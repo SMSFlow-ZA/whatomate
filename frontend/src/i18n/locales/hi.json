@@ -2410,6 +2410,8 @@
     "resume": "Resume",
     "onHold": "On Hold",
     "recording": "रिकॉर्डिंग",
+    "copyLink": "Copy link",
+    "callLogNotFound": "Call log not found",
     "error": "त्रुटि",
     "agent": "Agent",
     "pickedBy": "Picked by",
