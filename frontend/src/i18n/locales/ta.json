@@ -2410,6 +2410,8 @@
     "resume": "Resume",
     "onHold": "On Hold",
     "recording": "பதிவு",
+    "copyLink": "Copy link",
+    "callLogNotFound": "Call log not found",
     "error": "பிழை",
     "agent": "Agent",
     "pickedBy": "Picked by",
