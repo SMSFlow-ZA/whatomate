@@ -38,7 +38,7 @@ func managedEntityApp(t *testing.T) (*App, *models.Organization, *models.User, *
 	t.Cleanup(func() {
 		require.NoError(t, admin.Exec("DROP SCHEMA "+schema+" CASCADE").Error)
 		sql, _ := admin.DB()
-		sql.Close()
+		_ = sql.Close()
 	})
 	if parsed, e := url.Parse(dsn); e == nil && parsed.Scheme != "" {
 		q := parsed.Query()
@@ -50,7 +50,7 @@ func managedEntityApp(t *testing.T) (*App, *models.Organization, *models.User, *
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
-	t.Cleanup(func() { sql, _ := db.DB(); sql.Close() })
+	t.Cleanup(func() { sql, _ := db.DB(); _ = sql.Close() })
 	require.NoError(t, db.AutoMigrate(&models.Organization{}, &models.Permission{}, &models.CustomRole{}, &models.User{}, &models.UserOrganization{}, &models.WhatsAppAccount{}, &models.AuditLog{}, &models.SSOProvider{}))
 	redis := testutil.SetupTestRedis(t)
 	if redis == nil {

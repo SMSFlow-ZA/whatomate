@@ -764,7 +764,7 @@ func (a *App) transcodePlanAudio(inputPath, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 	tempOutput := filepath.Join(tempDir, "output.ogg")
 	if err := transcodeToOpus(inputPath, tempOutput); err != nil {
 		return err
@@ -773,7 +773,7 @@ func (a *App) transcodePlanAudio(inputPath, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	const maxOutput = 16 << 20
 	data, err := io.ReadAll(io.LimitReader(f, maxOutput+1))
 	if err != nil {

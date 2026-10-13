@@ -97,7 +97,7 @@ func EnsureSupport(db *gorm.DB, cfg config.PlanConfig, ownerEmail string) error 
 // counters avoid stale-snapshot count races at stronger transaction isolation.
 // Lower limits preserve all existing records and their ordinary updates.
 func Install(db *gorm.DB, cfg config.PlanConfig) error {
-	if db == nil || db.Dialector.Name() != "postgres" {
+	if db == nil || db.Name() != "postgres" {
 		return errors.New("plan guards require PostgreSQL")
 	}
 	if !cfg.Enabled {

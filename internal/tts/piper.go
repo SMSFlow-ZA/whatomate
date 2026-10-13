@@ -57,7 +57,7 @@ func (p *PiperTTS) Generate(text string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 	wavPath := filepath.Join(tempDir, "speech.wav")
 
 	piperCmd := exec.CommandContext(ctx, p.BinaryPath,
@@ -136,7 +136,7 @@ func readGeneratedAudio(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxGeneratedAudioBytes+1))
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func storeAudio(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
 		return err
@@ -185,7 +185,7 @@ func runBounded(ctx context.Context, cancel context.CancelFunc, cmd *exec.Cmd, d
 		case <-ticker.C:
 			if err := checkTemporaryAudioSize(dir); err != nil {
 				cancel()
-				_ = <-done
+				<-done
 				return err
 			}
 		}

@@ -223,7 +223,7 @@ func backupPriorFile(root *os.Root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer previous.Close()
+	defer func() { _ = previous.Close() }()
 	backup := filepath.Join(filepath.Dir(path), ".media-"+uuid.NewString()+".rollback")
 	f, err := root.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
@@ -354,7 +354,7 @@ func atomicWrite(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	return atomicRootWrite(root, filepath.Base(path), data)
 }
 
@@ -364,7 +364,7 @@ func atomicRootWrite(root *os.Root, path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temp)
+	defer func() { _ = root.Remove(temp) }()
 	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
 		return err
