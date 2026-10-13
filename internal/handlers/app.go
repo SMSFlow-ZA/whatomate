@@ -24,6 +24,7 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
+	BuildSourceURL    string
 	Config            *config.Config
 	DB                *gorm.DB
 	Redis             *redis.Client

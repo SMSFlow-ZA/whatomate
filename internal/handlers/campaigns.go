@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -896,33 +898,30 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported file type: "+mimeType, nil, "")
 	}
 
-	// Upload to WhatsApp
-	waAccount := a.toWhatsAppAccount(account)
-
-	ctx := r.RequestCtx
-	mediaID, err := a.WhatsApp.UploadMedia(ctx, waAccount, data, mimeType, fileHeader.Filename)
+	localPath := campaignMediaPath(campaignUUID.String(), mimeType)
+	filePath := filepath.Join(a.getMediaStoragePath(), localPath)
+	var mediaID string
+	// The storage session lock includes the bounded provider call, database
+	// publication, and any filesystem recovery. A failed upload preserves the old
+	// preview/metadata before a concurrent writer can proceed. Replacements use
+	// their byte delta and require no extra customer allowance for rollback copies.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = plan.WriteFileWithCommit(a.DB.WithContext(ctx), a.Config.Plan, []string{a.getMediaStoragePath(), a.getAudioDir()}, filePath, data, func(tx *gorm.DB) error {
+		var uploadErr error
+		mediaID, uploadErr = a.WhatsApp.UploadMedia(ctx, a.toWhatsAppAccount(account), data, mimeType, fileHeader.Filename)
+		if uploadErr != nil {
+			return fmt.Errorf("failed to upload media to WhatsApp: %w", uploadErr)
+		}
+		updates := map[string]any{"header_media_id": mediaID, "header_media_filename": sanitizeFilename(fileHeader.Filename), "header_media_mime_type": mimeType, "header_media_local_path": localPath}
+		return tx.Model(&campaign).Updates(updates).Error
+	})
 	if err != nil {
-		a.Log.Error("Failed to upload media to WhatsApp", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload media to WhatsApp", nil, "")
-	}
-
-	// Save file locally for preview
-	localPath, err := a.saveCampaignMedia(campaignUUID.String(), data, mimeType)
-	if err != nil {
-		a.Log.Error("Failed to save media locally", "error", err)
-		// Don't fail the request, just log the error - preview won't work
-	}
-
-	// Update campaign with media ID, filename, mime type, and local path
-	updates := map[string]any{
-		"header_media_id":         mediaID,
-		"header_media_filename":   sanitizeFilename(fileHeader.Filename),
-		"header_media_mime_type":  mimeType,
-		"header_media_local_path": localPath,
-	}
-	if err := a.DB.Model(&campaign).Updates(updates).Error; err != nil {
-		a.Log.Error("Failed to update campaign with media info", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save media info", nil, "")
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
+		a.Log.Error("Failed to publish campaign media", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to publish campaign media", nil, "")
 	}
 
 	a.Log.Info("Campaign media uploaded", "campaign_id", campaignUUID, "media_id", mediaID, "filename", fileHeader.Filename, "local_path", localPath)
@@ -938,6 +937,16 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 
 // saveCampaignMedia saves uploaded media locally for preview
 func (a *App) saveCampaignMedia(campaignID string, data []byte, mimeType string) (string, error) {
+	relativePath := campaignMediaPath(campaignID, mimeType)
+	filePath := filepath.Join(a.getMediaStoragePath(), relativePath)
+	if err := a.storePlanMedia(filePath, data); err != nil {
+		return "", fmt.Errorf("failed to save media file: %w", err)
+	}
+	a.Log.Info("Campaign media saved locally", "path", relativePath, "size", len(data))
+	return relativePath, nil
+}
+
+func campaignMediaPath(campaignID, mimeType string) string {
 	// Determine file extension
 	ext := getExtensionFromMimeType(mimeType)
 	if ext == "" {
@@ -946,24 +955,9 @@ func (a *App) saveCampaignMedia(campaignID string, data []byte, mimeType string)
 
 	// Create campaigns media directory
 	subdir := "campaigns"
-	if err := a.ensureMediaDir(subdir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
-	}
-
 	// Generate filename using campaign ID
 	filename := campaignID + ext
-	filePath := filepath.Join(a.getMediaStoragePath(), subdir, filename)
-
-	// Save file
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return "", fmt.Errorf("failed to save media file: %w", err)
-	}
-
-	// Return relative path for storage
-	relativePath := filepath.Join(subdir, filename)
-	a.Log.Info("Campaign media saved locally", "path", relativePath, "size", len(data))
-
-	return relativePath, nil
+	return filepath.Join(subdir, filename)
 }
 
 // ServeCampaignMedia serves campaign media files for preview

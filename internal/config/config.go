@@ -29,6 +29,7 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	Plan         PlanConfig         `koanf:"plan"`
 }
 
 type TTSConfig struct {
@@ -220,6 +221,9 @@ func Load(configPath string) (*Config, error) {
 
 	// Set defaults
 	setDefaults(&cfg)
+	if err := ValidatePlan(&cfg); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
 }

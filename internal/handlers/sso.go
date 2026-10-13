@@ -280,6 +280,10 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	}
 
 	// Find user by email (across all orgs, like regular login)
+	// Customer-controlled identity providers cannot authenticate the reserved host account.
+	if a.isSupportEmail(userInfo.Email) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Support account is protected", nil, "support_protected")
+	}
 	var user models.User
 	if err := a.DB.Where("email = ?", userInfo.Email).First(&user).Error; err != nil {
 		// User doesn't exist - check if auto-create is enabled
@@ -314,6 +318,9 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 		}
 
 		if err := a.DB.Create(&user).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to create SSO user", "error", err, "email", userInfo.Email)
 			a.redirectWithError(r, "Failed to create user account")
 			return nil
@@ -337,7 +344,14 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 		if user.SSOProvider == "" {
 			user.SSOProvider = provider
 			user.SSOProviderID = userInfo.ID
-			a.DB.Save(&user)
+			if err := a.DB.Save(&user).Error; err != nil {
+				if handled, responseErr := a.sendPlanError(r, err); handled {
+					return responseErr
+				}
+				a.Log.Error("Failed to update SSO identity", "error", err)
+				a.redirectWithError(r, "Failed to complete authentication")
+				return nil
+			}
 		}
 
 		// Check if user is active

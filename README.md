@@ -2,6 +2,9 @@
 
 # Whatomate
 
+SMSFlow managed fork: [plan enforcement and corresponding source](docs/managed-plans.md).
+Managed SMSFlow instances support one organization per instance.
+
 Modern, open-source WhatsApp Business Platform. Single binary app.
 
 ![Dashboard](docs/public/images/dashboard-light.png#gh-light-mode-only)

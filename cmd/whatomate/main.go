@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -30,8 +31,9 @@ import (
 )
 
 var (
-	Version   = "dev"
-	BuildTime = "unknown"
+	Version        = "dev"
+	SourceRevision = ""
+	BuildTime      = "unknown"
 )
 
 func main() {
@@ -117,6 +119,7 @@ func runServer(args []string) {
 	if err != nil {
 		lo.Fatal("Failed to load config", "error", err)
 	}
+	validateBuildSource(cfg, lo)
 
 	// Validate JWT secret
 	if cfg.App.Environment == "production" && len(cfg.JWT.Secret) < 32 {
@@ -165,6 +168,12 @@ func runServer(args []string) {
 	}
 
 	// Connect to Redis
+	if err := plan.EnsureSupport(db, cfg.Plan, cfg.DefaultAdmin.Email); err != nil {
+		lo.Fatal("Managed support initialization failed", "error", err)
+	}
+	if err := plan.Install(db, cfg.Plan); err != nil {
+		lo.Fatal("Managed plan initialization failed", "error", err)
+	}
 	rdb, err := database.NewRedis(&cfg.Redis)
 	if err != nil {
 		lo.Fatal("Failed to connect to Redis", "error", err)
@@ -199,14 +208,15 @@ func runServer(args []string) {
 	}
 
 	app := &handlers.App{
-		Config:     cfg,
-		DB:         db,
-		Redis:      rdb,
-		Log:        lo,
-		WhatsApp:   waClient,
-		WSHub:      wsHub,
-		Queue:      jobQueue,
-		HTTPClient: httpClient,
+		Config:         cfg,
+		BuildSourceURL: buildSourceURL(),
+		DB:             db,
+		Redis:          rdb,
+		Log:            lo,
+		WhatsApp:       waClient,
+		WSHub:          wsHub,
+		Queue:          jobQueue,
+		HTTPClient:     httpClient,
 	}
 
 	// Initialize S3 client for call recordings (optional)
@@ -237,6 +247,9 @@ func runServer(args []string) {
 			ModelPath:     cfg.TTS.PiperModel,
 			OpusencBinary: cfg.TTS.OpusencBinary,
 			AudioDir:      cfg.Calling.AudioDir,
+			Store: func(path string, data []byte) error {
+				return plan.WriteFile(db, cfg.Plan, []string{cfg.Storage.LocalPath, cfg.Calling.AudioDir}, path, data)
+			},
 		}
 		lo.Info("TTS initialized", "piper", cfg.TTS.PiperBinary, "model", cfg.TTS.PiperModel)
 	}
@@ -349,6 +362,19 @@ func runServer(args []string) {
 // WORKER COMMAND
 // ============================================================================
 
+func buildSourceURL() string {
+	if SourceRevision != "" {
+		return "https://github.com/SMSFlow-ZA/whatomate/commit/" + SourceRevision
+	}
+	return "https://github.com/SMSFlow-ZA/whatomate/tree/codex/plan-limits"
+}
+
+func validateBuildSource(cfg *config.Config, lo logf.Logger) {
+	if SourceRevision != "" && cfg.Plan.Enabled && cfg.Plan.SourceURL != buildSourceURL() {
+		lo.Fatal("Managed source configuration must match the compiled release")
+	}
+}
+
 func runWorker(args []string) {
 	workerFlags := flag.NewFlagSet("worker", flag.ExitOnError)
 	configPath := workerFlags.String("config", "config.toml", "Path to config file")
@@ -371,6 +397,7 @@ func runWorker(args []string) {
 	if err != nil {
 		lo.Fatal("Failed to load config", "error", err)
 	}
+	validateBuildSource(cfg, lo)
 
 	// Set log level based on environment
 	if cfg.App.Environment == "production" {
@@ -389,6 +416,9 @@ func runWorker(args []string) {
 	lo.Info("Connected to PostgreSQL")
 
 	// Connect to Redis
+	if err := plan.Install(db, cfg.Plan); err != nil {
+		lo.Fatal("Managed plan initialization failed", "error", err)
+	}
 	rdb, err := database.NewRedis(&cfg.Redis)
 	if err != nil {
 		lo.Fatal("Failed to connect to Redis", "error", err)
@@ -454,6 +484,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Health check
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)
+	g.GET("/source", app.CorrespondingSource)
 
 	g.GET("/api/embedded-signup/config", app.GetEmbeddedSignupConfig)
 
@@ -587,6 +618,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)
+	g.GET("/api/plan", app.GetPlan)
 	g.POST("/api/users", app.CreateUser)
 	g.GET("/api/users/{id}", app.GetUser)
 	g.PUT("/api/users/{id}", app.UpdateUser)

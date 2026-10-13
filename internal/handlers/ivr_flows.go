@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -121,6 +123,9 @@ func (a *App) CreateIVRFlow(r *fastglue.Request) error {
 			}
 		} else {
 			if err := a.generateIVRAudio(req.Menu); err != nil {
+				if handled, responseErr := a.sendPlanError(r, err); handled {
+					return responseErr
+				}
 				a.Log.Error("TTS generation failed", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
 					"Text-to-speech generation failed: "+err.Error(), nil, "")
@@ -210,6 +215,9 @@ func (a *App) UpdateIVRFlow(r *fastglue.Request) error {
 			}
 		} else {
 			if err := a.generateIVRAudio(req.Menu); err != nil {
+				if handled, responseErr := a.sendPlanError(r, err); handled {
+					return responseErr
+				}
 				a.Log.Error("TTS generation failed", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
 					"Text-to-speech generation failed: "+err.Error(), nil, "")
@@ -524,10 +532,6 @@ func (a *App) UploadIVRAudio(r *fastglue.Request) error {
 
 	// Ensure audio directory exists
 	audioDir := a.getAudioDir()
-	if err := os.MkdirAll(audioDir, 0755); err != nil {
-		a.Log.Error("Failed to create audio directory", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create audio directory", nil, "")
-	}
 
 	// Save uploaded file to a temp location for transcoding
 	tmpInput, err := os.CreateTemp("", "ivr-audio-input-*")
@@ -548,7 +552,10 @@ func (a *App) UploadIVRAudio(r *fastglue.Request) error {
 	filename := uuid.New().String() + ".ogg"
 	filePath := filepath.Join(audioDir, filename)
 
-	if err := transcodeToOpus(tmpInput.Name(), filePath); err != nil {
+	if err := a.transcodePlanAudio(tmpInput.Name(), filePath); err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("IVR audio transcoding failed", "error", err, "original_mime", mimeType)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to transcode audio to Opus format", nil, "")
 	}
@@ -668,10 +675,6 @@ func (a *App) UploadOrgAudio(r *fastglue.Request) error {
 
 	// Ensure audio directory exists
 	audioDir := a.getAudioDir()
-	if err := os.MkdirAll(audioDir, 0755); err != nil {
-		a.Log.Error("Failed to create org audio directory", "error", err, "audio_dir", audioDir)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create audio directory", nil, "")
-	}
 
 	// Save uploaded file to a temp location for transcoding
 	tmpInput, err := os.CreateTemp("", "org-audio-input-*")
@@ -692,7 +695,10 @@ func (a *App) UploadOrgAudio(r *fastglue.Request) error {
 	filename := fmt.Sprintf("org_%s_%s.ogg", orgID.String(), audioType)
 	filePath := filepath.Join(audioDir, filename)
 
-	if err := transcodeToOpus(tmpInput.Name(), filePath); err != nil {
+	if err := a.transcodePlanAudio(tmpInput.Name(), filePath); err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Audio transcoding failed", "error", err, "org_id", orgID, "type", audioType)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to transcode audio to Opus format", nil, "")
 	}
@@ -726,7 +732,9 @@ func (a *App) UploadOrgAudio(r *fastglue.Request) error {
 // transcodeToOpus converts any audio file to OGG/Opus 48kHz mono using ffmpeg.
 // This ensures the file is compatible with the WebRTC AudioPlayer.
 func transcodeToOpus(inputPath, outputPath string) error {
-	cmd := exec.Command("ffmpeg",
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-y",            // overwrite output
 		"-i", inputPath, // input file
 		"-ac", "1", // mono
@@ -735,7 +743,8 @@ func transcodeToOpus(inputPath, outputPath string) error {
 		"-b:a", "48k", // bitrate
 		"-application", "audio",
 		"-frame_duration", "20", // 20ms frames (matches RTP packetization)
-		"-vn", // strip video/cover art
+		"-vn",             // strip video/cover art
+		"-fs", "16777216", // cap conversion output at 16MB in runtime temporary storage
 		outputPath,
 	)
 
@@ -746,6 +755,34 @@ func transcodeToOpus(inputPath, outputPath string) error {
 		return fmt.Errorf("ffmpeg failed: %w (stderr: %s)", err, stderr.String())
 	}
 	return nil
+}
+
+// transcodePlanAudio never gives ffmpeg a persistent destination. Only the final
+// bounded output is committed under the instance storage lock.
+func (a *App) transcodePlanAudio(inputPath, outputPath string) error {
+	tempDir, err := os.MkdirTemp("", "whatomate-audio-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	tempOutput := filepath.Join(tempDir, "output.ogg")
+	if err := transcodeToOpus(inputPath, tempOutput); err != nil {
+		return err
+	}
+	f, err := os.Open(tempOutput)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	const maxOutput = 16 << 20
+	data, err := io.ReadAll(io.LimitReader(f, maxOutput+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxOutput {
+		return fmt.Errorf("converted audio exceeds 16MB")
+	}
+	return a.storePlanMedia(outputPath, data)
 }
 
 // generateIVRAudio iterates the flat v2 nodes array and generates TTS audio
