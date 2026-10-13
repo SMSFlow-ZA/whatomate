@@ -66,6 +66,17 @@ func managedEntityApp(t *testing.T) (*App, *models.Organization, *models.User, *
 	return app, org, owner, support
 }
 
+func TestManagedOrganizationCreateReturns409EvenForSuperAdmin(t *testing.T) {
+	app, org, owner, _ := managedEntityApp(t)
+	req := testutil.NewJSONRequest(t, CreateOrganizationRequest{Name: "Extra organization"})
+	testutil.SetAuthContext(req, org.ID, owner.ID)
+	require.NoError(t, app.CreateOrganization(req))
+	testutil.AssertErrorResponse(t, req, 409, "Each managed instance supports one organization")
+	var count int64
+	require.NoError(t, app.DB.Model(&models.Organization{}).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
 func TestManagedUserCreateAndRestoreReturn409(t *testing.T) {
 	app, org, owner, _ := managedEntityApp(t)
 	req := testutil.NewJSONRequest(t, UserRequest{Email: "new@example.test", Password: "password123", FullName: "New user"})

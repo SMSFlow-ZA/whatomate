@@ -46,6 +46,7 @@ func quotaDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	t.Cleanup(func() { sql, _ := db.DB(); _ = sql.Close() })
 	require.NoError(t, db.Exec(`CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text UNIQUE NOT NULL, organization_id uuid, password_hash text, full_name text, role_id uuid, is_active bool DEFAULT true, is_super_admin bool DEFAULT false, sso_provider text, sso_provider_id text, settings jsonb, deleted_at timestamptz, updated_at timestamptz);
+ CREATE TABLE organizations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, deleted_at timestamptz);
  CREATE TABLE whatsapp_accounts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, name text, status text, deleted_at timestamptz);
  CREATE TABLE user_organizations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid, organization_id uuid, role_id uuid, is_default bool, deleted_at timestamptz, updated_at timestamptz);
  CREATE TABLE custom_roles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, name text, is_system bool, deleted_at timestamptz);`).Error)

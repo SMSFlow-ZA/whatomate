@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { organizationsService } from '@/services/api'
+import { api, organizationsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { Building2, Plus, Loader2 } from 'lucide-vue-next'
 
@@ -26,7 +26,9 @@ const organizationsStore = useOrganizationsStore()
 const authStore = useAuthStore()
 
 const isSuperAdmin = computed(() => authStore.user?.is_super_admin || false)
-const canCreateOrg = computed(() => authStore.hasPermission('organizations', 'write'))
+// Default closed until the server has identified an unmanaged installation.
+const organizationCreationAllowed = ref(false)
+const canCreateOrg = computed(() => organizationCreationAllowed.value && authStore.hasPermission('organizations', 'write'))
 
 const shouldShowSwitcher = computed(() =>
   isSuperAdmin.value || organizationsStore.isMultiOrg
@@ -48,6 +50,12 @@ const currentOrgId = computed(() => {
 })
 
 onMounted(async () => {
+  try {
+    const response = await api.get('/plan')
+    organizationCreationAllowed.value = response.data.data.enabled === false
+  } catch {
+    organizationCreationAllowed.value = false
+  }
   // Fetch user's org memberships for all authenticated users
   await organizationsStore.fetchMyOrganizations()
 
@@ -94,7 +102,7 @@ const newOrgName = ref('')
 const isCreating = ref(false)
 
 async function submitCreateOrg() {
-  if (!newOrgName.value.trim()) return
+  if (!canCreateOrg.value || !newOrgName.value.trim()) return
   isCreating.value = true
   try {
     await organizationsService.create({ name: newOrgName.value.trim() })

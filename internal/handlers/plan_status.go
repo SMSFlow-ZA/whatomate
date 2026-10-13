@@ -20,11 +20,15 @@ func (a *App) GetPlan(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Plan usage is temporarily unavailable", nil, "")
 	}
+	var organizations int64
+	if err := a.DB.Table("organizations").Where("deleted_at IS NULL").Count(&organizations).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Plan usage is temporarily unavailable", nil, "")
+	}
 	return r.SendEnvelope(map[string]any{
 		"enabled": true, "enforced": true, "support_protected": true,
-		"limits":     map[string]any{"max_users": cfg.MaxUsers, "max_numbers": cfg.MaxNumbers, "max_storage_bytes": cfg.MaxStorageBytes},
-		"usage":      map[string]any{"users": users, "numbers": numbers, "storage_bytes": storage},
-		"over_limit": map[string]bool{"users": users > int64(cfg.MaxUsers), "numbers": numbers > int64(cfg.MaxNumbers), "storage": storage > cfg.MaxStorageBytes},
+		"limits":     map[string]any{"max_organizations": 1, "max_users": cfg.MaxUsers, "max_numbers": cfg.MaxNumbers, "max_storage_bytes": cfg.MaxStorageBytes},
+		"usage":      map[string]any{"organizations": organizations, "users": users, "numbers": numbers, "storage_bytes": storage},
+		"over_limit": map[string]bool{"organizations": organizations > 1, "users": users > int64(cfg.MaxUsers), "numbers": numbers > int64(cfg.MaxNumbers), "storage": storage > cfg.MaxStorageBytes},
 		"source_url": cfg.SourceURL,
 	})
 }

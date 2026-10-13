@@ -23,6 +23,8 @@ func (a *App) sendPlanError(r *fastglue.Request, err error) (bool, error) {
 			message = "WhatsApp number limit reached"
 		case "storage":
 			message = "Storage limit reached"
+		case "organizations":
+			message = "Each managed instance supports one organization"
 		}
 		return true, r.SendErrorEnvelope(fasthttp.StatusConflict, message, map[string]string{"resource": resource}, "plan_limit_reached")
 	}

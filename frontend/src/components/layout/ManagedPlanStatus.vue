@@ -6,8 +6,8 @@ import { api } from '@/services/api'
 type PlanStatus = {
   enabled: boolean
   enforced: boolean
-  limits: { max_users: number; max_numbers: number; max_storage_bytes: number }
-  usage: { users: number; numbers: number; storage_bytes: number }
+  limits: { max_organizations: number; max_users: number; max_numbers: number; max_storage_bytes: number }
+  usage: { organizations: number; users: number; numbers: number; storage_bytes: number }
   over_limit: { users: boolean; numbers: boolean; storage: boolean }
 }
 const route = useRoute()
@@ -38,6 +38,7 @@ watch(() => route.fullPath, refresh)
   <section v-if="status?.enforced" aria-label="Plan usage" class="shrink-0 border-b border-white/10 light:border-gray-200 bg-emerald-950/30 light:bg-emerald-50 px-4 py-2 text-xs text-white/80 light:text-gray-700">
     <div class="flex flex-wrap items-center gap-x-5 gap-y-1">
       <strong>Plan usage</strong>
+      <span>{{ status.usage.organizations }} / {{ status.limits.max_organizations }} organization</span>
       <span>{{ status.usage.users }} / {{ status.limits.max_users }} customer users</span>
       <span>{{ status.usage.numbers }} / {{ status.limits.max_numbers }} WhatsApp numbers</span>
       <span>{{ gib(status.usage.storage_bytes) }} / {{ gib(status.limits.max_storage_bytes) }} GiB media</span>

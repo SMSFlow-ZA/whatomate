@@ -4,6 +4,13 @@ This AGPL fork adds host-controlled allowances to upstream
 `v0.1.1-beta-0.17`. Public billing and customer administration cannot change the
 allowances. Existing unmanaged deployments retain upstream behavior.
 
+Every managed instance supports exactly one non-deleted organization, regardless
+of its subscription plan or administrator role. Database guards enforce this
+boundary for creation and restoration, including concurrent and direct writes.
+The UI hides organization creation and reports organization usage. Existing
+organizations found during an upgrade are preserved; additional organizations
+cannot be created or restored while one is present.
+
 Limits apply across every organization in an isolated instance. All non-deleted
 customer users count, including its owner and inactive users. A single verified,
 active support superadmin is excluded by immutable user ID. Its identity, access
@@ -24,7 +31,7 @@ encrypted backups are operational persistence outside the customer media allowan
 A lower allowance preserves existing data and ordinary updates. New additions
 are blocked until usage fits; reductions and equal-sized media replacement remain
 possible. API quota failures use HTTP 409, code `plan_limit_reached`, and resource
-`users`, `numbers` or `storage`. Reserved support changes use HTTP 403 and
+`organizations`, `users`, `numbers` or `storage`. Reserved support changes use HTTP 403 and
 `support_protected`. Authenticated `GET /api/plan` reports aggregate usage and
 allowances. There is no HTTP endpoint for changing limits or exposing bootstrap
 credentials. The UI displays usage and provides a refresh action.

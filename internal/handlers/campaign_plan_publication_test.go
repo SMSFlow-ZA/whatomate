@@ -93,12 +93,14 @@ func TestManagedStatusReportsInstalledCapsFromStaleProcess(t *testing.T) {
 	var response struct {
 		Data struct {
 			Limits struct {
-				Users   int   `json:"max_users"`
-				Numbers int   `json:"max_numbers"`
-				Storage int64 `json:"max_storage_bytes"`
+				Organizations int   `json:"max_organizations"`
+				Users         int   `json:"max_users"`
+				Numbers       int   `json:"max_numbers"`
+				Storage       int64 `json:"max_storage_bytes"`
 			}
 			Usage struct {
-				Users int `json:"users"`
+				Organizations int `json:"organizations"`
+				Users         int `json:"users"`
 			}
 		}
 	}
@@ -107,4 +109,6 @@ func TestManagedStatusReportsInstalledCapsFromStaleProcess(t *testing.T) {
 	require.Equal(t, 3, response.Data.Limits.Numbers)
 	require.EqualValues(t, 4, response.Data.Limits.Storage)
 	require.Equal(t, 1, response.Data.Usage.Users)
+	require.Equal(t, 1, response.Data.Limits.Organizations)
+	require.Equal(t, 1, response.Data.Usage.Organizations)
 }

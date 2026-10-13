@@ -26,6 +26,8 @@ func Classify(err error) (resource string, ok bool) {
 		return "users", true
 	case "whatomate_plan_numbers_limit":
 		return "numbers", true
+	case "whatomate_plan_organizations_limit":
+		return "organizations", true
 	}
 	return "", false
 }
@@ -119,7 +121,7 @@ func Install(db *gorm.DB, cfg config.PlanConfig) error {
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", storageLockID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec("LOCK TABLE users,whatsapp_accounts,user_organizations IN ACCESS EXCLUSIVE MODE").Error; err != nil {
+		if err := tx.Exec("LOCK TABLE organizations,users,whatsapp_accounts,user_organizations IN ACCESS EXCLUSIVE MODE").Error; err != nil {
 			return err
 		}
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(1464814930)").Error; err != nil {
@@ -162,6 +164,19 @@ func Install(db *gorm.DB, cfg config.PlanConfig) error {
 			return err
 		}
 		if err := tx.Exec("ALTER TABLE whatomate_plan_state ALTER COLUMN max_storage_bytes SET NOT NULL").Error; err != nil {
+			return err
+		}
+		// One organization is a fixed managed-instance boundary, independent of pricing.
+		if err := tx.Exec("ALTER TABLE whatomate_plan_state ADD COLUMN IF NOT EXISTS used_organizations bigint CHECK(used_organizations>=0)").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE whatomate_plan_state SET used_organizations=(SELECT count(*) FROM organizations WHERE deleted_at IS NULL)").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("ALTER TABLE whatomate_plan_state ALTER COLUMN used_organizations SET NOT NULL").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("ALTER TABLE whatomate_plan_state ALTER COLUMN used_organizations SET DEFAULT 0").Error; err != nil {
 			return err
 		}
 		return tx.Exec(databaseGuards).Error
@@ -225,6 +240,21 @@ BEGIN
  RETURN NULL;
 END $$;
 DROP TRIGGER IF EXISTS whatomate_plan_users_guard ON users;
+CREATE OR REPLACE FUNCTION whatomate_plan_organization_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE old_counted boolean := false; new_counted boolean := false; delta integer;
+BEGIN
+ PERFORM pg_advisory_xact_lock(1464814930);
+ IF TG_OP<>'INSERT' THEN old_counted:=OLD.deleted_at IS NULL; END IF;
+ IF TG_OP<>'DELETE' THEN new_counted:=NEW.deleted_at IS NULL; END IF;
+ delta:=new_counted::integer-old_counted::integer;
+ IF delta<>0 THEN
+  UPDATE whatomate_plan_state SET used_organizations=used_organizations+delta WHERE singleton=true AND (delta<0 OR used_organizations<1);
+  IF NOT FOUND THEN RAISE EXCEPTION 'Organization limit reached' USING ERRCODE='23514',CONSTRAINT='whatomate_plan_organizations_limit'; END IF;
+ END IF;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS whatomate_plan_organizations_guard ON organizations;
+CREATE TRIGGER whatomate_plan_organizations_guard AFTER INSERT OR UPDATE OR DELETE ON organizations FOR EACH ROW EXECUTE FUNCTION whatomate_plan_organization_guard();
 CREATE TRIGGER whatomate_plan_users_guard AFTER INSERT OR UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION whatomate_plan_entity_guard();
 DROP TRIGGER IF EXISTS whatomate_plan_numbers_guard ON whatsapp_accounts;
 CREATE TRIGGER whatomate_plan_numbers_guard AFTER INSERT OR UPDATE OR DELETE ON whatsapp_accounts FOR EACH ROW EXECUTE FUNCTION whatomate_plan_entity_guard();
