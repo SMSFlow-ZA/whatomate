@@ -223,6 +223,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(&org).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update settings", nil, "")
 	}
@@ -425,6 +428,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 
 	if err := tx.Create(&org).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create organization", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -444,6 +450,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 	}
 	if err := tx.Create(&chatbotSettings).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create chatbot settings", "error", err, "org_id", org.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -464,6 +473,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 	}
 	if err := tx.Create(&userOrg).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to add creator to organization", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -575,6 +587,9 @@ func (a *App) AddOrganizationMember(r *fastglue.Request) error {
 	}
 
 	// Check if already a member
+	if a.isSupportEmail(targetUser.Email) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Support account is protected", nil, "support_protected")
+	}
 	var existingCount int64
 	a.DB.Model(&models.UserOrganization{}).
 		Where("user_id = ? AND organization_id = ?", targetUser.ID, orgID).
@@ -608,6 +623,9 @@ func (a *App) AddOrganizationMember(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Create(&userOrg).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to add organization member", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add member", nil, "")
 	}
@@ -628,6 +646,9 @@ func (a *App) RemoveOrganizationMember(r *fastglue.Request) error {
 	}
 
 	// Cannot remove self
+	if handled, responseErr := a.protectSupportUser(r, targetUserID); handled {
+		return responseErr
+	}
 	if targetUserID == userID {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot remove yourself from the organization", nil, "")
 	}
@@ -635,6 +656,9 @@ func (a *App) RemoveOrganizationMember(r *fastglue.Request) error {
 	result := a.DB.Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
 		Delete(&models.UserOrganization{})
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to remove organization member", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
 	}
@@ -681,10 +705,16 @@ func (a *App) UpdateOrganizationMemberRole(r *fastglue.Request) error {
 	}
 
 	// Update the user's role in this org
+	if handled, responseErr := a.protectSupportUser(r, targetUserID); handled {
+		return responseErr
+	}
 	result := a.DB.Model(&models.UserOrganization{}).
 		Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
 		Update("role_id", req.RoleID)
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update member role", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update member role", nil, "")
 	}

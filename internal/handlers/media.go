@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -23,10 +24,9 @@ func (a *App) getMediaStoragePath() string {
 	return basePath
 }
 
-// ensureMediaDir ensures the media directory exists
-func (a *App) ensureMediaDir(subdir string) error {
-	path := filepath.Join(a.getMediaStoragePath(), subdir)
-	return os.MkdirAll(path, 0755)
+// storePlanMedia applies the same instance-wide allowance to uploads and audio.
+func (a *App) storePlanMedia(path string, data []byte) error {
+	return plan.WriteFile(a.DB, a.Config.Plan, []string{a.getMediaStoragePath(), a.getAudioDir()}, path, data)
 }
 
 // getExtensionFromMimeType returns file extension based on mime type
@@ -112,14 +112,9 @@ func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType
 		subdir = "documents"
 	}
 
-	// Ensure directory exists
-	if err := a.ensureMediaDir(subdir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
-	}
-
 	// Save file
 	filePath := filepath.Join(a.getMediaStoragePath(), subdir, filename)
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := a.storePlanMedia(filePath, data); err != nil {
 		return "", fmt.Errorf("failed to save media file: %w", err)
 	}
 

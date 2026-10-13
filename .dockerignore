@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/.secrets
+**/.env
+**/.env.local
+**/test-results
+**/playwright-report
+**/coverage
+**/.cache
+**/tmp*
+whatomate
+*.tar
+*.tar.gz

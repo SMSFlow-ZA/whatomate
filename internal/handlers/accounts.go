@@ -16,6 +16,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // AccountRequest represents the request body for creating/updating an account
@@ -137,19 +138,31 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
 
-	// If this is set as default, unset other defaults
-	if req.IsDefaultIncoming {
-		a.DB.Model(&models.WhatsAppAccount{}).
-			Where("organization_id = ? AND is_default_incoming = ?", orgID, true).
-			Update("is_default_incoming", false)
-	}
-	if req.IsDefaultOutgoing {
-		a.DB.Model(&models.WhatsAppAccount{}).
-			Where("organization_id = ? AND is_default_outgoing = ?", orgID, true).
-			Update("is_default_outgoing", false)
-	}
-
-	if err := a.DB.Create(&account).Error; err != nil {
+	// Reserve the number and change defaults atomically. A rejected creation
+	// must preserve the currently selected incoming and outgoing numbers.
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&account).Error; err != nil {
+			return err
+		}
+		if req.IsDefaultIncoming {
+			if err := tx.Model(&models.WhatsAppAccount{}).
+				Where("organization_id = ? AND is_default_incoming = ? AND id <> ?", orgID, true, account.ID).
+				Update("is_default_incoming", false).Error; err != nil {
+				return err
+			}
+		}
+		if req.IsDefaultOutgoing {
+			if err := tx.Model(&models.WhatsAppAccount{}).
+				Where("organization_id = ? AND is_default_outgoing = ? AND id <> ?", orgID, true, account.ID).
+				Update("is_default_outgoing", false).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
@@ -264,6 +277,9 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	account.UpdatedByID = &userID
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
 	}
@@ -309,6 +325,9 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Delete(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to delete account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete account", nil, "")
 	}
@@ -622,6 +641,24 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
 	}
 
+	// Reserve a managed number before registration/subscription side effects.
+	// Pending registration still consumes an allowance. Keep plaintext credentials
+	// in memory for the following API calls, and persist only encrypted values.
+	if a.Config.Plan.Enabled && !existingAccount {
+		reserved := *account
+		if err := a.encryptAccountSecrets(&reserved); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to secure account credentials", nil, "")
+		}
+		if err := a.DB.Create(&reserved).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
+			a.Log.Error("Failed to reserve account", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
+		}
+		account.BaseModel = reserved.BaseModel
+	}
+
 	// 4. Attempt Auto-Registration
 	var priorStatus string
 	if oldAccount != nil {
@@ -642,6 +679,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to save account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
 	}
@@ -926,6 +966,9 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
 	}
 
