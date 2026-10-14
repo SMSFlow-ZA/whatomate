@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Runtime instance accents; semantic status utilities retain their own colours. */
+:root { --brand-accent: #00aeef; --brand-hover: #14b4f0; --brand-foreground: #000; --brand-dark-text: #45c5f5; --brand-light-text: #00749f; --brand-text: var(--brand-dark-text); --brand-ring: var(--brand-dark-ring); }
+.light { --brand-text: var(--brand-light-text); --brand-ring: var(--brand-light-ring); }
+.brand-button { background: var(--brand-accent); color: var(--brand-foreground); }
+.brand-button:hover { background: var(--brand-hover); }
+.brand-link, a[class*="text-emerald-"] { color: var(--brand-text); }
+.brand-outline-control { color: var(--brand-text); border-color: var(--brand-text); }
+.text-primary, .hover\:text-primary:hover { color: var(--brand-text); }
+.border-primary { border-color: var(--brand-text); }
+nav a.router-link-exact-active { color: var(--brand-text); }
+
 @layer base {
   /* Dark-first: Linear/Vercel inspired dark mode */
   :root {

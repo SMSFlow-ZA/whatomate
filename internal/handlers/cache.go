@@ -33,8 +33,8 @@ const (
 	webhooksCachePrefix        = "webhooks:"
 	slaSettingsCacheKey        = "chatbot:sla_enabled_settings"
 	aiContextsCachePrefix      = "chatbot:ai_contexts:"
-	userPermissionsCachePrefix = "permissions:user:"
-	rolePermissionsCachePrefix = "permissions:role:"
+	userPermissionsCachePrefix = "permissions:v2:user:"
+	rolePermissionsCachePrefix = "permissions:v2:role:"
 	tagsCachePrefix            = "tags:"
 )
 
