@@ -64,7 +64,10 @@ func withStorageLock(db *gorm.DB, run func(*gorm.DB) error) error {
 			return err
 		}
 		defer conn.WithContext(context.Background()).Exec("SELECT pg_advisory_unlock(?)", storageLockID)
-		return run(conn)
+		// Connection supplies a mutable statement. Start a fresh ORM session on the
+		// same pinned SQL connection so quota scans and missing-row reads cannot
+		// contaminate subsequent publication queries or the advisory unlock.
+		return run(conn.Session(&gorm.Session{NewDB: true}))
 	})
 }
 

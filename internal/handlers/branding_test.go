@@ -9,10 +9,13 @@ import (
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/zerodha/fastglue"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 	"image"
 	"image/color"
 	"image/png"
 	"mime/multipart"
+	"os"
 	"strings"
 	"testing"
 )
@@ -149,4 +152,24 @@ func TestBrandingImageBoundariesAndQuotaRetainPrevious(t *testing.T) {
 	r = brandRequest(t, org.ID, admin.ID, map[string]string{"display_name": "Original", "accent_color": "#123456", "remove_logo": "true", "remove_favicon": "true"}, nil)
 	require.NoError(t, a.UpdateBranding(r))
 	require.Equal(t, 200, testutil.GetResponseStatusCode(r))
+}
+
+func TestBrandingFirstManagedSaveWithProductionDatabaseSession(t *testing.T) {
+	a := brandingApp(t)
+	db, err := gorm.Open(postgres.Open(os.Getenv("TEST_DATABASE_URL")), &gorm.Config{})
+	require.NoError(t, err)
+	connection, _ := db.DB()
+	t.Cleanup(func() { connection.Close() })
+	a.DB = db
+	require.NoError(t, db.Exec("CREATE TABLE whatomate_plan_state(singleton bool,max_users bigint,max_numbers bigint,max_storage_bytes bigint,support_email text); INSERT INTO whatomate_plan_state VALUES (true,3,1,1073741824,'support@example.invalid')").Error)
+	t.Cleanup(func() { require.NoError(t, db.Exec("DROP TABLE whatomate_plan_state").Error) })
+	a.Config.Plan.Enabled = true
+	a.Config.Plan.MaxUsers = 3
+	a.Config.Plan.MaxNumbers = 1
+	a.Config.Plan.MaxStorageBytes = 1073741824
+	org := testutil.CreateTestOrganization(t, db)
+	admin := createAdminUser(t, a, org.ID)
+	request := brandRequest(t, org.ID, admin.ID, map[string]string{"display_name": "Managed customer", "accent_color": "#8246AF"}, map[string][]byte{"logo": brandImage(t)})
+	require.NoError(t, a.UpdateBranding(request))
+	require.Equal(t, 200, testutil.GetResponseStatusCode(request), string(testutil.GetResponseBody(request)))
 }
