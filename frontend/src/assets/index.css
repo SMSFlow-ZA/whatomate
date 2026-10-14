@@ -11,7 +11,7 @@
 .brand-outline-control { color: var(--brand-text); border-color: var(--brand-text); }
 .text-primary, .hover\:text-primary:hover { color: var(--brand-text); }
 .border-primary { border-color: var(--brand-text); }
-nav a.router-link-exact-active { color: var(--brand-text); }
+[role="menuitem"][aria-current="page"] { color: var(--brand-text); }
 
 @layer base {
   /* Dark-first: Linear/Vercel inspired dark mode */
@@ -635,7 +635,7 @@ nav a.router-link-exact-active { color: var(--brand-text); }
   height: 50%;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: hsl(var(--primary));
+  background: var(--brand-text);
   opacity: 0;
   transform: scaleY(0);
   transition: opacity 0.2s ease, transform 0.2s ease;
