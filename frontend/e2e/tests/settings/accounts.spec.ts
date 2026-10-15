@@ -169,6 +169,11 @@ test.describe('WhatsApp Accounts - Detail Page CRUD', () => {
     await expect(page.getByText('Setup Guide')).toBeVisible({ timeout: 15000 })
   })
 
+})
+
+// These cases log in as superadmin explicitly; avoid a preceding admin login
+// whose pending redirect can abort the second navigation to /login.
+test.describe('WhatsApp Accounts - Connection Details', () => {
   test('should show connection details card upon successful test connection', async ({ page, request }) => {
     // Browser must share identity with the API session below; otherwise
     // /settings/accounts/:id 404s for the wrong org. See framework/auth.ts.
