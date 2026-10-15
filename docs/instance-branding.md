@@ -16,16 +16,29 @@ Runtime theme tokens, shared brand components and cache-busted asset URLs cover
 login, desktop/mobile headers, browser title/favicon and interactive highlights.
 Status colours, organization/Meta identities, source notices and billing are separate.
 
-Execution ledger (14 October 2026):
-- Base 597ce32; feature branch codex/instance-branding; implementation runs inline.
-- Ruling: reuse the clean dedicated checkout rather than duplicate its files;
-  build/test outputs go to C or disposable Docker volumes because F is nearly full.
-- Task 1 implemented: singleton branding API and durable multi-file publication;
-  SQL commit markers and preimage journals recover interrupted replacements.
-  Tests cover validation, permissions, quota, process death and committed outcomes.
-- Task 2 implemented: shared runtime theme/store/editor and accessible palettes.
-- Task 3 reviewed: crash recovery, deferred cleanup, outline contrast and
-  load-error protections added following independent release review.
-- Corresponding source and immutable image publication pending.
-- Task 4 pending: disposable acceptance, four-instance rollout, backup/restore,
-  final fixture cleanup and runtime acceptance.
+## Managed release
+
+Based on managed release `597ce32`, without unrelated upstream upgrades.
+Application source: `50bb081d35ac40517c50a7788ab1ac4eca13c0b2`.
+Pinned image:
+`ghcr.io/smsflow-za/whatomate@sha256:8514b40328e51e540c8778b485ffa7aedf4d6506cc74ee92574d4655255f8508`.
+Public review: https://github.com/SMSFlow-ZA/whatomate/pull/2.
+
+Validation on 14–15 October 2026:
+- 1,898 Go tests, 25 frontend tests, Vue type checking and production build passed.
+- Independent review covered crash recovery, deferred cleanup, readable outline
+  and navigation colours, editor loading failures and pinned ORM session isolation.
+- Disposable managed-instance acceptance covered save, replace, remove, reset,
+  upload validation, quotas, concurrent changes, administrator/support access,
+  denied agent/anonymous edits and public metadata isolation.
+- Branded login, desktop and 390-pixel mobile layouts, both themes, collapsed
+  navigation, browser title and favicon were checked in a real browser.
+- Custom branding survived application recreation, encrypted backup restoration
+  and a genuine sandbox trial-to-paid upgrade of the same workspace.
+- All four internal business instances received the pinned release with their
+  existing administrators, limits and domains preserved. The disposable workspace
+  and its sandbox recurring registration were removed after acceptance.
+
+The media lock uses a fresh GORM statement session on the same pinned SQL
+connection. Durable preimage journals and SQL commit markers recover interrupted
+publication without leaking earlier quota/lookup statement state into the save.
