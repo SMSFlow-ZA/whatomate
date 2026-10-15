@@ -2,7 +2,7 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits, codex/instance-branding]
+    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,12 @@ permissions:
   packages: write
 
 jobs:
+  verification:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
   image:
+    needs: verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

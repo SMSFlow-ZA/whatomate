@@ -1,14 +1,18 @@
 name: Test
 
 on:
+  workflow_call:
   push:
     branches:
       - main
       - codex/plan-limits
+      - codex/instance-branding
   pull_request:
     branches:
       - main
       - codex/managed-baseline
+      - codex/production-hardening
+      - codex/instance-branding
 
 permissions:
   contents: read
@@ -65,14 +69,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
           cache: true
 
       - name: Download dependencies
         run: go mod download
 
       - name: Install gotestsum
-        run: go install gotest.tools/gotestsum@latest
+        run: go install gotest.tools/gotestsum@v1.13.0
 
       - name: Run tests
         env:
@@ -113,7 +117,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
           cache: true
 
       - name: Run golangci-lint
@@ -130,7 +134,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
           cache: true
 
       - name: Build
