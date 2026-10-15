@@ -438,6 +438,8 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		}
 	}
 
+	// Retain the credential snapshot for optimistic security updates.
+	oldStamp, oldPasswordHash, oldActive := user.AuthStamp, user.PasswordHash, user.IsActive
 	// Snapshot before changes for audit log diff.
 	oldSnap := userAuditSnapshot(&user)
 
@@ -573,12 +575,48 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		user.IsSuperAdmin = *saField
 	}
 
-	if err := a.DB.Save(&user).Error; err != nil {
+	// Write only requested columns; a loaded user may already be stale. Security
+	// mutations additionally compare the snapshot in the authoritative update.
+	fields := []string{"UpdatedAt"}
+	if req.Email != "" {
+		fields = append(fields, "Email")
+	}
+	if req.FullName != "" {
+		fields = append(fields, "FullName")
+	}
+	if req.Password != "" {
+		fields = append(fields, "PasswordHash")
+	}
+	if req.SSOConfigID != nil {
+		fields = append(fields, "SSOProvider", "SSOProviderID", "SSOBinding")
+	}
+	if req.RoleID != nil {
+		fields = append(fields, "RoleID")
+	}
+	if req.IsActive != nil {
+		fields = append(fields, "IsActive")
+	}
+	if parseSuperAdminField(r) != nil {
+		fields = append(fields, "IsSuperAdmin")
+	}
+	if securityChanged {
+		fields = append(fields, "AuthStamp")
+	}
+	query := a.DB.Model(&user).Select(fields)
+	if securityChanged {
+		query = query.Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, oldActive)
+	}
+	result := query.Updates(&user)
+	if err := result.Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
 		a.Log.Error("Failed to update user", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
+	}
+
+	if securityChanged && result.RowsAffected != 1 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
 	}
 
 	// The database stamp remains authoritative even if this Redis write fails.
@@ -796,7 +834,7 @@ func (a *App) UpdateCurrentUserSettings(r *fastglue.Request) error {
 	user.Settings["new_message_alerts"] = req.NewMessageAlerts
 	user.Settings["campaign_updates"] = req.CampaignUpdates
 
-	if err := a.DB.Save(&user).Error; err != nil {
+	if err := a.DB.Model(&user).Select("Settings").Updates(&user).Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
@@ -871,9 +909,13 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
 	}
+	oldStamp, oldPasswordHash := user.AuthStamp, user.PasswordHash
 	user.PasswordHash = string(hashedPassword)
 	user.AuthStamp = uuid.NewString()
-	if err := a.DB.Save(&user).Error; err != nil {
+	result := a.DB.Model(&user).
+		Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, true).
+		Select("PasswordHash", "AuthStamp").Updates(&user)
+	if err := result.Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
@@ -881,6 +923,9 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change password", nil, "")
 	}
 
+	if result.RowsAffected != 1 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
+	}
 	// Fence logins that raced between the pre-save revocation and DB update.
 	// AuthStamp already invalidates them if storage fails here.
 	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
@@ -1049,7 +1094,7 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 
 	user.IsAvailable = req.IsAvailable
 
-	if err := a.DB.Save(&user).Error; err != nil {
+	if err := a.DB.Model(&user).Select("IsAvailable").Updates(&user).Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}

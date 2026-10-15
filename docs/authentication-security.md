@@ -36,6 +36,9 @@ password, activation or SSO-link updates (and account restoration). Tokens must
 match this stamp on current identity checks. This also revokes sessions minted
 during the pre-save interval if the final Redis revocation write fails. Such a
 write failure returns503; the password/security update may already have committed.
+Preferences and availability write only their own fields. Security mutations
+compare the loaded authentication stamp, password hash and activation state in
+the database update; a concurrent security change returns409 and must be retried.
 
 Browser logout uses `POST /api/auth/refresh/logout`, under the refresh cookie's
 existing narrow path. The older `/api/auth/logout` endpoint remains available
