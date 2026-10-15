@@ -24,7 +24,7 @@ func ParseToken(secret, encoded, purpose string) (*JWTClaims, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !token.Valid || claims.Subject != purpose || claims.UserID == uuid.Nil || claims.OrganizationID == uuid.Nil || claims.IssuedAt == nil {
+	if !token.Valid || claims.Subject != purpose || claims.UserID == uuid.Nil || claims.OrganizationID == uuid.Nil || claims.IssuedAt == nil || claims.SessionFamily == "" {
 		return nil, jwt.ErrTokenInvalidClaims
 	}
 	return claims, nil
@@ -39,6 +39,9 @@ func CurrentIdentity(db *gorm.DB, claims *JWTClaims) (*models.User, error) {
 	if err := db.Where("id = ? AND is_active = ?", claims.UserID, true).First(&user).Error; err != nil {
 		return nil, err
 	}
+	if claims.SessionID != "" && claims.AuthStamp != user.AuthStamp {
+		return nil, ErrSessionRevoked
+	}
 	var org models.Organization
 	if err := db.Where("id = ?", claims.OrganizationID).First(&org).Error; err != nil {
 		return nil, err
@@ -52,6 +55,8 @@ func CurrentIdentity(db *gorm.DB, claims *JWTClaims) (*models.User, error) {
 	}
 	return &user, nil
 }
+
+func FamilyKey(id string) string { return "auth:family:" + id }
 
 func SessionKey(id string) string        { return "auth:session:" + id }
 func VersionKey(userID uuid.UUID) string { return "auth:version:" + userID.String() }
@@ -68,12 +73,16 @@ func SessionVersion(ctx context.Context, client *redis.Client, userID uuid.UUID)
 }
 
 func ValidateSession(ctx context.Context, client *redis.Client, claims *JWTClaims) error {
-	if client == nil || claims.SessionID == "" {
+	if client == nil || claims.SessionID == "" || claims.SessionFamily == "" {
 		return errors.New("missing session")
 	}
 	owner, err := client.Get(ctx, SessionKey(claims.SessionID)).Result()
 	if err != nil || owner != claims.UserID.String() {
 		return errors.New("session expired or revoked")
+	}
+	familyOwner, err := client.Get(ctx, FamilyKey(claims.SessionFamily)).Result()
+	if err != nil || familyOwner != claims.UserID.String() {
+		return ErrSessionRevoked
 	}
 	version, err := SessionVersion(ctx, client, claims.UserID)
 	if err != nil || version != claims.SessionVersion {

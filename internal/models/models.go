@@ -108,6 +108,7 @@ type User struct {
 	BaseModel
 	OrganizationID uuid.UUID  `gorm:"type:uuid;index" json:"organization_id"`
 	Email          string     `gorm:"size:255;uniqueIndex;not null" json:"email"`
+	AuthStamp      string     `gorm:"size:36" json:"-"`
 	PasswordHash   string     `gorm:"size:255" json:"-"`
 	FullName       string     `gorm:"size:255" json:"full_name"`
 	RoleID         *uuid.UUID `gorm:"type:uuid;index" json:"role_id,omitempty"`

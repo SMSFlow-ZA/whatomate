@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -713,6 +715,28 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
 	}
 
+	if !hasWriteAccess {
+		if req.AgentID != nil && *req.AgentID != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You don't have permission to assign transfers to others", nil, "")
+		}
+		if !a.HasPermission(userID, models.ResourceTransfers, models.ActionPickup, orgID) || req.AgentID != nil || req.TeamID != nil || transfer.AgentID != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Transfer is not available for pickup", nil, "")
+		}
+		settings, err := a.getChatbotSettingsCached(orgID, "")
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Queue settings unavailable", nil, "")
+		}
+		if settings != nil && !settings.AgentAssignment.AllowQueuePickup {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Queue pickup is not allowed", nil, "")
+		}
+		if transfer.TeamID != nil {
+			var count int64
+			if err := a.DB.Model(&models.TeamMember{}).Where("team_id = ? AND user_id = ?", *transfer.TeamID, userID).Count(&count).Error; err != nil || count == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Team membership required", nil, "")
+			}
+		}
+	}
+
 	// Determine target agent
 	var targetAgentID *uuid.UUID
 
@@ -778,7 +802,21 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		a.UpdateSLAOnPickup(&transfer)
 	}
 
-	if err := a.DB.Save(&transfer).Error; err != nil {
+	if !hasWriteAccess {
+		// Recheck ownership and team eligibility in the authoritative write. A
+		// concurrent assignment must never be overwritten by a stale read.
+		teams := a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID)
+		result := a.DB.Model(&models.AgentTransfer{}).
+			Where("id = ? AND organization_id = ? AND status = ? AND agent_id IS NULL", transfer.ID, orgID, models.TransferStatusActive).
+			Where("team_id IS NULL OR team_id IN (?)", teams).
+			Updates(map[string]any{"agent_id": userID, "picked_up_at": transfer.SLA.PickedUpAt, "sla_breached": transfer.SLA.Breached, "sla_breached_at": transfer.SLA.BreachedAt})
+		if result.Error != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign transfer", nil, "")
+		}
+		if result.RowsAffected != 1 {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer is no longer available", nil, "")
+		}
+	} else if err := a.DB.Save(&transfer).Error; err != nil {
 		a.Log.Error("Failed to assign transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign transfer", nil, "")
 	}

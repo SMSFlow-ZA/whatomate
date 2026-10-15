@@ -295,11 +295,13 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 	// Check for soft-deleted user with same email and restore them
 	var softDeleted models.User
 	if err := a.DB.Unscoped().Where("email = ? AND deleted_at IS NOT NULL", req.Email).First(&softDeleted).Error; err == nil {
-		// Restore the soft-deleted user with new details
+		// Restore with a fresh stamp so previously issued sessions cannot revive.
+		softDeleted.AuthStamp = uuid.NewString()
 		if err := a.DB.Unscoped().Model(&softDeleted).Updates(map[string]any{
 			"deleted_at":      nil,
 			"organization_id": orgID,
 			"password_hash":   string(hashedPassword),
+			"auth_stamp":      softDeleted.AuthStamp,
 			"full_name":       req.FullName,
 			"role_id":         roleID,
 			"is_active":       true,
@@ -523,7 +525,9 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		}
 	}
 	// Revoke before applying security changes; storage failure must fail closed.
-	if req.Password != "" || req.IsActive != nil || req.SSOConfigID != nil {
+	securityChanged := req.Password != "" || req.IsActive != nil || req.SSOConfigID != nil
+	if securityChanged {
+		user.AuthStamp = uuid.NewString()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
@@ -577,6 +581,14 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
 	}
 
+	// The database stamp remains authoritative even if this Redis write fails.
+	if securityChanged {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
+		}
+	}
 	// Invalidate cached account and permission state after security changes.
 	if req.IsActive != nil || req.SSOConfigID != nil {
 		a.InvalidateUserPermissionsCache(user.ID)
@@ -860,6 +872,7 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
 	}
 	user.PasswordHash = string(hashedPassword)
+	user.AuthStamp = uuid.NewString()
 	if err := a.DB.Save(&user).Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
@@ -868,6 +881,11 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change password", nil, "")
 	}
 
+	// Fence logins that raced between the pre-save revocation and DB update.
+	// AuthStamp already invalidates them if storage fails here.
+	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
+	}
 	return r.SendEnvelope(map[string]string{"message": "Password changed successfully"})
 }
 

@@ -34,6 +34,8 @@ type JWTClaims struct {
 	Email          string     `json:"email"`
 	RoleID         *uuid.UUID `json:"role_id,omitempty"`
 	IsSuperAdmin   bool       `json:"is_super_admin"`
+	SessionFamily  string     `json:"session_family,omitempty"`
+	AuthStamp      string     `json:"auth_stamp,omitempty"`
 	SessionID      string     `json:"sid,omitempty"`
 	SessionVersion string     `json:"session_version,omitempty"`
 	jwt.RegisteredClaims

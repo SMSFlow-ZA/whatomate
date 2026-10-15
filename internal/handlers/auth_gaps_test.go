@@ -26,12 +26,13 @@ func generateRefreshTokenWithJTI(t *testing.T, secret string, user *models.User,
 	version, err := middleware.SessionVersion(ctx, rdb, user.ID)
 	require.NoError(t, err)
 	require.NoError(t, rdb.Set(ctx, middleware.SessionKey(jti), user.ID.String(), expiry).Err())
+	require.NoError(t, rdb.Set(ctx, middleware.FamilyKey(jti), user.ID.String(), expiry).Err())
 	claims := middleware.JWTClaims{
 		UserID:         user.ID,
 		OrganizationID: user.OrganizationID,
 		Email:          user.Email,
 		RoleID:         user.RoleID,
-		SessionID:      jti, SessionVersion: version,
+		SessionID:      jti, SessionVersion: version, SessionFamily: jti, AuthStamp: user.AuthStamp,
 		RegisteredClaims: jwt.RegisteredClaims{Subject: "refresh", Audience: jwt.ClaimStrings{"whatomate:refresh"},
 			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),

@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -316,7 +317,7 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 
 	// Preserve the authenticated epoch: rotation must never adopt a later
 	// password-reset/disable epoch if revocation races with this request.
-	accessToken, err := a.generateAccessToken(&user, claims.SessionVersion)
+	accessToken, err := a.generateAccessToken(&user, claims.SessionVersion, claims.SessionFamily)
 	if err != nil {
 		if errors.Is(err, middleware.ErrSessionRevoked) {
 			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
@@ -354,19 +355,41 @@ func (a *App) generateAccessToken(user *models.User, expectedVersions ...string)
 	if err != nil {
 		return "", err
 	}
-	if current.PasswordHash != user.PasswordHash || current.SSOBinding != user.SSOBinding || current.SSOProviderID != user.SSOProviderID || current.SSOProvider != user.SSOProvider {
+	if current.AuthStamp != user.AuthStamp || current.PasswordHash != user.PasswordHash || current.SSOBinding != user.SSOBinding || current.SSOProviderID != user.SSOProviderID || current.SSOProvider != user.SSOProvider {
 		return "", middleware.ErrSessionRevoked
 	}
 	sid := uuid.NewString()
 	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
-	if err := a.Redis.Set(ctx, middleware.SessionKey(sid), user.ID.String(), expiry).Err(); err != nil {
-		return "", err
+	family := sid
+	if len(expectedVersions) > 1 {
+		family = expectedVersions[1]
+		// Atomic family fence: logout cannot be crossed by creating a successor.
+		created, err := a.Redis.Eval(ctx, `if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end; redis.call("SET", KEYS[2], ARGV[1], "PX", ARGV[2]); return 1`, []string{middleware.FamilyKey(family), middleware.SessionKey(sid)}, user.ID.String(), expiry.Milliseconds()).Int()
+		if err != nil {
+			return "", err
+		}
+		if created != 1 {
+			return "", middleware.ErrSessionRevoked
+		}
+	} else {
+		_, err := a.Redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, middleware.FamilyKey(family), user.ID.String(), expiry)
+			pipe.Set(ctx, middleware.SessionKey(sid), user.ID.String(), expiry)
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
 	}
-	return a.signPurposeToken(user, "access", sid, version, uuid.NewString(), time.Duration(a.Config.JWT.AccessExpiryMins)*time.Minute)
+	return a.signPurposeToken(user, "access", sid, version, uuid.NewString(), time.Duration(a.Config.JWT.AccessExpiryMins)*time.Minute, family)
 }
 
-func (a *App) signPurposeToken(user *models.User, purpose, sid, version, jti string, expiry time.Duration) (string, error) {
-	claims := middleware.JWTClaims{UserID: user.ID, OrganizationID: user.OrganizationID, Email: user.Email, RoleID: user.RoleID, IsSuperAdmin: user.IsSuperAdmin, SessionID: sid, SessionVersion: version,
+func (a *App) signPurposeToken(user *models.User, purpose, sid, version, jti string, expiry time.Duration, families ...string) (string, error) {
+	family := sid
+	if len(families) > 0 {
+		family = families[0]
+	}
+	claims := middleware.JWTClaims{UserID: user.ID, OrganizationID: user.OrganizationID, Email: user.Email, RoleID: user.RoleID, IsSuperAdmin: user.IsSuperAdmin, SessionID: sid, SessionVersion: version, SessionFamily: family, AuthStamp: user.AuthStamp,
 		RegisteredClaims: jwt.RegisteredClaims{ID: jti, Subject: purpose, Audience: jwt.ClaimStrings{"whatomate:" + purpose}, ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)), IssuedAt: jwt.NewNumericDate(time.Now()), Issuer: "whatomate"}}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(a.Config.JWT.Secret))
 }
@@ -378,7 +401,7 @@ func (a *App) generateRefreshToken(user *models.User, accessToken string) (strin
 	}
 	jti := uuid.NewString()
 	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
-	signed, err := a.signPurposeToken(user, "refresh", access.SessionID, access.SessionVersion, jti, expiry)
+	signed, err := a.signPurposeToken(user, "refresh", access.SessionID, access.SessionVersion, jti, expiry, access.SessionFamily)
 	if err != nil {
 		return "", err
 	}
@@ -471,7 +494,10 @@ func (a *App) SwitchOrg(r *fastglue.Request) error {
 	// Generate new tokens with the target org
 	var expectedVersions []string
 	if claims, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims); ok {
-		expectedVersions = append(expectedVersions, claims.SessionVersion)
+		if claims.AuthStamp != user.AuthStamp {
+			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+		}
+		expectedVersions = append(expectedVersions, claims.SessionVersion, claims.SessionFamily)
 	}
 	accessToken, err := a.generateAccessToken(&user, expectedVersions...)
 	if err != nil {
@@ -519,7 +545,7 @@ func (a *App) Logout(r *fastglue.Request) error {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID)).Err(); err != nil {
+			if err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)).Err(); err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke session", nil, "")
 			}
 		}
@@ -574,8 +600,11 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 			return err
 		}
 	}
+	if session.AuthStamp != user.AuthStamp {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+	}
 	jti := uuid.NewString()
-	signed, err := a.signPurposeToken(user, "ws", session.SessionID, session.SessionVersion, jti, 30*time.Second)
+	signed, err := a.signPurposeToken(user, "ws", session.SessionID, session.SessionVersion, jti, 30*time.Second, session.SessionFamily)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}

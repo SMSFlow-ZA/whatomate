@@ -31,6 +31,7 @@ func generateTestToken(t *testing.T, userID, orgID uuid.UUID, email string, role
 		OrganizationID: orgID,
 		Email:          email,
 		RoleID:         roleID,
+		SessionFamily:  "test-family",
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: "whatomate", Subject: "access", Audience: jwt.ClaimStrings{"whatomate:access"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),

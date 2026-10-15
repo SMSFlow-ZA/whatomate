@@ -399,6 +399,7 @@ func GenerateTestRefreshToken(t *testing.T, user *models.User, secret string, ex
 	require.NoError(t, err)
 	if expiry > 0 {
 		require.NoError(t, rdb.Set(ctx, middleware.SessionKey(jti), user.ID.String(), expiry).Err())
+		require.NoError(t, rdb.Set(ctx, middleware.FamilyKey(jti), user.ID.String(), expiry).Err())
 		require.NoError(t, rdb.Set(ctx, "refresh:"+jti, user.ID.String(), expiry).Err())
 	}
 	claims := middleware.JWTClaims{
@@ -406,7 +407,7 @@ func GenerateTestRefreshToken(t *testing.T, user *models.User, secret string, ex
 		OrganizationID: user.OrganizationID,
 		Email:          user.Email,
 		RoleID:         user.RoleID,
-		SessionID:      jti, SessionVersion: version,
+		SessionID:      jti, SessionVersion: version, SessionFamily: jti, AuthStamp: user.AuthStamp,
 		RegisteredClaims: jwt.RegisteredClaims{ID: jti, Subject: "refresh", Audience: jwt.ClaimStrings{"whatomate:refresh"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

@@ -7,7 +7,10 @@ uses account permissions because the current permission model has no separate
 catalogue resource. Unknown API families fail closed.
 Campaign execution uses `campaigns:execute`; custom action execution uses the
 existing `custom_actions:write` permission. Pickup-only agents can resume only
-their own assigned transfers. Queue agents receive only the pickup feature flag
+their own assigned transfers. Pickup assignment requires an unassigned general
+queue or a team the agent belongs to, with queue pickup enabled. The claim
+updates only an unassigned active row, so concurrent assignment wins safely.
+Queue agents receive only the pickup feature flag
 from the chatbot settings route; the full configuration and statistics require
 `settings.chatbot:read`.
 
@@ -22,12 +25,17 @@ Every API request and WebSocket authentication checks the current active user
 and organization membership. Disabling a user or changing a password revokes
 their sessions. Established WebSockets recheck account/session validity every
 five seconds, with a five-second storage timeout. Refresh rotation replaces the
-previous session, so existing sockets reconnect with a fresh ticket. Logging out
-revokes the selected session, including its access token, while preserving other
-independent sign-ins.
+previous session, so existing sockets reconnect with a fresh ticket. Refresh and
+organization switching preserve a stable session family. Logging out revokes
+that family, including in-flight or completed refresh successors, while preserving
+other independent sign-ins. Families expire at the original sign-in lifetime.
 Rotation preserves the authenticated revocation epoch, and token issuance
 rechecks its credential snapshot, so an in-flight request cannot adopt a later
-password-reset epoch.
+password-reset epoch. A database authentication stamp changes atomically with
+password, activation or SSO-link updates (and account restoration). Tokens must
+match this stamp on current identity checks. This also revokes sessions minted
+during the pre-save interval if the final Redis revocation write fails. Such a
+write failure returns503; the password/security update may already have committed.
 
 Browser logout uses `POST /api/auth/refresh/logout`, under the refresh cookie's
 existing narrow path. The older `/api/auth/logout` endpoint remains available
@@ -62,7 +70,7 @@ also fails if its configuration changes.
 
 ## Upgrade compatibility
 
-Run the normal database migrations to add the user SSO binding column. Existing
+Run the normal database migrations to add the user SSO binding and authentication stamp columns. Existing
 tokens without the required purpose/audience/session state are rejected; users
 must sign in again. Legacy SSO links without a configuration binding require
 explicit administrator re-linking. Native login remains available for existing
