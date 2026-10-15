@@ -2,7 +2,7 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits]
+    branches: [codex/plan-limits, codex/instance-branding]
   workflow_dispatch:
 
 permissions:

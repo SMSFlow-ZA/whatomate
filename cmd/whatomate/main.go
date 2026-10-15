@@ -167,6 +167,10 @@ func runServer(args []string) {
 		}
 	}
 
+	if err := plan.RecoverMediaPublications(db, []string{cfg.Storage.LocalPath, cfg.Calling.AudioDir}); err != nil {
+		lo.Fatal("Media publication recovery failed", "error", err)
+	}
+
 	// Connect to Redis
 	if err := plan.EnsureSupport(db, cfg.Plan, cfg.DefaultAdmin.Email); err != nil {
 		lo.Fatal("Managed support initialization failed", "error", err)
@@ -485,6 +489,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)
 	g.GET("/source", app.CorrespondingSource)
+	g.GET("/api/branding", app.GetBranding)
+	g.GET("/api/branding/assets/{asset}", app.BrandingAsset)
+	g.PUT("/api/branding", app.UpdateBranding)
+	g.DELETE("/api/branding", app.ResetBranding)
 
 	g.GET("/api/embedded-signup/config", app.GetEmbeddedSignupConfig)
 
@@ -546,6 +554,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 			return r
 		}
 		path := string(r.RequestCtx.Path())
+		if string(r.RequestCtx.Method()) == "GET" && (path == "/api/branding" || path == "/api/branding/assets/logo" || path == "/api/branding/assets/favicon") {
+			return r
+		}
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||

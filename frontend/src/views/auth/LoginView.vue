@@ -9,7 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
+import BrandLogo from '@/components/shared/BrandLogo.vue'
+import { useBrandingStore } from '@/stores/branding'
 
 const { t } = useI18n()
 
@@ -21,6 +23,7 @@ interface SSOProvider {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const branding = useBrandingStore()
 
 const email = ref('')
 const password = ref('')
@@ -96,11 +99,9 @@ const initiateSSO = (provider: string) => {
     <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
       <div class="p-8 space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <MessageSquare class="h-7 w-7 text-white" />
-          </div>
+          <BrandLogo />
         </div>
-        <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
+        <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.brandWelcomeTitle', { name: branding.current.display_name }) }}</h2>
         <p class="text-white/50 light:text-gray-500">
           {{ $t('auth.welcomeSubtitle') }}
         </p>
@@ -164,7 +165,7 @@ const initiateSSO = (provider: string) => {
       <div class="px-8 pb-8">
         <p class="text-sm text-center text-white/40 light:text-gray-500">
           {{ $t('auth.noAccount') }}
-          <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
+          <RouterLink to="/register" class="brand-link hover:underline">
             {{ $t('auth.signUp') }}
           </RouterLink>
         </p>

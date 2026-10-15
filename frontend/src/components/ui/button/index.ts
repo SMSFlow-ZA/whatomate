@@ -9,7 +9,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         // Gradient primary button with glow
-        default: "bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-600 hover:to-green-700",
+        default: "brand-button shadow-sm",
         destructive:
           "bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-lg shadow-red-500/25 hover:shadow-red-500/40",
         // Glass outline for dark mode
@@ -22,7 +22,7 @@ export const buttonVariants = cva(
           "bg-white/[0.06] text-foreground hover:bg-white/[0.10] light:bg-gray-100 light:hover:bg-gray-200",
         // Subtle ghost with hover
         ghost: "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground light:hover:bg-gray-100",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "brand-link underline-offset-4 hover:underline",
         // Glass variant for cards/panels
         glass: "bg-white/[0.04] border border-white/[0.08] text-foreground hover:bg-white/[0.08] light:bg-gray-50 light:border-gray-200 light:hover:bg-gray-100",
       },
