@@ -890,8 +890,9 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 
 	// Check if agent queue pickup is allowed (use cache)
 	settings, err := a.getChatbotSettingsCached(orgID, "")
-	if err != nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		a.Log.Error("Failed to load chatbot settings for queue pickup check", "error", err, "org_id", orgID)
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Queue settings unavailable", nil, "")
 	}
 
 	// Users without full access need AllowQueuePickup enabled when settings exist.
@@ -907,12 +908,20 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 
 	// Get optional team filter
 	teamIDStr := string(r.RequestCtx.QueryArgs().Peek("team_id"))
+	var teamFilterID uuid.UUID
+	if teamIDStr != "" && teamIDStr != "general" {
+		teamFilterID, err = uuid.Parse(teamIDStr)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid team_id", nil, "")
+		}
+	}
 
 	// Get user's team memberships
 	var userTeamIDs []uuid.UUID
 	var memberships []models.TeamMember
 	if err := a.DB.Where("user_id = ?", userID).Find(&memberships).Error; err != nil {
 		a.Log.Error("Failed to fetch team memberships for pick", "error", err, "user_id", userID)
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Team memberships unavailable", nil, "")
 	}
 	for _, m := range memberships {
 		userTeamIDs = append(userTeamIDs, m.TeamID)
@@ -931,39 +940,30 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 		Where("organization_id = ? AND status = ? AND agent_id IS NULL", orgID, models.TransferStatusActive).
 		Order("transferred_at ASC")
 
-	if teamIDStr != "" {
-		// Pick from specific team
-		if teamIDStr == "general" {
-			query = query.Where("team_id IS NULL")
-		} else {
-			teamID, err := uuid.Parse(teamIDStr)
-			if err == nil {
-				// Verify user is member of this team (unless they have full access)
-				if !hasFullAccess {
-					found := false
-					for _, tid := range userTeamIDs {
-						if tid == teamID {
-							found = true
-							break
-						}
-					}
-					if !found {
-						tx.Rollback()
-						return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You are not a member of this team", nil, "")
-					}
+	// Scope every non-writer query independently of the optional filter. This
+	// predicate also uses current membership rather than the earlier snapshot.
+	if !hasFullAccess {
+		teams := tx.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID)
+		query = query.Where("team_id IS NULL OR team_id IN (?)", teams)
+	}
+	if teamIDStr == "general" {
+		query = query.Where("team_id IS NULL")
+	} else if teamIDStr != "" {
+		if !hasFullAccess {
+			found := false
+			for _, teamID := range userTeamIDs {
+				if teamID == teamFilterID {
+					found = true
+					break
 				}
-				query = query.Where("team_id = ?", teamID)
+			}
+			if !found {
+				tx.Rollback()
+				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You are not a member of this team", nil, "")
 			}
 		}
-	} else if !hasFullAccess {
-		// Users without full access can only pick from their teams or general queue
-		if len(userTeamIDs) > 0 {
-			query = query.Where("team_id IS NULL OR team_id IN ?", userTeamIDs)
-		} else {
-			query = query.Where("team_id IS NULL")
-		}
+		query = query.Where("team_id = ?", teamFilterID)
 	}
-	// Users with full access can pick from any queue if no team_id specified
 
 	// Find oldest unassigned active transfer (FIFO) - locked row
 	var transfer models.AgentTransfer
@@ -987,10 +987,26 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 	// Update SLA tracking for pickup
 	a.UpdateSLAOnPickup(&transfer)
 
-	if err := tx.Save(&transfer).Error; err != nil {
+	// Keep the row lock and fence the authoritative write as well: a team
+	// membership revoked after selection must not grant access through pickup.
+	claim := tx.Model(&models.AgentTransfer{}).
+		Where("id = ? AND organization_id = ? AND status = ? AND agent_id IS NULL", transfer.ID, orgID, models.TransferStatusActive)
+	if !hasFullAccess {
+		teams := tx.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID)
+		claim = claim.Where("team_id IS NULL OR team_id IN (?)", teams)
+	}
+	claimed := claim.Updates(map[string]any{
+		"agent_id": userID, "transferred_by_user_id": transfer.TransferredByUserID,
+		"picked_up_at": transfer.SLA.PickedUpAt, "sla_breached": transfer.SLA.Breached, "sla_breached_at": transfer.SLA.BreachedAt,
+	})
+	if claimed.Error != nil {
 		tx.Rollback()
-		a.Log.Error("Failed to pick transfer", "error", err, "transfer_id", transfer.ID)
+		a.Log.Error("Failed to pick transfer", "error", claimed.Error, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to pick transfer", nil, "")
+	}
+	if claimed.RowsAffected != 1 {
+		tx.Rollback()
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer is no longer available", nil, "")
 	}
 
 	// Pin the agent as the contact's relationship manager only when the org

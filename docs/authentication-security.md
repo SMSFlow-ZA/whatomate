@@ -10,6 +10,9 @@ existing `custom_actions:write` permission. Pickup-only agents can resume only
 their own assigned transfers. Pickup assignment requires an unassigned general
 queue or a team the agent belongs to, with queue pickup enabled. The claim
 updates only an unassigned active row, so concurrent assignment wins safely.
+Picking the next queued transfer rejects malformed team IDs with400. Selection
+and assignment both enforce current team membership for pickup-only agents;
+membership revoked after selection causes409 instead of granting the transfer.
 Queue agents receive only the pickup feature flag
 from the chatbot settings route; the full configuration and statistics require
 `settings.chatbot:read`.
