@@ -67,7 +67,7 @@ func TestStorageBatchProcessDeath(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("old"), 0644))
 	}
 	command := exec.Command(os.Args[0], "-test.run=^TestStorageBatchProcessDeath$")
-	command.Env = append(os.Environ(), "BRANDING_CRASH_CHILD=1", "BRANDING_CRASH_ROOT="+root, "BRANDING_CRASH_DSN="+db.Dialector.(*postgres.Dialector).Config.DSN)
+	command.Env = append(os.Environ(), "BRANDING_CRASH_CHILD=1", "BRANDING_CRASH_ROOT="+root, "BRANDING_CRASH_DSN="+db.Dialector.(*postgres.Dialector).DSN)
 	err := command.Run()
 	var exit *exec.ExitError
 	require.ErrorAs(t, err, &exit)
@@ -128,7 +128,7 @@ func TestStoragePublicationAbandonedJournalAndWriteFailure(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(root, "cannot-replace-directory"), 0700))
 	handle, err := os.OpenRoot(root)
 	require.NoError(t, err)
-	defer handle.Close()
+	defer func() { require.NoError(t, handle.Close()) }()
 	require.Error(t, durableWrite(handle, "cannot-replace-directory", "failed.tmp", []byte("new")))
 	_, err = os.Stat(filepath.Join(root, "failed.tmp"))
 	require.True(t, os.IsNotExist(err))

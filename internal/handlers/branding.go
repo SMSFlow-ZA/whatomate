@@ -234,12 +234,12 @@ func (a *App) BrandingAsset(r *fastglue.Request) error {
 		if err != nil {
 			return err
 		}
-		defer root.Close()
+		defer func() { _ = root.Close() }() // Directory handle only; this operation does not write.
 		f, err := root.Open(filepath.Join("branding", asset+".png"))
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }() // Read-only asset handle.
 		data, err = io.ReadAll(io.LimitReader(f, 32*1024*1024+1))
 		if err != nil {
 			return err

@@ -34,7 +34,7 @@ func TestReviewSecurityPasswordResetPreSaveLoginRevoked(t *testing.T) {
 		mintedAccess = testutil.GetResponseCookie(login, "whm_access")
 		mintedRefresh = testutil.GetResponseCookie(login, "whm_refresh")
 	}))
-	defer app.DB.Callback().Update().Remove(callbackName)
+	defer func() { require.NoError(t, app.DB.Callback().Update().Remove(callbackName)) }()
 	reset := testutil.NewJSONRequest(t, map[string]string{"current_password": "old-password-123456", "new_password": "new-password-123456"})
 	testutil.SetAuthContext(reset, org.ID, user.ID)
 	require.NoError(t, app.ChangePassword(reset))
@@ -66,7 +66,7 @@ func TestReviewSecurityLogoutDuringRefreshRevokesSuccessor(t *testing.T) {
 		require.NoError(t, app.Logout(logout))
 		require.Equal(t, 200, logout.RequestCtx.Response.StatusCode())
 	}))
-	defer app.DB.Callback().Query().Remove(callbackName)
+	defer func() { require.NoError(t, app.DB.Callback().Query().Remove(callbackName)) }()
 	rotate := testutil.NewJSONRequest(t, map[string]string{"refresh_token": refresh})
 	require.NoError(t, app.RefreshToken(rotate))
 	require.True(t, loggedOut)
@@ -129,7 +129,7 @@ func TestReviewSecurityPickupEligibilityAndConditionalClaim(t *testing.T) {
 					seen = true
 					require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("id = ?", transfer.ID).Update("agent_id", other.ID).Error)
 				}))
-				defer app.DB.Callback().Update().Remove(hook)
+				defer func() { require.NoError(t, app.DB.Callback().Update().Remove(hook)) }()
 			}
 			req := testutil.NewJSONRequest(t, map[string]any{})
 			testutil.SetAuthContext(req, org.ID, user.ID)
@@ -171,15 +171,15 @@ func TestReviewSecurityDatabaseStampFencesFailedPostSaveRevocation(t *testing.T)
 		access = testutil.GetResponseCookie(login, "whm_access")
 		refresh = testutil.GetResponseCookie(login, "whm_refresh")
 	}))
-	defer app.DB.Callback().Update().Remove(before)
+	defer func() { require.NoError(t, app.DB.Callback().Update().Remove(before)) }()
 	unavailable := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 20 * time.Millisecond, ContextTimeoutEnabled: true})
-	defer unavailable.Close()
+	defer func() { require.NoError(t, unavailable.Close()) }()
 	require.NoError(t, app.DB.Callback().Update().After("gorm:update").Register(after, func(tx *gorm.DB) {
 		if tx.Statement.Table == "users" {
 			app.Redis = unavailable
 		}
 	}))
-	defer app.DB.Callback().Update().Remove(after)
+	defer func() { require.NoError(t, app.DB.Callback().Update().Remove(after)) }()
 	reset := testutil.NewJSONRequest(t, map[string]string{"current_password": "old-password-123456", "new_password": "new-password-123456"})
 	testutil.SetAuthContext(reset, org.ID, user.ID)
 	require.NoError(t, app.ChangePassword(reset))

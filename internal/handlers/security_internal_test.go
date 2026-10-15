@@ -184,7 +184,7 @@ func TestSecurityTokens_UnavailableRedisFailsClosed(t *testing.T) {
 	refresh, err := app.generateRefreshToken(user, access)
 	require.NoError(t, err)
 	unavailable := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 20 * time.Millisecond, ContextTimeoutEnabled: true})
-	defer unavailable.Close()
+	defer func() { require.NoError(t, unavailable.Close()) }()
 	app.Redis = unavailable
 	_, err = app.generateAccessToken(user)
 	require.Error(t, err)
@@ -215,7 +215,7 @@ func TestSecurityTokens_RefreshCannotCrossRevocation(t *testing.T) {
 			once.Do(func() { require.NoError(t, middleware.RevokeUserSessions(context.Background(), app.Redis, user.ID)) })
 		}
 	}))
-	defer app.DB.Callback().Query().Remove(callbackName)
+	defer func() { require.NoError(t, app.DB.Callback().Query().Remove(callbackName)) }()
 	req := testutil.NewJSONRequest(t, map[string]string{"refresh_token": refresh})
 	require.NoError(t, app.RefreshToken(req))
 	require.Equal(t, 401, req.RequestCtx.Response.StatusCode(), "in-flight refresh must not adopt a newer revocation epoch")

@@ -109,7 +109,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 	fullSettings := a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionRead, orgID)
-	if !fullSettings && !(a.HasPermission(userID, models.ResourceTransfers, models.ActionRead, orgID) || a.HasPermission(userID, models.ResourceTransfers, models.ActionPickup, orgID)) {
+	if !fullSettings && !a.HasPermission(userID, models.ResourceTransfers, models.ActionRead, orgID) && !a.HasPermission(userID, models.ResourceTransfers, models.ActionPickup, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 

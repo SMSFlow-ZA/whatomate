@@ -44,15 +44,16 @@ func TestSecurityQueuePick_FilterAndCurrentMembership(t *testing.T) {
 					seen = true
 					require.NoError(t, app.DB.Where("team_id = ? AND user_id = ?", team.ID, user.ID).Delete(&models.TeamMember{}).Error)
 				}))
-				defer app.DB.Callback().Update().Remove(hook)
+				defer func() { require.NoError(t, app.DB.Callback().Update().Remove(hook)) }()
 			}
 			req := testutil.NewJSONRequest(t, map[string]any{})
 			req.RequestCtx.Request.SetRequestURI("/api/chatbot/transfers/pick")
 			testutil.SetAuthContext(req, org.ID, user.ID)
 			filter := team.ID.String()
-			if scenario == "invalid" || scenario == "invalid-writer" {
+			switch scenario {
+			case "invalid", "invalid-writer":
 				filter = "not-a-uuid"
-			} else if scenario == "default-scope" {
+			case "default-scope":
 				filter = ""
 			}
 			testutil.SetQueryParam(req, "team_id", filter)
@@ -74,9 +75,10 @@ func TestSecurityQueuePick_FilterAndCurrentMembership(t *testing.T) {
 				require.Nil(t, current.AgentID)
 			default:
 				expected := 403
-				if scenario == "invalid" || scenario == "invalid-writer" {
+				switch scenario {
+				case "invalid", "invalid-writer":
 					expected = 400
-				} else if scenario == "membership-race" {
+				case "membership-race":
 					expected = 409
 				}
 				require.Equal(t, expected, req.RequestCtx.Response.StatusCode())

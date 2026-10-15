@@ -159,7 +159,7 @@ func TestBrandingFirstManagedSaveWithProductionDatabaseSession(t *testing.T) {
 	db, err := gorm.Open(postgres.Open(os.Getenv("TEST_DATABASE_URL")), &gorm.Config{})
 	require.NoError(t, err)
 	connection, _ := db.DB()
-	t.Cleanup(func() { connection.Close() })
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	a.DB = db
 	require.NoError(t, db.Exec("CREATE TABLE whatomate_plan_state(singleton bool,max_users bigint,max_numbers bigint,max_storage_bytes bigint,support_email text); INSERT INTO whatomate_plan_state VALUES (true,3,1,1073741824,'support@example.invalid')").Error)
 	t.Cleanup(func() { require.NoError(t, db.Exec("DROP TABLE whatomate_plan_state").Error) })

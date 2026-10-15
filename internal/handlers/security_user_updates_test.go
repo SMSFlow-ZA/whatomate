@@ -36,12 +36,13 @@ func TestSecurityUserUpdates_StaleSnapshotCannotRestoreSecurityState(t *testing.
 				require.NoError(t, app.DB.First(&committed, user.ID).Error)
 				require.NotEmpty(t, committed.AuthStamp)
 			}))
-			defer app.DB.Callback().Update().Remove(hook)
+			defer func() { require.NoError(t, app.DB.Callback().Update().Remove(hook)) }()
 
 			body := map[string]any{"email_notifications": true, "is_available": false, "full_name": "Updated name"}
-			if action == "admin-password" {
+			switch action {
+			case "admin-password":
 				body = map[string]any{"password": "stale-password-123456"}
-			} else if action == "own-password" {
+			case "own-password":
 				body = map[string]any{"current_password": "old-password-123456", "new_password": "stale-password-123456"}
 			}
 			req := testutil.NewJSONRequest(t, body)

@@ -38,9 +38,10 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			return r
 		}
 		action := models.ActionWrite
-		if method == "GET" {
+		switch method {
+		case "GET":
 			action = models.ActionRead
-		} else if method == "DELETE" {
+		case "DELETE":
 			action = models.ActionDelete
 		}
 		resource := ""

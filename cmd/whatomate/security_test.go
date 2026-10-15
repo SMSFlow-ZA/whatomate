@@ -74,11 +74,11 @@ func TestSecurityRouter_BrowserLogoutRevokesRefresh(t *testing.T) {
 	login := securityLogin(t, app, user)
 	jar, _ := cookiejar.New(nil)
 	origin, _ := url.Parse("http://example.test/api/auth/login")
-	login.RequestCtx.Response.Header.VisitAllCookie(func(_, val []byte) {
+	for _, val := range login.RequestCtx.Response.Header.Cookies() {
 		h := http.Header{}
 		h.Add("Set-Cookie", string(val))
 		jar.SetCookies(origin, (&http.Response{Header: h}).Cookies())
-	})
+	}
 	logoutURL, _ := url.Parse("http://example.test/api/auth/refresh/logout")
 	ctx := &fasthttp.RequestCtx{}
 	ctx.Request.Header.SetMethod("POST")
@@ -197,8 +197,12 @@ func TestSecurityRouter_SessionTicketAuthenticatesRealWebSocket(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	server := &fasthttp.Server{Handler: g.Handler()}
-	go server.Serve(listener)
-	defer server.Shutdown()
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	defer func() {
+		require.NoError(t, server.Shutdown())
+		require.NoError(t, <-serveDone)
+	}()
 	request := &fasthttp.RequestCtx{}
 	request.Request.Header.SetMethod("GET")
 	request.Request.SetRequestURI("/api/auth/ws-token")
@@ -213,7 +217,7 @@ func TestSecurityRouter_SessionTicketAuthenticatesRealWebSocket(t *testing.T) {
 	require.NoError(t, json.Unmarshal(request.Response.Body(), &response))
 	conn, _, err := websocketclient.DefaultDialer.Dial("ws://"+listener.Addr().String()+"/ws", nil)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() // The peer may already have closed the test socket.
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "auth", "payload": map[string]string{"token": response.Data.Token}}))
 	require.NoError(t, conn.WriteJSON(map[string]string{"type": "ping"}))
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))

@@ -63,12 +63,14 @@ func syncDirectory(root *os.Root, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return f.Sync()
+	syncErr := f.Sync()
+	return errors.Join(syncErr, f.Close())
 }
 
 func durableWrite(root *os.Root, path, temp string, data []byte) error {
-	defer root.Remove(temp)
+	// Best-effort cleanup; successful rename has already removed this name.
+	// Write, fsync, close and rename errors below remain authoritative.
+	defer func() { _ = root.Remove(temp) }()
 	f, err := root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -105,13 +107,13 @@ func recoverPublications(conn *gorm.DB, roots []string) error {
 	if err != nil {
 		return err
 	}
-	defer journalRoot.Close()
+	defer func() { _ = journalRoot.Close() }() // Root has no buffered writes; each mutation is synced explicitly.
 	directory, err := journalRoot.Open(".")
 	if err != nil {
 		return err
 	}
 	entries, err := directory.ReadDir(-1)
-	directory.Close()
+	err = errors.Join(err, directory.Close())
 	if err != nil {
 		return err
 	}
@@ -145,7 +147,7 @@ func recoverPublications(conn *gorm.DB, roots []string) error {
 			return err
 		}
 		data, err := io.ReadAll(io.LimitReader(f, 128<<20))
-		f.Close()
+		err = errors.Join(err, f.Close())
 		if err != nil {
 			return err
 		}
@@ -188,7 +190,7 @@ func recoverPublications(conn *gorm.DB, roots []string) error {
 					err = nil
 				}
 			}
-			root.Close()
+			err = errors.Join(err, root.Close())
 			if err != nil {
 				return err
 			}
@@ -293,7 +295,7 @@ func WriteFilesWithCommit(db *gorm.DB, cfg config.PlanConfig, roots []string, ch
 		if err != nil {
 			return err
 		}
-		defer root.Close()
+		defer func() { _ = root.Close() }() // Root has no buffered writes; durability is checked before commit.
 		name := ".branding-publication-" + journal.ID + ".json"
 		data, err := json.Marshal(journal)
 		if err != nil {
@@ -326,7 +328,7 @@ func WriteFilesWithCommit(db *gorm.DB, cfg config.PlanConfig, roots []string, ch
 					} else {
 						err = durableWrite(target, file.Path, filepath.Join(filepath.Dir(file.Path), fmt.Sprintf(".branding-%s-%d.tmp", journal.ID, index)), change.Data)
 					}
-					target.Close()
+					err = errors.Join(err, target.Close())
 					if err != nil {
 						return err
 					}
