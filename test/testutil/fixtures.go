@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -390,12 +391,23 @@ func UniqueEmail(prefix string) string {
 func GenerateTestRefreshToken(t *testing.T, user *models.User, secret string, expiry time.Duration) string {
 	t.Helper()
 
+	jti := uuid.NewString()
+	rdb := SetupTestRedis(t)
+	require.NotNil(t, rdb)
+	ctx := context.Background()
+	version, err := middleware.SessionVersion(ctx, rdb, user.ID)
+	require.NoError(t, err)
+	if expiry > 0 {
+		require.NoError(t, rdb.Set(ctx, middleware.SessionKey(jti), user.ID.String(), expiry).Err())
+		require.NoError(t, rdb.Set(ctx, "refresh:"+jti, user.ID.String(), expiry).Err())
+	}
 	claims := middleware.JWTClaims{
 		UserID:         user.ID,
 		OrganizationID: user.OrganizationID,
 		Email:          user.Email,
 		RoleID:         user.RoleID,
-		RegisteredClaims: jwt.RegisteredClaims{
+		SessionID:      jti, SessionVersion: version,
+		RegisteredClaims: jwt.RegisteredClaims{ID: jti, Subject: "refresh", Audience: jwt.ClaimStrings{"whatomate:refresh"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "whatomate",

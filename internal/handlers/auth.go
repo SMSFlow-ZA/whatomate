@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -92,7 +93,7 @@ func (a *App) Login(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
 
-	refreshToken, err := a.generateRefreshToken(&user)
+	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
 		a.Log.Error("Failed to generate refresh token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
@@ -184,7 +185,7 @@ func (a *App) Register(r *fastglue.Request) error {
 			a.Log.Error("Failed to generate access token", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 		}
-		refreshToken, err := a.generateRefreshToken(&existingUser)
+		refreshToken, err := a.generateRefreshToken(&existingUser, accessToken)
 		if err != nil {
 			a.Log.Error("Failed to generate refresh token", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
@@ -261,7 +262,7 @@ func (a *App) Register(r *fastglue.Request) error {
 		a.Log.Error("Failed to generate access token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
-	refreshToken, err := a.generateRefreshToken(&user)
+	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
 		a.Log.Error("Failed to generate refresh token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
@@ -289,48 +290,41 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Missing refresh token", nil, "")
 	}
 
-	// Parse and validate refresh token
-	token, err := jwt.ParseWithClaims(refreshTokenStr, &middleware.JWTClaims{}, func(token *jwt.Token) (any, error) {
-		return []byte(a.Config.JWT.Secret), nil
-	})
-
-	if err != nil || !token.Valid {
+	claims, err := middleware.ParseToken(a.Config.JWT.Secret, refreshTokenStr, "refresh")
+	if err != nil || claims.ID == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid refresh token", nil, "")
 	}
-
-	claims, ok := token.Claims.(*middleware.JWTClaims)
-	if !ok {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid token claims", nil, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Refresh token has been revoked", nil, "")
 	}
-
-	// Validate JTI in Redis (single-use: delete on consumption)
-	if claims.ID != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		deleted, err := a.Redis.Del(ctx, refreshTokenKey(claims.ID)).Result()
-		if err != nil || deleted == 0 {
-			// Token was already used or revoked
-			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Refresh token has been revoked", nil, "")
-		}
+	// GETDEL consumes state atomically, including concurrent refresh requests.
+	owner, err := a.Redis.GetDel(ctx, refreshTokenKey(claims.ID)).Result()
+	if err != nil || owner != claims.UserID.String() {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Refresh token has been revoked", nil, "")
 	}
-
-	// Get user
-	var user models.User
-	if err := a.DB.Where("id = ?", claims.UserID).First(&user).Error; err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "User not found", nil, "")
-	}
-
-	if !user.IsActive {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account is disabled", nil, "")
-	}
-
-	// Generate new tokens (rotation: new refresh token with new JTI)
-	accessToken, err := a.generateAccessToken(&user)
+	current, err := middleware.CurrentIdentity(a.DB, claims)
 	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account is disabled or unavailable", nil, "")
+	}
+	user := *current
+	user.OrganizationID = claims.OrganizationID
+	if err := a.Redis.Del(ctx, middleware.SessionKey(claims.SessionID)).Err(); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
+	}
+
+	// Preserve the authenticated epoch: rotation must never adopt a later
+	// password-reset/disable epoch if revocation races with this request.
+	accessToken, err := a.generateAccessToken(&user, claims.SessionVersion)
+	if err != nil {
+		if errors.Is(err, middleware.ErrSessionRevoked) {
+			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+		}
 		a.Log.Error("Failed to generate access token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
-	newRefreshToken, err := a.generateRefreshToken(&user)
+	newRefreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
 		a.Log.Error("Failed to generate refresh token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
@@ -344,55 +338,58 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 	})
 }
 
-func (a *App) generateAccessToken(user *models.User) (string, error) {
-	claims := middleware.JWTClaims{
-		UserID:         user.ID,
-		OrganizationID: user.OrganizationID,
-		Email:          user.Email,
-		RoleID:         user.RoleID,
-		IsSuperAdmin:   user.IsSuperAdmin,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(a.Config.JWT.AccessExpiryMins) * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "whatomate",
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(a.Config.JWT.Secret))
-}
-
-func (a *App) generateRefreshToken(user *models.User) (string, error) {
-	jti := uuid.New().String()
-	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
-
-	claims := middleware.JWTClaims{
-		UserID:         user.ID,
-		OrganizationID: user.OrganizationID,
-		Email:          user.Email,
-		RoleID:         user.RoleID,
-		IsSuperAdmin:   user.IsSuperAdmin,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        jti,
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "whatomate",
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(a.Config.JWT.Secret))
+func (a *App) generateAccessToken(user *models.User, expectedVersions ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	version, err := middleware.SessionVersion(ctx, a.Redis, user.ID)
 	if err != nil {
 		return "", err
 	}
+	if len(expectedVersions) > 0 && version != expectedVersions[0] {
+		return "", middleware.ErrSessionRevoked
+	}
+	// Check after reading the epoch. A credential change before this read is
+	// detected here; a change afterwards invalidates the token's old epoch.
+	current, err := middleware.CurrentIdentity(a.DB.WithContext(ctx), &middleware.JWTClaims{UserID: user.ID, OrganizationID: user.OrganizationID})
+	if err != nil {
+		return "", err
+	}
+	if current.PasswordHash != user.PasswordHash || current.SSOBinding != user.SSOBinding || current.SSOProviderID != user.SSOProviderID || current.SSOProvider != user.SSOProvider {
+		return "", middleware.ErrSessionRevoked
+	}
+	sid := uuid.NewString()
+	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
+	if err := a.Redis.Set(ctx, middleware.SessionKey(sid), user.ID.String(), expiry).Err(); err != nil {
+		return "", err
+	}
+	return a.signPurposeToken(user, "access", sid, version, uuid.NewString(), time.Duration(a.Config.JWT.AccessExpiryMins)*time.Minute)
+}
 
-	// Store JTI in Redis so it can be revoked
+func (a *App) signPurposeToken(user *models.User, purpose, sid, version, jti string, expiry time.Duration) (string, error) {
+	claims := middleware.JWTClaims{UserID: user.ID, OrganizationID: user.OrganizationID, Email: user.Email, RoleID: user.RoleID, IsSuperAdmin: user.IsSuperAdmin, SessionID: sid, SessionVersion: version,
+		RegisteredClaims: jwt.RegisteredClaims{ID: jti, Subject: purpose, Audience: jwt.ClaimStrings{"whatomate:" + purpose}, ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)), IssuedAt: jwt.NewNumericDate(time.Now()), Issuer: "whatomate"}}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(a.Config.JWT.Secret))
+}
+
+func (a *App) generateRefreshToken(user *models.User, accessToken string) (string, error) {
+	access, err := middleware.ParseToken(a.Config.JWT.Secret, accessToken, "access")
+	if err != nil {
+		return "", err
+	}
+	jti := uuid.NewString()
+	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
+	signed, err := a.signPurposeToken(user, "refresh", access.SessionID, access.SessionVersion, jti, expiry)
+	if err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := a.Redis.Set(ctx, refreshTokenKey(jti), user.ID.String(), expiry).Err(); err != nil {
-		a.Log.Error("Failed to store refresh token in Redis", "error", err)
+	if err := middleware.ValidateSession(ctx, a.Redis, access); err != nil {
+		return "", err
 	}
-
+	if err := a.Redis.Set(ctx, refreshTokenKey(jti), user.ID.String(), expiry).Err(); err != nil {
+		return "", err
+	}
 	return signed, nil
 }
 
@@ -472,13 +469,20 @@ func (a *App) SwitchOrg(r *fastglue.Request) error {
 	}
 
 	// Generate new tokens with the target org
-	accessToken, err := a.generateAccessToken(&user)
+	var expectedVersions []string
+	if claims, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims); ok {
+		expectedVersions = append(expectedVersions, claims.SessionVersion)
+	}
+	accessToken, err := a.generateAccessToken(&user, expectedVersions...)
 	if err != nil {
+		if errors.Is(err, middleware.ErrSessionRevoked) {
+			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+		}
 		a.Log.Error("Failed to generate access token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
 
-	refreshToken, err := a.generateRefreshToken(&user)
+	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
 		a.Log.Error("Failed to generate refresh token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
@@ -508,15 +512,15 @@ func (a *App) Logout(r *fastglue.Request) error {
 	}
 
 	if refreshTokenStr != "" {
-		// Parse the token to extract JTI (don't need to fully validate — just extract claims)
-		token, _ := jwt.ParseWithClaims(refreshTokenStr, &middleware.JWTClaims{}, func(token *jwt.Token) (any, error) {
-			return []byte(a.Config.JWT.Secret), nil
-		})
-		if token != nil {
-			if claims, ok := token.Claims.(*middleware.JWTClaims); ok && claims.ID != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				a.Redis.Del(ctx, refreshTokenKey(claims.ID))
+		claims, err := middleware.ParseToken(a.Config.JWT.Secret, refreshTokenStr, "refresh")
+		if err == nil && claims.ID != "" {
+			if a.Redis == nil {
+				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID)).Err(); err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke session", nil, "")
 			}
 		}
 	}
@@ -554,23 +558,31 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	claims := middleware.JWTClaims{
-		UserID:         userID,
-		OrganizationID: orgID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * time.Second)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "whatomate",
-			Subject:   "ws",
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(a.Config.JWT.Secret))
+	user, err := middleware.CurrentIdentity(a.DB, &middleware.JWTClaims{UserID: userID, OrganizationID: orgID})
 	if err != nil {
-		a.Log.Error("Failed to generate WS token", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account unavailable", nil, "")
+	}
+	user.OrganizationID = orgID
+	session, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
+	if !ok {
+		access, err := a.generateAccessToken(user)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
+		}
+		session, err = middleware.ParseToken(a.Config.JWT.Secret, access, "access")
+		if err != nil {
+			return err
+		}
+	}
+	jti := uuid.NewString()
+	signed, err := a.signPurposeToken(user, "ws", session.SessionID, session.SessionVersion, jti, 30*time.Second)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
-
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Redis.Set(ctx, "auth:ws:"+jti, user.ID.String(), 30*time.Second).Err(); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
+	}
 	return r.SendEnvelope(map[string]string{"token": signed})
 }

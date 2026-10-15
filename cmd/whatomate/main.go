@@ -521,6 +521,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		g.POST("/api/auth/refresh", app.RefreshToken)
 	}
 	g.POST("/api/auth/logout", app.Logout)
+	g.POST("/api/auth/refresh/logout", app.Logout)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
 
@@ -560,7 +561,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
-			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
+			path == "/api/auth/logout" || path == "/api/auth/refresh/logout" || path == "/api/webhook" || path == "/ws" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
@@ -573,7 +574,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		}
 		// Apply auth for all other /api routes (supports both JWT and API key)
 		if len(path) > 4 && path[:4] == "/api" {
-			return middleware.AuthWithDB(app.Config.JWT.Secret, app.DB)(r)
+			return middleware.AuthWithDB(app.Config.JWT.Secret, app.DB, app.Redis)(r)
 		}
 		return r
 	})
@@ -606,19 +607,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		})
 	}
 
-	// Role-based access control middleware
-	g.Before(func(r *fastglue.Request) *fastglue.Request {
-		method := string(r.RequestCtx.Method())
-
-		// Skip OPTIONS preflight requests
-		if method == "OPTIONS" {
-			return r
-		}
-
-		// Route-level permission checks are now handled at the handler level
-		// using the granular permission system (HasPermission checks)
-		return r
-	})
+	// Every protected API family has an explicit permission policy.
+	g.Before(app.AuthorizeAPI())
 
 	// Current User (all authenticated users)
 	g.GET("/api/me", app.GetCurrentUser)

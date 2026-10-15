@@ -83,8 +83,9 @@ test.describe('Template Sending', () => {
     // Get the organization ID for the logged-in user
     const orgId = await execSQL(`SELECT organization_id FROM users WHERE email = 'admin@test.com' LIMIT 1`)
 
-    // Clean up leftover e2e templates from previous runs
-    await execSQL(`DELETE FROM templates WHERE name LIKE 'e2e_%' AND organization_id = '${orgId}'`)
+    // Other template specs run concurrently in this organization. Clean only
+    // this spec's fixture families so their header/campaign fixtures survive.
+    await execSQL(`DELETE FROM templates WHERE (name LIKE 'e2e_simple_%' OR name LIKE 'e2e_params_%' OR name LIKE 'e2e_buttons_%') AND organization_id = '${orgId}'`)
 
     // Seed APPROVED templates directly via SQL (API only creates DRAFT)
     const uid = Date.now().toString().slice(-6)

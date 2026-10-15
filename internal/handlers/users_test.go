@@ -61,6 +61,7 @@ func TestApp_ListUsers(t *testing.T) {
 		admin := testutil.CreateTestUser(t, app.DB, otherOrg.ID,
 			testutil.WithEmail(testutil.UniqueEmail("list-empty-admin")),
 			testutil.WithRoleID(&adminRole.ID),
+			testutil.WithSuperAdmin(),
 		)
 
 		req := testutil.NewGETRequest(t)

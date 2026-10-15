@@ -78,6 +78,9 @@ type redirectToken struct {
 
 // ListCustomActions returns all custom actions for the organization
 func (a *App) ListCustomActions(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionRead); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -114,6 +117,9 @@ func (a *App) ListCustomActions(r *fastglue.Request) error {
 
 // GetCustomAction returns a single custom action by ID
 func (a *App) GetCustomAction(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionRead); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -134,6 +140,9 @@ func (a *App) GetCustomAction(r *fastglue.Request) error {
 
 // CreateCustomAction creates a new custom action
 func (a *App) CreateCustomAction(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -181,6 +190,9 @@ func (a *App) CreateCustomAction(r *fastglue.Request) error {
 
 // UpdateCustomAction updates an existing custom action
 func (a *App) UpdateCustomAction(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -243,6 +255,9 @@ func (a *App) UpdateCustomAction(r *fastglue.Request) error {
 
 // DeleteCustomAction deletes a custom action
 func (a *App) DeleteCustomAction(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionDelete); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -268,6 +283,9 @@ func (a *App) DeleteCustomAction(r *fastglue.Request) error {
 
 // ExecuteCustomAction executes a custom action with the given context
 func (a *App) ExecuteCustomAction(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

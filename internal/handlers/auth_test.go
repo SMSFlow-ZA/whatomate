@@ -336,7 +336,7 @@ func TestApp_RefreshToken_UserNotFound(t *testing.T) {
 
 	err := app.RefreshToken(req)
 	require.NoError(t, err)
-	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "User not found")
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "Account is disabled or unavailable")
 }
 
 func TestApp_RefreshToken_DisabledUser(t *testing.T) {
@@ -351,7 +351,7 @@ func TestApp_RefreshToken_DisabledUser(t *testing.T) {
 
 	err := app.RefreshToken(req)
 	require.NoError(t, err)
-	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "Account is disabled")
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "Account is disabled or unavailable")
 }
 
 func TestApp_RefreshToken_MalformedToken(t *testing.T) {

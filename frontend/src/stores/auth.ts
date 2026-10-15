@@ -145,13 +145,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout(): Promise<void> {
-    try {
-      await api.post('/auth/logout', {})
-    } catch {
-      // Ignore logout errors
-    } finally {
-      clearAuth()
-    }
+    await api.post('/auth/refresh/logout', {})
+    clearAuth()
   }
 
   function setAvailability(available: boolean, breakStart?: string | null) {

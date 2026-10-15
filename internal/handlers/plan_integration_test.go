@@ -200,7 +200,9 @@ func TestManagedSSOAutoCreationAndSupportIdentityAreProtected(t *testing.T) {
 		t.Run(tc.email, func(t *testing.T) {
 			email = tc.email
 			nonce := uuid.NewString()
-			state, _ := json.Marshal(SSOState{OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(time.Minute)})
+			var provider models.SSOProvider
+			require.NoError(t, app.DB.Where("organization_id = ? AND provider = ?", org.ID, "custom").First(&provider).Error)
+			state, _ := json.Marshal(SSOState{ConfigBinding: SSOProviderBinding(&provider), OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(time.Minute)})
 			require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, state, time.Minute).Err())
 			req := testutil.NewGETRequest(t)
 			testutil.SetPathParam(req, "provider", "custom")

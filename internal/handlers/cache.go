@@ -410,12 +410,27 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 		cacheKey = fmt.Sprintf("%s%s", userPermissionsCachePrefix, userID.String())
 	}
 
+	// Verify current account state before trusting cached permissions.
+	var current models.User
+	if err := a.DB.Where("id = ? AND is_active = ?", userID, true).First(&current).Error; err != nil {
+		return nil, err
+	}
+	if orgID != uuid.Nil && current.OrganizationID != orgID && !current.IsSuperAdmin {
+		var membership models.UserOrganization
+		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&membership).Error; err != nil {
+			return nil, err
+		}
+		if membership.RoleID == nil {
+			return nil, gorm.ErrRecordNotFound
+		}
+	}
 	// Try cache first (if Redis is available)
 	if a.Redis != nil {
 		cached, err := a.Redis.Get(ctx, cacheKey).Result()
 		if err == nil && cached != "" {
 			var perms UserPermissions
 			if err := json.Unmarshal([]byte(cached), &perms); err == nil {
+				perms.IsSuperAdmin = current.IsSuperAdmin
 				return &perms, nil
 			}
 		}
@@ -427,6 +442,9 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 		return nil, err
 	}
 
+	if user.IsSuperAdmin {
+		return &UserPermissions{IsSuperAdmin: true}, nil
+	}
 	// Determine which role to use
 	var roleID *uuid.UUID
 	if orgID != uuid.Nil {

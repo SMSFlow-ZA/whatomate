@@ -60,6 +60,7 @@ func TestApp_ListCustomActions(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ListCustomActions(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -85,6 +86,7 @@ func TestApp_ListCustomActions(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ListCustomActions(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -117,6 +119,7 @@ func TestApp_GetCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.GetCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -142,6 +145,7 @@ func TestApp_GetCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", uuid.New().String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.GetCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -171,6 +175,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -210,6 +215,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -237,6 +243,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -263,6 +270,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -282,6 +290,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -302,6 +311,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -320,6 +330,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -338,6 +349,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -356,6 +368,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -373,6 +386,7 @@ func TestApp_CreateCustomAction(t *testing.T) {
 		})
 		// No auth context
 
+		authorizeAdminFixture(t, app, req)
 		err := app.CreateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusUnauthorized, testutil.GetResponseStatusCode(req))
@@ -401,6 +415,7 @@ func TestApp_UpdateCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.UpdateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -435,6 +450,7 @@ func TestApp_UpdateCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.UpdateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -459,6 +475,7 @@ func TestApp_UpdateCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", uuid.New().String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.UpdateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -482,6 +499,7 @@ func TestApp_UpdateCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org2.ID, user2.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.UpdateCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -505,6 +523,7 @@ func TestApp_DeleteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.DeleteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -533,6 +552,7 @@ func TestApp_DeleteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", uuid.New().String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.DeleteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -553,6 +573,7 @@ func TestApp_DeleteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org2.ID, user2.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.DeleteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -585,6 +606,7 @@ func TestApp_ListCustomActions_CrossOrgIsolation(t *testing.T) {
 	req1 := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req1, org1.ID, user1.ID)
 
+	authorizeAdminFixture(t, app, req1)
 	err := app.ListCustomActions(req1)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req1))
@@ -603,6 +625,7 @@ func TestApp_ListCustomActions_CrossOrgIsolation(t *testing.T) {
 	req2 := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req2, org2.ID, user2.ID)
 
+	authorizeAdminFixture(t, app, req2)
 	err = app.ListCustomActions(req2)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req2))
@@ -637,6 +660,7 @@ func TestApp_GetCustomAction_CrossOrgIsolation(t *testing.T) {
 	testutil.SetAuthContext(req, org2.ID, user2.ID)
 	testutil.SetPathParam(req, "id", action.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -655,6 +679,7 @@ func TestApp_GetCustomAction_InvalidID(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", "not-a-valid-uuid")
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -679,6 +704,7 @@ func TestApp_UpdateCustomAction_InvalidActionType(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", action.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -704,6 +730,7 @@ func TestApp_UpdateCustomAction_InvalidConfig(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", action.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -743,6 +770,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -781,6 +809,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -815,6 +844,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -850,6 +880,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -884,6 +915,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -902,6 +934,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", uuid.New().String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -923,6 +956,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -944,6 +978,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -970,6 +1005,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org2.ID, user2.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -986,6 +1022,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		// No auth context
 		testutil.SetPathParam(req, "id", uuid.New().String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusUnauthorized, testutil.GetResponseStatusCode(req))
@@ -1015,6 +1052,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -1060,6 +1098,7 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 		testutil.SetAuthContext(req, org.ID, user.ID)
 		testutil.SetPathParam(req, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, req)
 		err := app.ExecuteCustomAction(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -1094,6 +1133,7 @@ func TestApp_CustomActionRedirect(t *testing.T) {
 		testutil.SetAuthContext(execReq, org.ID, user.ID)
 		testutil.SetPathParam(execReq, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, execReq)
 		err := app.ExecuteCustomAction(execReq)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(execReq))
@@ -1157,6 +1197,7 @@ func TestApp_CustomActionRedirect(t *testing.T) {
 		testutil.SetAuthContext(execReq, org.ID, user.ID)
 		testutil.SetPathParam(execReq, "id", action.ID.String())
 
+		authorizeAdminFixture(t, app, execReq)
 		err := app.ExecuteCustomAction(execReq)
 		require.NoError(t, err)
 
@@ -1200,6 +1241,7 @@ func TestApp_CreateCustomAction_MissingConfig(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -1227,6 +1269,7 @@ func TestApp_CreateCustomAction_DuplicateName(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -1260,6 +1303,7 @@ func TestApp_UpdateCustomAction_ChangeActionType(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", action.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateCustomAction(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))

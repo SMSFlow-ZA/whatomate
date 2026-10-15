@@ -5,12 +5,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
+	"github.com/stretchr/testify/require"
+	"github.com/zerodha/fastglue"
 )
+
+// Administrative handler fixtures need an actual authorized identity now that
+// handlers no longer rely on the historical router role middleware.
+func authorizeAdminFixture(t *testing.T, app *handlers.App, req *fastglue.Request) {
+	t.Helper()
+	orgID, ok := req.RequestCtx.UserValue("organization_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	userID, _ := req.RequestCtx.UserValue("user_id").(uuid.UUID)
+	if userID == uuid.Nil {
+		return
+	}
+	var user models.User
+	if userID == uuid.Nil || app.DB.First(&user, "id = ?", userID).Error != nil {
+		user = *testutil.CreateTestUser(t, app.DB, orgID, testutil.WithSuperAdmin())
+		req.RequestCtx.SetUserValue("user_id", user.ID)
+	} else {
+		require.NoError(t, app.DB.Model(&user).Update("is_super_admin", true).Error)
+		app.InvalidateUserPermissionsCache(user.ID)
+	}
+}
 
 // appOption configures an App for testing.
 type appOption func(*handlers.App)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -33,6 +34,8 @@ type JWTClaims struct {
 	Email          string     `json:"email"`
 	RoleID         *uuid.UUID `json:"role_id,omitempty"`
 	IsSuperAdmin   bool       `json:"is_super_admin"`
+	SessionID      string     `json:"sid,omitempty"`
+	SessionVersion string     `json:"session_version,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -127,7 +130,7 @@ func Auth(secret string) fastglue.FastMiddleware {
 }
 
 // AuthWithDB validates both JWT tokens and API keys
-func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
+func AuthWithDB(secret string, db *gorm.DB, clients ...*redis.Client) fastglue.FastMiddleware {
 	return func(r *fastglue.Request) *fastglue.Request {
 		authHeader := string(r.RequestCtx.Request.Header.Peek("Authorization"))
 		apiKey := string(r.RequestCtx.Request.Header.Peek("X-API-Key"))
@@ -163,22 +166,28 @@ func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
 			return nil
 		}
 
-		// Parse and validate token
-		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (any, error) {
-			return []byte(secret), nil
-		})
-
-		if err != nil || !token.Valid {
+		claims, err := ParseToken(secret, tokenString, "access")
+		if err != nil {
 			_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid or expired token", nil, "")
 			return nil
 		}
-
-		claims, ok := token.Claims.(*JWTClaims)
-		if !ok {
-			_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid token claims", nil, "")
-			return nil
+		if db != nil {
+			user, err := CurrentIdentity(db, claims)
+			if err != nil {
+				_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account unavailable", nil, "")
+				return nil
+			}
+			claims.Email, claims.RoleID, claims.IsSuperAdmin = user.Email, user.RoleID, user.IsSuperAdmin
 		}
-
+		if len(clients) > 0 {
+			ctx, cancel := sessionContext()
+			defer cancel()
+			if err := ValidateSession(ctx, clients[0], claims); err != nil {
+				_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session expired or revoked", nil, "")
+				return nil
+			}
+		}
+		r.RequestCtx.SetUserValue(ContextKeyClaims, claims)
 		// Store claims in context
 		r.RequestCtx.SetUserValue(ContextKeyUserID, claims.UserID)
 		r.RequestCtx.SetUserValue(ContextKeyOrganizationID, claims.OrganizationID)
@@ -227,7 +236,12 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 			}(apiKey.ID)
 
 			// Set context values from the user who created the key
-			if apiKey.User != nil {
+			if apiKey.User != nil && apiKey.User.IsActive {
+				current, err := CurrentIdentity(db, &JWTClaims{UserID: apiKey.UserID, OrganizationID: apiKey.OrganizationID})
+				if err != nil {
+					return false
+				}
+				apiKey.User = current
 				r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
 				r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
 				r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)

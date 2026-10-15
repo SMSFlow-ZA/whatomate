@@ -107,17 +107,9 @@ func TestApp_WebhookVerify_EmptyTokenWithEmptyConfigRejected(t *testing.T) {
 	// attacker could send no token at all and pass verification).
 	app := newAppForWebhook(t, "")
 
-	// Production code falls back to `WHERE webhook_verify_token = ?` against the
-	// accounts table. If a leftover row from another test in the suite happens to
-	// have an empty webhook_verify_token, the empty incoming token would match it
-	// and the test would be meaningless. Skip in that case rather than mutating
-	// shared state — other tests later in the run depend on these rows.
-	var leftoverEmpty int64
-	require.NoError(t, app.DB.Model(&models.WhatsAppAccount{}).
-		Where("webhook_verify_token = ?", "").Count(&leftoverEmpty).Error)
-	if leftoverEmpty > 0 {
-		t.Skipf("test data has %d account(s) with empty webhook_verify_token; this branch is only meaningful when none exist", leftoverEmpty)
-	}
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(account).Update("webhook_verify_token", "").Error)
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetQueryParam(req, "hub.mode", "subscribe")

@@ -638,6 +638,10 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if !a.HasPermission(userID, models.ResourceTransfers, models.ActionWrite, orgID) &&
+		(!a.HasPermission(userID, models.ResourceTransfers, models.ActionPickup, orgID) || transfer.AgentID == nil || *transfer.AgentID != userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+	}
 
 	if transfer.Status != models.TransferStatusActive {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")

@@ -29,6 +29,11 @@ func (a *App) WebhookVerify(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Verification failed", nil, "")
 	}
 
+	// Empty credentials must never match an unconfigured account token.
+	if token == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Verification failed", nil, "")
+	}
+
 	// First check against global config token
 	if token == a.Config.WhatsApp.WebhookVerifyToken && token != "" {
 		a.Log.Info("Webhook verified successfully (global token)")

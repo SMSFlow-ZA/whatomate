@@ -161,6 +161,7 @@ func TestApp_GetSSOSettings_HidesSecretButReportsHasSecret(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.GetSSOSettings(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
@@ -190,6 +191,7 @@ func TestApp_UpdateSSOProvider_CreateCustomRequiresURLs(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "custom")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.UpdateSSOProvider(req))
 	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "auth_url, token_url, and user_info_url")
 }
@@ -205,6 +207,7 @@ func TestApp_UpdateSSOProvider_InvalidProviderRejected(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "okta") // not in allowlist
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.UpdateSSOProvider(req))
 	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "Invalid provider")
 }
@@ -222,6 +225,7 @@ func TestApp_UpdateSSOProvider_EncryptsClientSecret(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "google")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.UpdateSSOProvider(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
@@ -249,6 +253,7 @@ func TestApp_UpdateSSOProvider_OmittingSecretLeavesUnchanged(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "google")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.UpdateSSOProvider(req))
 
 	var stored models.SSOProvider
@@ -272,6 +277,7 @@ func TestApp_DeleteSSOProvider_Success(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "google")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.DeleteSSOProvider(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
@@ -288,6 +294,7 @@ func TestApp_DeleteSSOProvider_NotFound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "google")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.DeleteSSOProvider(req))
 	testutil.AssertErrorResponse(t, req, fasthttp.StatusNotFound, "SSO provider not found")
 }
@@ -306,6 +313,7 @@ func TestApp_DeleteSSOProvider_CrossOrgIsolation(t *testing.T) {
 	testutil.SetAuthContext(req, orgB.ID, uuid.New())
 	testutil.SetPathParam(req, "provider", "google")
 
+	authorizeAdminFixture(t, app, req)
 	require.NoError(t, app.DeleteSSOProvider(req))
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
 
@@ -420,7 +428,8 @@ func TestApp_CallbackSSO_StateProviderMismatchRejected(t *testing.T) {
 	// Plant state claiming provider=google, but request comes in for provider=custom.
 	nonce := "test-nonce-1"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "google", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "google", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -445,7 +454,8 @@ func TestApp_CallbackSSO_StateIsSingleUse(t *testing.T) {
 
 	nonce := "single-use-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -481,10 +491,15 @@ func TestApp_CallbackSSO_CustomProvider_ExistingUser_LoginSuccess(t *testing.T) 
 
 	// Pre-create the user matching the userinfo response.
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(email))
+	user.SSOProvider = "custom"
+	user.SSOProviderID = fake.UserID
+	user.SSOBinding = ssoBindingFixture(t, app, org.ID)
+	require.NoError(t, app.DB.Save(user).Error)
 
 	nonce := "good-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -526,7 +541,8 @@ func TestApp_CallbackSSO_AutoCreateDisabledRejectsNewUser(t *testing.T) {
 
 	nonce := "no-auto-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -557,7 +573,8 @@ func TestApp_CallbackSSO_AutoCreateEnabledCreatesUserWithDefaultRole(t *testing.
 
 	nonce := "auto-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -595,7 +612,8 @@ func TestApp_CallbackSSO_DomainRestrictionRejectsOutsideEmail(t *testing.T) {
 
 	nonce := "domain-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -622,11 +640,16 @@ func TestApp_CallbackSSO_DisabledExistingUserRejected(t *testing.T) {
 
 	// Create existing user, then disable.
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(email))
+	user.SSOProvider = "custom"
+	user.SSOProviderID = fake.UserID
+	user.SSOBinding = ssoBindingFixture(t, app, org.ID)
+	require.NoError(t, app.DB.Save(user).Error)
 	require.NoError(t, app.DB.Model(user).Update("is_active", false).Error)
 
 	nonce := "disabled-user-nonce"
 	state := handlers.SSOState{
-		OrgID: org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: ssoBindingFixture(t, app, org.ID),
+		OrgID:         org.ID.String(), Provider: "custom", Nonce: nonce, ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	stored, _ := json.Marshal(state)
 	require.NoError(t, app.Redis.Set(context.Background(), "sso:state:"+nonce, stored, 5*time.Minute).Err())
@@ -641,4 +664,13 @@ func TestApp_CallbackSSO_DisabledExistingUserRejected(t *testing.T) {
 	assert.Contains(t, loc, "Account+is+disabled")
 	// No cookies set when account is disabled.
 	assert.Empty(t, testutil.GetResponseCookie(req, "whm_access"))
+}
+
+func ssoBindingFixture(t *testing.T, app *handlers.App, orgID uuid.UUID) string {
+	t.Helper()
+	var config models.SSOProvider
+	if app.DB.Where("organization_id = ? AND provider = ?", orgID, "custom").First(&config).Error != nil {
+		return ""
+	}
+	return handlers.SSOProviderBinding(&config)
 }

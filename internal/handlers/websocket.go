@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"time"
+
 	"github.com/fasthttp/websocket"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -36,8 +39,22 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 	// Upgrade to WebSocket immediately (unauthenticated)
 	up := a.wsUpgrader()
 	err := up.Upgrade(r.RequestCtx, func(conn *websocket.Conn) {
+		done := make(chan struct{})
+		defer close(done)
+		authenticate := a.validateWSTokenFn()
+		validate := func(encoded string) (uuid.UUID, uuid.UUID, error) {
+			userID, orgID, err := authenticate(encoded)
+			if err == nil {
+				claims, parseErr := middleware.ParseToken(a.Config.JWT.Secret, encoded, "ws")
+				if parseErr != nil {
+					return uuid.Nil, uuid.Nil, parseErr
+				}
+				go a.watchWSSession(done, claims, 5*time.Second, func() { _ = conn.Close() })
+			}
+			return userID, orgID, err
+		}
 		// Create unauthenticated client — auth happens via first message
-		client := ws.NewUnauthenticatedClient(a.WSHub, conn, a.validateWSTokenFn())
+		client := ws.NewUnauthenticatedClient(a.WSHub, conn, validate)
 
 		// Start pumps in goroutines
 		// Client self-registers with hub after successful auth message
@@ -53,20 +70,52 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 	return nil
 }
 
+// Bound access for already established sockets after disable, logout or reset.
+// The short WS ticket expires after authentication; the underlying session is
+// rechecked until the connection closes, independently of that ticket's expiry.
+func (a *App) watchWSSession(done <-chan struct{}, claims *middleware.JWTClaims, interval time.Duration, closeConnection func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := middleware.ValidateSession(ctx, a.Redis, claims)
+			if err == nil {
+				_, err = middleware.CurrentIdentity(a.DB.WithContext(ctx), claims)
+			}
+			cancel()
+			if err != nil {
+				closeConnection()
+				return
+			}
+		}
+	}
+}
+
 // validateWSTokenFn returns a function that validates a JWT token
 // and returns user ID and organization ID.
 func (a *App) validateWSTokenFn() ws.AuthenticateFn {
 	return func(tokenString string) (uuid.UUID, uuid.UUID, error) {
-		token, err := jwt.ParseWithClaims(tokenString, &middleware.JWTClaims{}, func(token *jwt.Token) (any, error) {
-			return []byte(a.Config.JWT.Secret), nil
-		})
-
-		if err != nil || !token.Valid {
+		claims, err := middleware.ParseToken(a.Config.JWT.Secret, tokenString, "ws")
+		if err != nil {
 			return uuid.Nil, uuid.Nil, err
 		}
-
-		claims, ok := token.Claims.(*middleware.JWTClaims)
-		if !ok {
+		if claims.ID == "" {
+			return uuid.Nil, uuid.Nil, jwt.ErrTokenInvalidClaims
+		}
+		if _, err := middleware.CurrentIdentity(a.DB, claims); err != nil {
+			return uuid.Nil, uuid.Nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
+			return uuid.Nil, uuid.Nil, err
+		}
+		owner, err := a.Redis.GetDel(ctx, "auth:ws:"+claims.ID).Result()
+		if err != nil || owner != claims.UserID.String() {
 			return uuid.Nil, uuid.Nil, jwt.ErrTokenInvalidClaims
 		}
 

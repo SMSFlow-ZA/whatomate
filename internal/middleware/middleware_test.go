@@ -32,6 +32,7 @@ func generateTestToken(t *testing.T, userID, orgID uuid.UUID, email string, role
 		Email:          email,
 		RoleID:         roleID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: "whatomate", Subject: "access", Audience: jwt.ClaimStrings{"whatomate:access"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -484,9 +485,9 @@ func TestJWTClaims(t *testing.T) {
 		Email:          "test@example.com",
 		RoleID:         &roleID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: "whatomate", Subject: "access", Audience: jwt.ClaimStrings{"whatomate:access"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Subject:   userID.String(),
 		},
 	}
 
@@ -563,6 +564,7 @@ func generateTokenWithSecret(t *testing.T, secret string) string {
 		Email:          "test@example.com",
 		RoleID:         &roleID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: "whatomate", Subject: "access", Audience: jwt.ClaimStrings{"whatomate:access"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},

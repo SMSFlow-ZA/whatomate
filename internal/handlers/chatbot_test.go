@@ -99,6 +99,9 @@ func TestApp_GetChatbotSettings(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
+
+		authorizeAdminFixture(t, app, req)
 		err := app.GetChatbotSettings(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -172,6 +175,7 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(getReq))
@@ -1047,6 +1051,9 @@ func TestApp_GetChatbotSettings_ExistingSettings(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
+
+		authorizeAdminFixture(t, app, req)
 		err := app.GetChatbotSettings(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -1081,6 +1088,9 @@ func TestApp_GetChatbotSettings_ExistingSettings(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
+		authorizeAdminFixture(t, app, req)
+
+		authorizeAdminFixture(t, app, req)
 		err := app.GetChatbotSettings(req)
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -1133,6 +1143,7 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 		// Verify: greeting changed, other fields preserved
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 
@@ -1169,6 +1180,7 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 		// Read back
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 
@@ -1203,6 +1215,7 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 
@@ -1239,6 +1252,7 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 
@@ -1279,6 +1293,7 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 
 		getReq := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(getReq, org.ID, user.ID)
+		authorizeAdminFixture(t, app, getReq)
 		err = app.GetChatbotSettings(getReq)
 		require.NoError(t, err)
 

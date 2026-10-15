@@ -49,6 +49,7 @@ func TestApp_ListWebhooks_Success(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.ListWebhooks(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -81,6 +82,7 @@ func TestApp_ListWebhooks_Empty(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.ListWebhooks(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -111,6 +113,7 @@ func TestApp_ListWebhooks_OrgIsolation(t *testing.T) {
 	// org1 should see 2
 	req1 := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req1, org1.ID, user1.ID)
+	authorizeAdminFixture(t, app, req1)
 	err := app.ListWebhooks(req1)
 	require.NoError(t, err)
 
@@ -126,6 +129,7 @@ func TestApp_ListWebhooks_OrgIsolation(t *testing.T) {
 	// org2 should see 1
 	req2 := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req2, org2.ID, user2.ID)
+	authorizeAdminFixture(t, app, req2)
 	err = app.ListWebhooks(req2)
 	require.NoError(t, err)
 
@@ -166,6 +170,7 @@ func TestApp_GetWebhook_Success(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -195,6 +200,7 @@ func TestApp_GetWebhook_NotFound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -211,6 +217,7 @@ func TestApp_GetWebhook_InvalidID(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", "not-a-uuid")
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -231,6 +238,7 @@ func TestApp_GetWebhook_CrossOrgIsolation(t *testing.T) {
 	testutil.SetAuthContext(req, org2.ID, user2.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -255,6 +263,7 @@ func TestApp_CreateWebhook_Success(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -293,6 +302,7 @@ func TestApp_CreateWebhook_MissingName(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -311,6 +321,7 @@ func TestApp_CreateWebhook_MissingURL(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -329,6 +340,7 @@ func TestApp_CreateWebhook_MissingEvents(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -348,6 +360,7 @@ func TestApp_CreateWebhook_EmptyEvents(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -390,6 +403,7 @@ func TestApp_UpdateWebhook_Success(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -429,6 +443,7 @@ func TestApp_UpdateWebhook_PartialUpdate(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -458,6 +473,7 @@ func TestApp_UpdateWebhook_NotFound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -477,6 +493,7 @@ func TestApp_UpdateWebhook_InvalidID(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", "not-a-uuid")
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -496,6 +513,7 @@ func TestApp_DeleteWebhook_Success(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -526,6 +544,7 @@ func TestApp_DeleteWebhook_NotFound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -542,6 +561,7 @@ func TestApp_DeleteWebhook_InvalidID(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", "not-a-uuid")
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -562,6 +582,7 @@ func TestApp_DeleteWebhook_CrossOrgIsolation(t *testing.T) {
 	testutil.SetAuthContext(req, org2.ID, user2.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -598,6 +619,7 @@ func TestApp_TestWebhook_Success(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.TestWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -647,6 +669,7 @@ func TestApp_TestWebhook_ServerError(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.TestWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadGateway, testutil.GetResponseStatusCode(req))
@@ -663,6 +686,7 @@ func TestApp_TestWebhook_NotFound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.TestWebhook(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -697,6 +721,7 @@ func TestWebhookToResponse_HasSecretTrue(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 
@@ -732,6 +757,7 @@ func TestWebhookToResponse_HasSecretFalse(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", wh.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetWebhook(req)
 	require.NoError(t, err)
 

@@ -117,7 +117,8 @@ type User struct {
 	IsSuperAdmin   bool       `gorm:"default:false" json:"is_super_admin"` // Super admin can access all organizations
 
 	// SSO fields
-	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"`     // google, microsoft, github, facebook, custom
+	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"` // google, microsoft, github, facebook, custom
+	SSOBinding    string `gorm:"size:64" json:"-"`
 	SSOProviderID string `gorm:"size:255" json:"sso_provider_id,omitempty"` // External user ID from provider
 
 	// Relations

@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +24,7 @@ import (
 	"golang.org/x/oauth2/github"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/microsoft"
+	"gorm.io/gorm"
 )
 
 // OAuth provider configurations (endpoints are hardcoded, only need client credentials)
@@ -54,10 +57,11 @@ var oauthProviders = map[string]struct {
 
 // SSOState represents the state stored in Redis during OAuth flow
 type SSOState struct {
-	OrgID     string    `json:"org_id"`
-	Provider  string    `json:"provider"`
-	Nonce     string    `json:"nonce"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ConfigBinding string    `json:"config_binding"`
+	OrgID         string    `json:"org_id"`
+	Provider      string    `json:"provider"`
+	Nonce         string    `json:"nonce"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // SSOProviderPublic represents public SSO provider info (no secrets)
@@ -82,16 +86,17 @@ type SSOProviderRequest struct {
 
 // SSOProviderResponse represents SSO provider config response (masked secret)
 type SSOProviderResponse struct {
-	Provider        string `json:"provider"`
-	ClientID        string `json:"client_id"`
-	HasSecret       bool   `json:"has_secret"`
-	IsEnabled       bool   `json:"is_enabled"`
-	AllowAutoCreate bool   `json:"allow_auto_create"`
-	DefaultRole     string `json:"default_role"`
-	AllowedDomains  string `json:"allowed_domains"`
-	AuthURL         string `json:"auth_url,omitempty"`
-	TokenURL        string `json:"token_url,omitempty"`
-	UserInfoURL     string `json:"user_info_url,omitempty"`
+	ID              uuid.UUID `json:"id"`
+	Provider        string    `json:"provider"`
+	ClientID        string    `json:"client_id"`
+	HasSecret       bool      `json:"has_secret"`
+	IsEnabled       bool      `json:"is_enabled"`
+	AllowAutoCreate bool      `json:"allow_auto_create"`
+	DefaultRole     string    `json:"default_role"`
+	AllowedDomains  string    `json:"allowed_domains"`
+	AuthURL         string    `json:"auth_url,omitempty"`
+	TokenURL        string    `json:"token_url,omitempty"`
+	UserInfoURL     string    `json:"user_info_url,omitempty"`
 }
 
 // providerDisplayNames maps provider keys to display names
@@ -153,10 +158,11 @@ func (a *App) InitSSO(r *fastglue.Request) error {
 	// Generate state token
 	nonce := generateRandomString(32)
 	state := SSOState{
-		OrgID:     ssoConfig.OrganizationID.String(),
-		Provider:  provider,
-		Nonce:     nonce,
-		ExpiresAt: time.Now().Add(5 * time.Minute),
+		ConfigBinding: SSOProviderBinding(&ssoConfig),
+		OrgID:         ssoConfig.OrganizationID.String(),
+		Provider:      provider,
+		Nonce:         nonce,
+		ExpiresAt:     time.Now().Add(5 * time.Minute),
 	}
 
 	stateJSON, _ := json.Marshal(state)
@@ -205,14 +211,11 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	redisCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	stateKey := "sso:state:" + stateNonce
-	stateJSON, err := a.Redis.Get(redisCtx, stateKey).Bytes()
+	stateJSON, err := a.Redis.GetDel(redisCtx, stateKey).Bytes()
 	if err != nil {
 		a.redirectWithError(r, "Invalid or expired state")
 		return nil
 	}
-
-	// Delete state immediately to prevent replay
-	a.Redis.Del(redisCtx, stateKey)
 
 	var state SSOState
 	if err := json.Unmarshal(stateJSON, &state); err != nil {
@@ -221,7 +224,7 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	}
 
 	// Validate state
-	if state.Provider != provider || time.Now().After(state.ExpiresAt) {
+	if state.Provider != provider || state.Nonce != stateNonce || time.Now().After(state.ExpiresAt) {
 		a.redirectWithError(r, "Invalid or expired state")
 		return nil
 	}
@@ -235,11 +238,15 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 
 	// Get SSO provider config
 	var ssoConfig models.SSOProvider
-	if err := a.DB.Where("organization_id = ? AND provider = ?", orgID, provider).First(&ssoConfig).Error; err != nil {
+	if err := a.DB.Where("organization_id = ? AND provider = ? AND is_enabled = ?", orgID, provider, true).First(&ssoConfig).Error; err != nil {
 		a.redirectWithError(r, "SSO provider not configured")
 		return nil
 	}
 
+	if state.ConfigBinding == "" || state.ConfigBinding != SSOProviderBinding(&ssoConfig) {
+		a.redirectWithError(r, "SSO configuration changed. Please sign in again.")
+		return nil
+	}
 	// Build OAuth config and exchange code for token
 	oauthConfig := a.buildOAuthConfig(provider, &ssoConfig, r)
 	token, err := oauthConfig.Exchange(context.Background(), code)
@@ -286,6 +293,10 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	}
 	var user models.User
 	if err := a.DB.Where("email = ?", userInfo.Email).First(&user).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			a.redirectWithError(r, "Identity storage unavailable")
+			return nil
+		}
 		// User doesn't exist - check if auto-create is enabled
 		if !ssoConfig.AllowAutoCreate {
 			a.redirectWithError(r, "User not found. Contact your administrator.")
@@ -315,6 +326,7 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 			IsAvailable:    true,
 			SSOProvider:    provider,
 			SSOProviderID:  userInfo.ID,
+			SSOBinding:     SSOProviderBinding(&ssoConfig),
 		}
 
 		if err := a.DB.Create(&user).Error; err != nil {
@@ -340,18 +352,10 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 
 		a.Log.Info("Created SSO user", "user_id", user.ID, "email", user.Email, "provider", provider)
 	} else {
-		// User exists - update SSO info if not set
-		if user.SSOProvider == "" {
-			user.SSOProvider = provider
-			user.SSOProviderID = userInfo.ID
-			if err := a.DB.Save(&user).Error; err != nil {
-				if handled, responseErr := a.sendPlanError(r, err); handled {
-					return responseErr
-				}
-				a.Log.Error("Failed to update SSO identity", "error", err)
-				a.redirectWithError(r, "Failed to complete authentication")
-				return nil
-			}
+		// Linking an existing account requires explicit administrator setup.
+		if user.OrganizationID != orgID || user.SSOProvider != provider || user.SSOProviderID != userInfo.ID || user.SSOBinding == "" || user.SSOBinding != SSOProviderBinding(&ssoConfig) {
+			a.redirectWithError(r, "SSO identity is not linked. Contact your administrator.")
+			return nil
 		}
 
 		// Check if user is active
@@ -369,7 +373,7 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 		return nil
 	}
 
-	refreshToken, err := a.generateRefreshToken(&user)
+	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
 		a.Log.Error("Failed to generate refresh token", "error", err)
 		a.redirectWithError(r, "Failed to complete authentication")
@@ -389,6 +393,9 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 
 // GetSSOSettings returns all SSO provider configs for the organization (admin only)
 func (a *App) GetSSOSettings(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionRead); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -404,6 +411,7 @@ func (a *App) GetSSOSettings(r *fastglue.Request) error {
 	result := make([]SSOProviderResponse, 0, len(providers))
 	for _, p := range providers {
 		result = append(result, SSOProviderResponse{
+			ID:              p.ID,
 			Provider:        p.Provider,
 			ClientID:        p.ClientID,
 			HasSecret:       p.ClientSecret != "",
@@ -422,6 +430,9 @@ func (a *App) GetSSOSettings(r *fastglue.Request) error {
 
 // UpdateSSOProvider creates or updates an SSO provider config (admin only)
 func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -493,6 +504,7 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 	}
 
 	return r.SendEnvelope(SSOProviderResponse{
+		ID:              ssoConfig.ID,
 		Provider:        ssoConfig.Provider,
 		ClientID:        ssoConfig.ClientID,
 		HasSecret:       ssoConfig.ClientSecret != "",
@@ -511,6 +523,9 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 // doesn't ignore deleted_at — a soft-deleted row would block re-creating the
 // same provider until the row is purged.
 func (a *App) DeleteSSOProvider(r *fastglue.Request) error {
+	if _, _, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite); err != nil {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -636,7 +651,9 @@ func (a *App) fetchUserInfo(provider string, ssoConfig *models.SSOProvider, toke
 		}
 		userInfo.Name = getString(rawData, "displayName")
 	case "github":
-		userInfo.ID = fmt.Sprintf("%v", rawData["id"])
+		if id := rawData["id"]; id != nil {
+			userInfo.ID = fmt.Sprintf("%v", id)
+		}
 		userInfo.Email = getString(rawData, "email")
 		userInfo.Name = getString(rawData, "name")
 		if userInfo.Name == "" {
@@ -665,8 +682,8 @@ func (a *App) fetchUserInfo(provider string, ssoConfig *models.SSOProvider, toke
 		}
 	}
 
-	if userInfo.Email == "" {
-		return nil, fmt.Errorf("email not provided by SSO provider")
+	if strings.TrimSpace(userInfo.ID) == "" || userInfo.Email == "" {
+		return nil, fmt.Errorf("identity or email not provided by SSO provider")
 	}
 
 	return &userInfo, nil
@@ -755,4 +772,11 @@ func getString(data map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+// SSOProviderBinding pins identities to the saved organization and configuration.
+// Changing credentials or endpoints requires explicit administrator re-linking.
+func SSOProviderBinding(provider *models.SSOProvider) string {
+	encoded, _ := json.Marshal([]string{provider.ID.String(), provider.OrganizationID.String(), provider.Provider, provider.ClientID, provider.ClientSecret, provider.AuthURL, provider.TokenURL, provider.UserInfoURL})
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }

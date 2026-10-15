@@ -104,9 +104,13 @@ type AIContextResponse struct {
 
 // GetChatbotSettings returns chatbot settings and stats
 func (a *App) GetChatbotSettings(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	fullSettings := a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionRead, orgID)
+	if !fullSettings && !(a.HasPermission(userID, models.ResourceTransfers, models.ActionRead, orgID) || a.HasPermission(userID, models.ResourceTransfers, models.ActionPickup, orgID)) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
 	// Get or create default settings
@@ -119,7 +123,11 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 			DefaultResponse:    "Hello! How can I help you today?",
 			SessionTimeoutMins: 30,
 			AI:                 models.AIConfig{Enabled: false},
+			AgentAssignment:    models.AgentAssignmentConfig{AllowQueuePickup: true},
 		}
+	}
+	if !fullSettings {
+		return r.SendEnvelope(map[string]any{"settings": map[string]bool{"allow_agent_queue_pickup": settings.AgentAssignment.AllowQueuePickup}})
 	}
 
 	// Gather stats

@@ -29,6 +29,7 @@ func TestApp_ListRoles_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.ListRoles(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -65,6 +66,7 @@ func TestApp_GetRole_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", role.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -92,6 +94,7 @@ func TestApp_GetRole_NotFound(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.GetRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -114,6 +117,7 @@ func TestApp_CreateRole_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -158,6 +162,7 @@ func TestApp_CreateRole_DuplicateName(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
@@ -178,6 +183,7 @@ func TestApp_CreateRole_MissingName(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -203,6 +209,7 @@ func TestApp_CreateRole_WithDefaultFlag(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.CreateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -232,6 +239,7 @@ func TestApp_UpdateRole_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", role.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -268,6 +276,7 @@ func TestApp_UpdateRole_SystemRoleOnlyDescription(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", systemRole.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -300,6 +309,7 @@ func TestApp_UpdateRole_NotFound(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", uuid.New().String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.UpdateRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
@@ -318,6 +328,7 @@ func TestApp_DeleteRole_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", role.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -341,6 +352,7 @@ func TestApp_DeleteRole_SystemRole(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", systemRole.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -365,6 +377,7 @@ func TestApp_DeleteRole_WithAssignedUsers(t *testing.T) {
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 	req.RequestCtx.SetUserValue("id", role.ID.String())
 
+	authorizeAdminFixture(t, app, req)
 	err := app.DeleteRole(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
@@ -380,6 +393,7 @@ func TestApp_ListPermissions_Success(t *testing.T) {
 	req.RequestCtx.SetUserValue("user_id", user.ID)
 	req.RequestCtx.SetUserValue("organization_id", org.ID)
 
+	authorizeAdminFixture(t, app, req)
 	err := app.ListPermissions(req)
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))

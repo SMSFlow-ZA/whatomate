@@ -21,6 +21,10 @@ const (
 	// Maximum message size allowed from peer
 	maxMessageSize = 512
 
+	// Session-bound JWTs include revocation state and exceed the ordinary
+	// application-message limit. Only the first authentication frame uses this.
+	maxAuthMessageSize = 4096
+
 	// Time allowed to authenticate after connection
 	authTimeout = 5 * time.Second
 )
@@ -96,6 +100,7 @@ func (c *Client) ReadPump() {
 
 	// If not yet authenticated, enforce auth timeout for the first message
 	if !c.authenticated {
+		c.conn.SetReadLimit(maxAuthMessageSize)
 		_ = c.conn.SetReadDeadline(time.Now().Add(authTimeout))
 
 		_, message, err := c.conn.ReadMessage()
@@ -110,6 +115,7 @@ func (c *Client) ReadPump() {
 			return
 		}
 	}
+	c.conn.SetReadLimit(maxMessageSize)
 
 	// Normal read loop (authenticated)
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))

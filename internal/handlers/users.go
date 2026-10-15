@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"net/mail"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -15,11 +17,13 @@ import (
 // Note: is_super_admin is intentionally excluded to prevent mass assignment.
 // Super admin status changes are handled via parseSuperAdminField.
 type UserRequest struct {
-	Email    string     `json:"email"`
-	Password string     `json:"password"`
-	FullName string     `json:"full_name"`
-	RoleID   *uuid.UUID `json:"role_id"`
-	IsActive *bool      `json:"is_active"`
+	SSOConfigID *uuid.UUID `json:"sso_config_id"`
+	SSOSubject  string     `json:"sso_subject"`
+	Email       string     `json:"email"`
+	Password    string     `json:"password"`
+	FullName    string     `json:"full_name"`
+	RoleID      *uuid.UUID `json:"role_id"`
+	IsActive    *bool      `json:"is_active"`
 }
 
 // superAdminField is used to extract is_super_admin separately from the request body.
@@ -445,6 +449,9 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	if req.RoleID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to change roles", nil, "")
 	}
+	if req.SSOConfigID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to link SSO identities", nil, "")
+	}
 
 	// For cross-org members, only allow role updates
 	if isMember {
@@ -500,6 +507,29 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		user.PasswordHash = string(hashedPassword)
 	}
 
+	if req.SSOConfigID != nil {
+		if *req.SSOConfigID == uuid.Nil {
+			user.SSOProvider = ""
+			user.SSOProviderID = ""
+			user.SSOBinding = ""
+		} else {
+			var provider models.SSOProvider
+			if req.SSOSubject == "" || a.DB.Where("id = ? AND organization_id = ? AND is_enabled = ?", *req.SSOConfigID, orgID, true).First(&provider).Error != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Enabled SSO configuration and external subject are required", nil, "")
+			}
+			user.SSOProvider = provider.Provider
+			user.SSOProviderID = req.SSOSubject
+			user.SSOBinding = SSOProviderBinding(&provider)
+		}
+	}
+	// Revoke before applying security changes; storage failure must fail closed.
+	if req.Password != "" || req.IsActive != nil || req.SSOConfigID != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
+		}
+	}
 	// Handle role update
 	roleChanged := false
 	if req.RoleID != nil {
@@ -547,7 +577,10 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
 	}
 
-	// Invalidate permissions cache if role changed
+	// Invalidate cached account and permission state after security changes.
+	if req.IsActive != nil || req.SSOConfigID != nil {
+		a.InvalidateUserPermissionsCache(user.ID)
+	}
 	if roleChanged {
 		// Sync role change to UserOrganization for this org
 		a.DB.Model(&models.UserOrganization{}).
@@ -821,6 +854,11 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change password", nil, "")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
+	}
 	user.PasswordHash = string(hashedPassword)
 	if err := a.DB.Save(&user).Error; err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
