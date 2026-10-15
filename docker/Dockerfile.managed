@@ -1,5 +1,7 @@
-# Derive only the application binary; retain the exact tested upstream runtime.
-ARG RUNTIME_IMAGE=shridh0r/whatomate@sha256:8091fd13661bc51d5e14e7fbf25a4792e781b85e10b715172bf22aa87ed1e669
+# Preserve upstream Piper assets while using a supported, patched OS/audio runtime.
+ARG PIPER_ASSETS_IMAGE=shridh0r/whatomate@sha256:8091fd13661bc51d5e14e7fbf25a4792e781b85e10b715172bf22aa87ed1e669
+FROM ${PIPER_ASSETS_IMAGE} AS piper-assets
+
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -7,7 +9,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -19,7 +21,60 @@ ARG VCS_REF
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags "-X main.Version=0.1.1-beta-0.17-managed-${VCS_REF} -X main.SourceRevision=${VCS_REF}" -o /whatomate ./cmd/whatomate
 
-FROM ${RUNTIME_IMAGE}
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS media-builder
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl gnupg nasm pkg-config libopus-dev zlib1g-dev xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+RUN curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz \
+    && echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmpeg-9.0.2.tar.xz" | sha256sum -c - \
+    && curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc \
+    && curl -fsSLO https://ffmpeg.org/ffmpeg-devel.asc \
+    && gpg --batch --import ffmpeg-devel.asc \
+    && gpg --batch --status-fd=1 --verify ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > signature-status.txt \
+    && grep -q 'VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8 ' signature-status.txt \
+    && tar -xf ffmpeg-9.0.2.tar.xz
+WORKDIR /build/ffmpeg-9.0.2
+# Keep the application audio formats and mixing filters; omit unrelated parsers.
+RUN ./configure --prefix=/opt/whatomate-media \
+        --disable-everything --disable-autodetect --disable-network --disable-avdevice --disable-swscale --disable-doc --disable-debug \
+        --enable-ffmpeg --enable-ffprobe --enable-static --disable-shared --enable-libopus --enable-zlib \
+        --enable-protocol=file,pipe \
+        --enable-demuxer=ogg,mp3,aac,mov,wav,matroska,flac \
+        --enable-decoder=aac,aac_fixed,aac_latm,alac,flac,mp3,mp3float,mp3adu,mp3adufloat,mp3on4,mp3on4float,opus,vorbis,pcm_alaw,pcm_mulaw,pcm_s8,pcm_u8,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_f64be,adpcm_ima_wav,adpcm_ms \
+        --enable-parser=aac,aac_latm,flac,mpegaudio,opus,vorbis \
+        --enable-encoder=libopus,pcm_s16le \
+        --enable-muxer=ogg,wav \
+        --enable-filter=aresample,aformat,anull,abuffer,abuffersink,amix,loudnorm,volume \
+    && make -j2 \
+    && make install \
+    && mkdir -p /opt/whatomate-media/share/source \
+    && cp /build/ffmpeg-9.0.2.tar.xz /build/ffmpeg-9.0.2.tar.xz.asc /build/ffmpeg-devel.asc \
+        /build/signature-status.txt COPYING* LICENSE.md ffbuild/config.log ffbuild/config.mak \
+        /opt/whatomate-media/share/source/ \
+    && printf '%s\n' 'https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz' \
+        'sha256:8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e' \
+        > /opt/whatomate-media/share/source/manifest.txt
+
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates tzdata espeak-ng opus-tools libstdc++6 libopus0 zlib1g \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=piper-assets /usr/local/bin/piper /usr/local/bin/piper
+COPY --from=piper-assets /usr/local/lib/ /usr/local/lib/
+COPY --from=piper-assets /opt/piper/ /opt/piper/
+COPY --from=piper-assets /usr/share/espeak-ng-data/ /usr/share/espeak-ng-data/
+COPY --from=media-builder /opt/whatomate-media/bin/ /usr/local/bin/
+COPY --from=media-builder /opt/whatomate-media/share/source/ /usr/share/doc/whatomate-media/
+RUN ldconfig \
+    && mkdir -p /app/uploads /app/audio \
+    && chown -R 10001:10001 /app/uploads /app/audio
+WORKDIR /app
+EXPOSE 8080
 ARG VCS_REF
 LABEL org.opencontainers.image.source="https://github.com/SMSFlow-ZA/whatomate" \
       org.opencontainers.image.revision="${VCS_REF}" \

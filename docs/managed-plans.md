@@ -63,9 +63,16 @@ that published commit:
 docker build -f docker/Dockerfile.managed --build-arg VCS_REF="$(git rev-parse HEAD)" -t whatomate-managed .
 ```
 
-The managed Dockerfile retains the pinned upstream runtime and replaces the
-application binary and embedded frontend. Production deployments should pin the
-derived image digest and the same public source revision. Before deployment run
+The managed Dockerfile uses a pinned Debian 13 runtime with supported package
+updates, and builds the application binary and embedded frontend using the
+pinned Go security release. Piper and its voice model are retained from the pinned
+upstream image; verified FFmpeg source is built for application audio formats and
+Opus tools come from Debian 13. The final image runs as
+user/group `10001:10001`. Rebuild with
+`--no-cache` when refreshing distribution security updates. Production deployments
+should pin the derived image digest and the same public source revision. See
+[dependency and runtime security](dependency-security.md) for scan scope and
+remaining distribution risk. Before deployment run
 `go test -p 1 ./...` with disposable PostgreSQL and Redis, plus frontend type
 checks, unit tests and production build. Upstream packages share a test database
 and must run serially; quota tests themselves exercise concurrent requests.
