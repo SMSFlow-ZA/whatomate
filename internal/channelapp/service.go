@@ -512,7 +512,7 @@ func (s *Service) PollConnection(ctx context.Context, id uuid.UUID) error {
 				return err
 			}
 			if event.Kind == "status" {
-				if attempt.Status != "delivered" && !(attempt.Status == "failed" && event.Status == "submitted") && (event.Status == "submitted" || event.Status == "delivered" || event.Status == "failed") {
+				if attempt.Status != "delivered" && (attempt.Status != "failed" || event.Status != "submitted") && (event.Status == "submitted" || event.Status == "delivered" || event.Status == "failed") {
 					if err = tx.Model(&attempt).Updates(map[string]any{"status": event.Status, "provider_message_id": event.ProviderMessageID, "error_code": event.Code}).Error; err != nil {
 						return err
 					}
@@ -608,7 +608,7 @@ func (s *Service) ReconcileUnknown(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
-		if result.ClientMessageID != attempt.ID.String() || !(result.Status == "submitted" || result.Status == "delivered" || result.Status == "failed") {
+		if result.ClientMessageID != attempt.ID.String() || (result.Status != "submitted" && result.Status != "delivered" && result.Status != "failed") {
 			continue
 		}
 		if err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

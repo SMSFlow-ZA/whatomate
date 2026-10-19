@@ -632,22 +632,6 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 	return nil
 }
 
-// sendAndSaveCTAURLButton sends a CTA URL button message and saves it to the database
-// Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveCTAURLButton(account *models.WhatsAppAccount, contact *models.Contact, bodyText, buttonText, url string) error {
-	ctx := context.Background()
-	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
-		Account:         account,
-		Contact:         contact,
-		Type:            models.MessageTypeInteractive,
-		InteractiveType: "cta_url",
-		BodyText:        bodyText,
-		ButtonText:      buttonText,
-		URL:             url,
-	}, ChatbotSendOptions())
-	return err
-}
-
 // sendAndSaveFlowMessage sends a WhatsApp Flow message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
 func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) error {

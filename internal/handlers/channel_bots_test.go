@@ -50,7 +50,7 @@ func TestWhatsAppBotSMSActionsReuseStableInputAndNodeIdentifiers(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				sends.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"messages":[{"id":"wamid.bot"}]}`))
+				_, _ = w.Write([]byte(`{"messages":[{"id":"wamid.bot"}]}`))
 			}))
 			defer server.Close()
 			app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, server.URL)
@@ -89,7 +89,7 @@ func TestWhatsAppBotButtonsFallbackIsAuthoredAndReplaySafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sends.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"messages":[{"id":"wamid.rich"}]}`))
+		_, _ = w.Write([]byte(`{"messages":[{"id":"wamid.rich"}]}`))
 	}))
 	defer server.Close()
 	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, server.URL)

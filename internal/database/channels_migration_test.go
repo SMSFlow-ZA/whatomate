@@ -21,7 +21,7 @@ func TestChannelMigrationCreatesFreshDatabaseAndReapplies(t *testing.T) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	defer pool.Close()
+	defer func() { require.NoError(t, pool.Close()) }()
 	tx := db.Begin()
 	require.NoError(t, tx.Error)
 	defer tx.Rollback()
