@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import type { ChannelSendFields, DeliveryAttempt } from '@/lib/channels'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -48,6 +49,9 @@ export interface Reaction {
 }
 
 export interface Message {
+	channel?: 'whatsapp' | 'sms'
+	channel_connection_id?: string
+	delivery_attempts?: DeliveryAttempt[]
   id: string
   contact_id: string
   direction: 'incoming' | 'outgoing'
@@ -236,7 +240,7 @@ export const useContactsStore = defineStore('contacts', () => {
     content: any,
     replyToMessageId?: string,
     whatsappAccount?: string,
-    extra?: { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
+    extra?: ChannelSendFields & { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
   ) {
     try {
       const response = await messagesService.send(contactId, {
@@ -244,7 +248,7 @@ export const useContactsStore = defineStore('contacts', () => {
         content,
         reply_to_message_id: replyToMessageId,
         whatsapp_account: whatsappAccount,
-        ...(extra?.interactive ? { interactive: extra.interactive } : {}),
+        ...extra,
       })
       // API returns { status: "success", data: { ... } }
       const newMessage = response.data.data || response.data
@@ -265,10 +269,12 @@ export const useContactsStore = defineStore('contacts', () => {
     accountName?: string,
     headerFile?: File,
     buttonParams?: Record<string, string>,
-    headerParams?: Record<string, string>
+    headerParams?: Record<string, string>,
+    channel?: ChannelSendFields
   ) {
     try {
       const response = await messagesService.sendTemplate(contactId, {
+        ...channel,
         template_name: templateName,
         template_params: templateParams,
         header_params: headerParams,
@@ -295,7 +301,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
   // Reflect a new message on its sidebar row. Returns false when the contact
   // isn't in the loaded list (a new conversation, or beyond the loaded pages).
-  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at'>): boolean {
+  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'channel'>): boolean {
     const contact = contacts.value.find(c => c.id === message.contact_id)
     if (!contact) return false
     contact.last_message_at = message.created_at
@@ -303,8 +309,10 @@ export const useContactsStore = defineStore('contacts', () => {
       // Mirrors the server's unread count, which excludes already-read
       // messages (e.g. ones the chatbot handled).
       if (message.status !== 'read') contact.unread_count++
-      contact.last_inbound_at = message.created_at
-      contact.service_window_open = true
+      if (message.channel !== 'sms') {
+        contact.last_inbound_at = message.created_at
+        contact.service_window_open = true
+      }
     }
     return true
   }
@@ -326,10 +334,12 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   function addMessage(message: Message) {
+    const existing = messages.value.findIndex(m => m.id === message.id)
+    if (existing !== -1) { messages.value[existing] = { ...messages.value[existing], ...message }; return }
     // Update contact metadata regardless of account filter
     updateContactFromMessage(message)
     // Also update currentContact if it matches
-    if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming') {
+    if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming' && message.channel !== 'sms') {
       currentContact.value.last_inbound_at = message.created_at
       currentContact.value.service_window_open = true
     }
@@ -346,12 +356,13 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
+  function updateMessageStatus(messageId: string, status: string, errorMessage?: string, deliveryAttempts?: DeliveryAttempt[]) {
     const index = messages.value.findIndex(m => m.id === messageId)
     if (index !== -1) {
       messages.value[index] = {
         ...messages.value[index],
         status,
+        ...(deliveryAttempts ? { delivery_attempts: deliveryAttempts } : {}),
         ...(errorMessage ? { error_message: errorMessage } : {})
       }
     }

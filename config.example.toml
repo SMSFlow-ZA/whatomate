@@ -141,3 +141,10 @@ udp_port_max = 10100          # WebRTC UDP port range end
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+
+# Compiled channel providers; no new sidecars are required.
+[channels]
+# Emergency/restore hold stops new SMS and SMS bot dispatch; receipts continue.
+stop_dispatch = false
+# Leave unset for SMSFlow's standard endpoint. Trusted host configuration only:
+# smsflow_endpoint = "https://portal.smsflow.co.za"

@@ -307,6 +307,10 @@ class WebSocketService {
       // Add message to the store
       store.addMessage({
         id: payload.id,
+        channel: payload.channel,
+        channel_connection_id: payload.channel_connection_id,
+        delivery_attempts: payload.delivery_attempts,
+        whatsapp_account: payload.whatsapp_account,
         contact_id: payload.contact_id,
         direction: payload.direction,
         message_type: payload.message_type,
@@ -385,7 +389,12 @@ class WebSocketService {
   }
 
   private handleStatusUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
-    store.updateMessageStatus(payload.message_id, payload.status, payload.error_message)
+    if (payload.channel_invalidation) {
+      store.scheduleContactsRefresh()
+      if (store.currentContact) void store.fetchMessages(store.currentContact.id)
+      return
+    }
+    store.updateMessageStatus(payload.message_id, payload.status, payload.error_message, payload.delivery_attempts)
   }
 
   private handleReactionUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {

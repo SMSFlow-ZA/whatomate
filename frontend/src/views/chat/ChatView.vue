@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ChannelOptions from '@/components/shared/ChannelOptions.vue'
+import { channelPayload, initialChannelOptions } from '@/lib/channels'
 import { useI18n } from 'vue-i18n'
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
@@ -217,6 +219,8 @@ const executingActionId = ref<string | null>(null)
 const isTagFilterOpen = ref(false)
 
 // Service window state
+const deliveryOptions = ref(initialChannelOptions())
+watch(() => contactsStore.currentContact?.id, () => { deliveryOptions.value = initialChannelOptions() })
 const isServiceWindowExpired = computed(() => {
   const contact = contactsStore.currentContact
   if (!contact) return false
@@ -609,7 +613,7 @@ async function selectContact(id: string) {
         contactsStore.setAccountFilter(selectedAccount.value)
         // Filter messages client-side instead of re-fetching
         contactsStore.messages = contactsStore.messages.filter(
-          (m: any) => m.whatsapp_account === selectedAccount.value
+          (m: any) => m.channel === 'sms' || m.whatsapp_account === selectedAccount.value
         )
       }
     } else if (contactAccounts.value.length === 1) {
@@ -717,6 +721,7 @@ async function sendMessage() {
       { body: messageInput.value },
       contactsStore.replyingTo?.id,
       selectedAccount.value || undefined
+      ,channelPayload(deliveryOptions.value, false)
     )
     messageInput.value = ''
     contactsStore.clearReplyingTo()
@@ -983,7 +988,7 @@ async function sendCannedResponse() {
       sendType === 'interactive' ? { body } : { body },
       contactsStore.replyingTo?.id,
       selectedAccount.value || undefined,
-      interactive ? { interactive } : undefined,
+      { ...channelPayload(deliveryOptions.value, sendType === 'interactive'), ...(interactive ? { interactive } : {}) },
     )
     cannedResponsesService.use(responseId).catch(() => {})
     contactsStore.clearReplyingTo()
@@ -1137,7 +1142,8 @@ async function sendTemplateMessage() {
       selectedAccount.value || undefined,
       templateHeaderFile.value || undefined,
       buttonParams,
-      headerParams
+      headerParams,
+      channelPayload(deliveryOptions.value, true)
     )
     toast.success(t('chat.templateSent'))
     templateDialogOpen.value = false
@@ -1149,7 +1155,7 @@ async function sendTemplateMessage() {
     clearTemplateHeaderMedia()
     templateButtonUrlParams.value = []
   } catch (error: any) {
-    const message = error.response?.data?.message || t('chat.templateSendFailed')
+    const message = error.response?.data?.message || error.message || t('chat.templateSendFailed')
     toast.error(message)
   } finally {
     isSendingTemplate.value = false
@@ -1659,6 +1665,8 @@ async function sendMediaMessage() {
   isUploadingMedia.value = true
   try {
     const formData = new FormData()
+    const channel = channelPayload(deliveryOptions.value, true)
+    if (channel.sms_fallback) formData.append('sms_fallback',JSON.stringify(channel.sms_fallback))
     formData.append('file', selectedFile.value)
     formData.append('contact_id', contactsStore.currentContact.id)
     formData.append('type', getMediaType(selectedFile.value.type))
@@ -2092,6 +2100,10 @@ async function sendMediaMessage() {
                 ]"
               >
                 <!-- Reply preview (if this message is replying to another) -->
+                <div v-if="message.channel === 'sms' || message.delivery_attempts?.length" class="mb-1 text-xs opacity-75">{{ message.channel === 'sms' ? 'SMS' : 'WhatsApp' }}</div>
+                <div v-for="attempt in message.delivery_attempts?.filter(a => a.is_fallback)" :key="attempt.id" class="mb-2 rounded border p-2 text-xs">
+                  <strong>SMS fallback · {{ attempt.status }}</strong><p v-if="attempt.text">{{ attempt.text }}</p><p v-if="attempt.error_code">{{ attempt.error_code }}</p>
+                </div>
                 <div
                   v-if="message.is_reply && message.reply_to_message"
                   class="reply-preview cursor-pointer text-xs"
@@ -2351,7 +2363,7 @@ async function sendMediaMessage() {
                 </div>
                 <!-- Failed message error (not for template messages) -->
                 <span
-                  v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type !== 'template'"
+                  v-if="message.status === 'failed' && message.channel !== 'sms' && message.direction === 'outgoing' && message.message_type !== 'template'"
                   class="flex items-center gap-1 mt-1 text-xs text-destructive"
                 >
                   <AlertCircle class="h-3 w-3" />
@@ -2359,7 +2371,7 @@ async function sendMediaMessage() {
                 </span>
                 <!-- Failed template message indicator (no retry) -->
                 <span
-                  v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type === 'template'"
+                  v-if="message.status === 'failed' && message.channel !== 'sms' && message.direction === 'outgoing' && message.message_type === 'template'"
                   class="flex items-center gap-1 mt-1 text-xs text-destructive"
                 >
                   <AlertCircle class="h-3 w-3" />
@@ -2426,7 +2438,7 @@ async function sendMediaMessage() {
                   <Reply class="h-3 w-3" />
                 </Button>
                 <Button
-                  v-if="message.status === 'failed' && message.message_type !== 'template'"
+                  v-if="message.status === 'failed' && message.channel !== 'sms' && message.message_type !== 'template'"
                   variant="ghost"
                   size="icon"
                   class="h-6 w-6 text-destructive hover:text-destructive"
@@ -2447,7 +2459,7 @@ async function sendMediaMessage() {
 
         <!-- Service window expired banner -->
         <div
-          v-if="isServiceWindowExpired"
+          v-if="isServiceWindowExpired && deliveryOptions.channel !== 'sms'"
           class="px-4 py-2.5 border-t border-red-500/20 bg-red-500/10 flex items-center gap-2"
         >
           <Clock class="h-4 w-4 text-red-500 shrink-0" />
@@ -2477,6 +2489,7 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
+          <ChannelOptions v-model="deliveryOptions" :text="messageInput" />
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>

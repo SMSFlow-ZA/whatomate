@@ -30,6 +30,12 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Plan         PlanConfig         `koanf:"plan"`
+	Channels     ChannelsConfig     `koanf:"channels"`
+}
+
+type ChannelsConfig struct {
+	StopDispatch    bool   `koanf:"stop_dispatch"`
+	SMSFlowEndpoint string `koanf:"smsflow_endpoint"` // trusted host setting; HTTPS origin only
 }
 
 type TTSConfig struct {

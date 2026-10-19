@@ -2,9 +2,9 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/services/api'
 import { brandPalette, hsl, validateBranding } from '@/utils/branding'
-export interface Branding { display_name: string; accent_color: string; logo_url: string; favicon_url: string; custom: boolean }
+export interface Branding { display_name: string; accent_color: string; logo_url: string; favicon_url: string; custom: boolean; default_display_name?:string; default_logo_url?:string; default_favicon_url?:string }
 const base = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-export const defaultBranding: Branding = { display_name: 'SMSFlow', accent_color: '#00AEEF', logo_url: base + '/branding/smsflow-logo.png', favicon_url: base + '/branding/smsflow-favicon.svg', custom: false }
+export const defaultBranding: Branding = { display_name: 'Whatomate', accent_color: '#25D366', logo_url: base + '/branding/whatomate-logo.svg', favicon_url: base + '/favicon.svg', custom: false }
 export const useBrandingStore = defineStore('branding', () => {
   const current = ref<Branding>({ ...defaultBranding })
   const loadError = ref(false)

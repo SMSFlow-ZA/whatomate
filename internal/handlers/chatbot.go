@@ -78,6 +78,7 @@ type KeywordRuleResponse struct {
 
 // ChatbotFlowResponse represents a chatbot flow for API response
 type ChatbotFlowResponse struct {
+	Channel         string   `json:"channel"`
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
 	Description     string   `json:"description"`
@@ -866,6 +867,7 @@ func (a *App) ListChatbotFlows(r *fastglue.Request) error {
 	response := make([]ChatbotFlowResponse, len(flows))
 	for i, flow := range flows {
 		response[i] = ChatbotFlowResponse{
+			Channel:         flow.Channel,
 			ID:              flow.ID.String(),
 			Name:            flow.Name,
 			Description:     flow.Description,
@@ -890,6 +892,7 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 	}
 
 	var req struct {
+		Channel           string         `json:"channel"`
 		Name              string         `json:"name"`
 		Description       string         `json:"description"`
 		TriggerKeywords   []string       `json:"trigger_keywords"`
@@ -910,7 +913,14 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Name is required", nil, "")
 	}
 
+	if req.Channel == "" {
+		req.Channel = "whatsapp"
+	}
+	if req.Channel != "whatsapp" && req.Channel != "sms" {
+		return r.SendErrorEnvelope(400, "Unsupported flow channel", nil, "")
+	}
 	flow := models.ChatbotFlow{
+		Channel:           req.Channel,
 		BaseModel:         models.BaseModel{ID: uuid.New()},
 		OrganizationID:    orgID,
 		Name:              req.Name,
@@ -927,6 +937,11 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		UpdatedByID:       &userID,
 	}
 
+	if flow.Channel == "sms" && flow.IsEnabled {
+		if err := validateSMSBotGraph(&flow); err != nil {
+			return r.SendErrorEnvelope(422, err.Error(), nil, "")
+		}
+	}
 	if err := a.DB.Create(&flow).Error; err != nil {
 		a.Log.Error("Failed to create flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create flow", nil, "")
@@ -994,6 +1009,7 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 	oldFlow := *flow // value copy for audit
 
 	var req struct {
+		Channel           *string        `json:"channel"`
 		Name              *string        `json:"name"`
 		Description       *string        `json:"description"`
 		TriggerKeywords   []string       `json:"trigger_keywords"`
@@ -1010,6 +1026,9 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
 
+	if req.Channel != nil && *req.Channel != flow.Channel {
+		return r.SendErrorEnvelope(422, "Create a new flow to change its channel", nil, "")
+	}
 	if req.Name != nil {
 		flow.Name = *req.Name
 	}
@@ -1042,6 +1061,11 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 	}
 	flow.UpdatedByID = &userID
 
+	if flow.Channel == "sms" && flow.IsEnabled {
+		if err := validateSMSBotGraph(flow); err != nil {
+			return r.SendErrorEnvelope(422, err.Error(), nil, "")
+		}
+	}
 	if err := a.DB.Save(flow).Error; err != nil {
 		a.Log.Error("Failed to update flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update flow", nil, "")

@@ -48,6 +48,13 @@ type MetaAPIError struct {
 // ParseError attempts to parse respBody as a Meta API error. If successful,
 // it returns a formatted error including code, message, details, and user message.
 // If parsing fails, it returns a generic error with the status code and raw body.
+type CodedAPIError struct {
+	Code    int
+	Message string
+}
+
+func (e *CodedAPIError) Error() string { return e.Message }
+
 func ParseMetaAPIError(statusCode int, respBody []byte) error {
 	var apiErr MetaAPIError
 	if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {
@@ -58,7 +65,7 @@ func ParseMetaAPIError(statusCode int, respBody []byte) error {
 		if apiErr.Error.ErrorUserMsg != "" {
 			errMsg += " - " + apiErr.Error.ErrorUserMsg
 		}
-		return fmt.Errorf("%s", errMsg)
+		return &CodedAPIError{Code: apiErr.Error.Code, Message: errMsg}
 	}
 	return fmt.Errorf("API returned status %d: %s", statusCode, string(respBody))
 }

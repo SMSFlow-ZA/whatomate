@@ -7,12 +7,15 @@ import (
 
 // Add only the new resource to existing system Admin roles; preserve customizations.
 func SeedBrandingAdminPermissions(db *gorm.DB) error {
+	return seedAdminSettingPermissions(db, models.ResourceSettingsBranding, models.ResourceSettingsChannels)
+}
+func seedAdminSettingPermissions(db *gorm.DB, resources ...string) error {
 	var roles []models.CustomRole
 	if err := db.Where("name = ? AND is_system = ?", "admin", true).Find(&roles).Error; err != nil {
 		return err
 	}
 	var permissions []models.Permission
-	if err := db.Where("resource = ?", models.ResourceSettingsBranding).Find(&permissions).Error; err != nil {
+	if err := db.Where("resource IN ?", resources).Find(&permissions).Error; err != nil {
 		return err
 	}
 	for _, role := range roles {

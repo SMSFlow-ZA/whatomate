@@ -29,16 +29,25 @@ const iconMax = 512 * 1024
 var accentPattern = regexp.MustCompile("^#[a-fA-F0-9]{6}$")
 
 type brandDisplay struct {
-	DisplayName string `json:"display_name"`
-	AccentColor string `json:"accent_color"`
-	LogoURL     string `json:"logo_url"`
-	FaviconURL  string `json:"favicon_url"`
-	Custom      bool   `json:"custom"`
+	DisplayName        string `json:"display_name"`
+	AccentColor        string `json:"accent_color"`
+	LogoURL            string `json:"logo_url"`
+	FaviconURL         string `json:"favicon_url"`
+	Custom             bool   `json:"custom"`
+	DefaultDisplayName string `json:"default_display_name"`
+	DefaultLogoURL     string `json:"default_logo_url"`
+	DefaultFaviconURL  string `json:"default_favicon_url"`
 }
 
 func (a *App) brandingDisplay(row models.InstanceBranding) brandDisplay {
 	base := strings.TrimRight(a.Config.Server.BasePath, "/")
 	display := brandDisplay{DisplayName: "SMSFlow", AccentColor: "#00AEEF", LogoURL: base + "/branding/smsflow-logo.png", FaviconURL: base + "/branding/smsflow-favicon.svg"}
+	if !a.Config.Plan.Enabled {
+		display = brandDisplay{DisplayName: "Whatomate", AccentColor: "#25D366", LogoURL: base + "/branding/whatomate-logo.svg", FaviconURL: base + "/favicon.svg"}
+	}
+	display.DefaultDisplayName = display.DisplayName
+	display.DefaultLogoURL = display.LogoURL
+	display.DefaultFaviconURL = display.FaviconURL
 	if row.ID == 1 {
 		display.DisplayName = row.DisplayName
 		display.AccentColor = row.AccentColor

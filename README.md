@@ -5,6 +5,9 @@
 SMSFlow managed fork: [plan enforcement and corresponding source](docs/managed-plans.md).
 Managed SMSFlow instances support one organization per instance.
 
+Channel framework API 1 and the separately maintained SMSFlow adapter are under
+acceptance: [configuration, API and recovery](docs/channels.md).
+
 Modern, open-source WhatsApp Business Platform. Single binary app.
 
 ![Dashboard](docs/public/images/dashboard-light.png#gh-light-mode-only)

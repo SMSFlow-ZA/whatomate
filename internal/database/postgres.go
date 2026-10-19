@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/channelmigration"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
@@ -58,6 +59,10 @@ func GetMigrationModels() []MigrationModel {
 		// Core models
 		{"Organization", &models.Organization{}},
 		{"InstanceBranding", &models.InstanceBranding{}},
+		{"ChannelConnection", &models.ChannelConnection{}},
+		{"ChannelAttempt", &models.ChannelAttempt{}},
+		{"ChannelReceipt", &models.ChannelReceipt{}},
+		{"ChannelBotJob", &models.ChannelBotJob{}},
 		{"Permission", &models.Permission{}},
 		{"CustomRole", &models.CustomRole{}},
 		{"User", &models.User{}},
@@ -127,7 +132,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return nil
+	return channelmigration.Run(db)
 }
 
 // RunMigrationWithProgress runs migrations with a progress bar display
@@ -166,6 +171,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	}
 
 	// Create indexes
+	if err := channelmigration.Run(silentDB); err != nil {
+		return err
+	}
 	for _, idx := range indexes {
 		printProgress(currentStep, totalSteps)
 		if err := silentDB.Exec(idx).Error; err != nil {

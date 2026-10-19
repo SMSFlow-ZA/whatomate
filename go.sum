@@ -2,6 +2,10 @@ cloud.google.com/go/compute/metadata v0.3.0 h1:Tz+eQXMEqDIKRsmY3cHTL6FVaynIjX2Qx
 cloud.google.com/go/compute/metadata v0.3.0/go.mod h1:zFmK7XCadkQkj6TtorcaGlCW1hT1fIilQDwofLpJ20k=
 github.com/Masterminds/semver/v3 v3.2.1 h1:RN9w6+7QoMeJVGyfmbcgs28Br8cvmnucEXnY0rYXWg0=
 github.com/Masterminds/semver/v3 v3.2.1/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=
+github.com/SMSFlow-ZA/whatomate-smsflow v0.0.0-20261019093331-b963ef9a4617 h1:HsRVxPhVbbwtHjLhbsGE8XDRcQzupz463GWdQ5lHOp8=
+github.com/SMSFlow-ZA/whatomate-smsflow v0.0.0-20261019093331-b963ef9a4617/go.mod h1:U37HJVRqK59k+juUVYA/Fu4numKUZaaqndJ+mE21oeE=
+github.com/SMSFlow-ZA/whatomate-smsflow v0.1.0 h1:q5CMa6yhjz6uQCqsTmmfhYLsR1lyNfo9FZt+WFi+i5Q=
+github.com/SMSFlow-ZA/whatomate-smsflow v0.1.0/go.mod h1:U37HJVRqK59k+juUVYA/Fu4numKUZaaqndJ+mE21oeE=
 github.com/andybalholm/brotli v1.0.2/go.mod h1:loMXtMfwqflxFJPmdbJO0a3KNoPuLBgiu3qAvBg8x/Y=
 github.com/andybalholm/brotli v1.0.4/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
 github.com/aws/aws-sdk-go-v2 v1.41.9 h1:/rYeyO2+HrMztAmxAq9++XJtFMqSIpSsNA0yDGALYq4=

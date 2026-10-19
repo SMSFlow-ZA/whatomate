@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import type { ChannelSendFields } from '@/lib/channels'
 
 // Get base path from server-injected config or fallback
 const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
@@ -267,7 +268,7 @@ export const messagesService = {
     api.get(`/contacts/${contactId}/messages`, { params }),
   send: (
     contactId: string,
-    data: {
+    data: ChannelSendFields & {
       type: string
       content: any
       reply_to_message_id?: string
@@ -289,11 +290,12 @@ export const messagesService = {
       }
     },
   ) => api.post(`/contacts/${contactId}/messages`, data),
-  sendTemplate: (contactId: string, data: { template_name: string; template_params?: Record<string, string>; header_params?: Record<string, string>; button_params?: Record<string, string>; account_name?: string }, headerFile?: File) => {
+  sendTemplate: (contactId: string, data: ChannelSendFields & { template_name: string; template_params?: Record<string, string>; header_params?: Record<string, string>; button_params?: Record<string, string>; account_name?: string }, headerFile?: File) => {
     if (headerFile) {
       const formData = new FormData()
       formData.append('contact_id', contactId)
       formData.append('template_name', data.template_name)
+      if (data.sms_fallback) formData.append('sms_fallback', JSON.stringify(data.sms_fallback))
       if (data.template_params) {
         formData.append('template_params', JSON.stringify(data.template_params))
       }

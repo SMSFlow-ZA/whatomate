@@ -9,10 +9,15 @@ import (
 // BulkMessageCampaign represents a bulk message campaign
 type BulkMessageCampaign struct {
 	BaseModel
+	Channel              string         `gorm:"size:20;not null;default:whatsapp" json:"channel"`
+	ChannelConnectionID  *uuid.UUID     `gorm:"type:uuid;index" json:"channel_connection_id,omitempty"`
+	SMSBody              string         `gorm:"type:text" json:"sms_body"`
+	SMSConsentConfirmed  bool           `gorm:"not null;default:false" json:"consent_confirmed"`
+	SMSFallback          JSONB          `gorm:"type:jsonb" json:"sms_fallback,omitempty"`
 	OrganizationID       uuid.UUID      `gorm:"type:uuid;index;not null" json:"organization_id"`
 	WhatsAppAccount      string         `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	Name                 string         `gorm:"size:255;not null" json:"name"`
-	TemplateID           uuid.UUID      `gorm:"type:uuid;not null" json:"template_id"`
+	TemplateID           uuid.UUID      `gorm:"type:uuid;default:null" json:"template_id"`
 	HeaderMediaID        string         `gorm:"type:text" json:"header_media_id"`         // Meta media ID (from uploaded media)
 	HeaderMediaFilename  string         `gorm:"type:text" json:"header_media_filename"`   // Original filename
 	HeaderMediaMimeType  string         `gorm:"type:text" json:"header_media_mime_type"`  // MIME type (image/jpeg, video/mp4, etc.)

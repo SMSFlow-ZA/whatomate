@@ -99,7 +99,7 @@ func (a *App) getChatbotFlowsCached(orgID uuid.UUID) ([]models.ChatbotFlow, erro
 
 	// Cache miss - fetch from database
 	var flows []models.ChatbotFlow
-	if err := a.DB.Where("organization_id = ? AND is_enabled = true", orgID).
+	if err := a.DB.Where("organization_id = ? AND is_enabled = true AND channel = 'whatsapp'", orgID).
 		Find(&flows).Error; err != nil {
 		return nil, err
 	}

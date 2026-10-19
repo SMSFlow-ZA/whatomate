@@ -415,6 +415,18 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 	}
 
 	newStatus := models.MessageStatus(statusValue)
+	if a.Channels != nil {
+		code := 0
+		if len(errors) > 0 {
+			code = errors[0].Code
+		}
+		if err := a.Channels.RecordWhatsApp(context.Background(), message.ID, statusValue, code); err != nil {
+			a.Log.Error("Channel status persistence failed", "message_id", message.ID)
+		}
+	}
+	if (message.Status == models.MessageStatusDelivered || message.Status == models.MessageStatusRead) && newStatus == models.MessageStatusFailed {
+		return
+	}
 	currentPriority := statusPriority(message.Status)
 	newPriority := statusPriority(newStatus)
 

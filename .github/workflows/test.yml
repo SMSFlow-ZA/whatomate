@@ -7,6 +7,7 @@ on:
       - main
       - codex/plan-limits
       - codex/instance-branding
+      - codex/channels-smsflow-20261019
   pull_request:
     branches:
       - main

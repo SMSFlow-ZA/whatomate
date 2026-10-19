@@ -2,12 +2,15 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/shridarpatil/whatomate/internal/channelapp"
+	"github.com/shridarpatil/whatomate/internal/channelregistry"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -20,6 +23,7 @@ import (
 
 // Worker processes jobs from the queue
 type Worker struct {
+	Channels  *channelapp.Service
 	Config    *config.Config
 	DB        *gorm.DB
 	Redis     *redis.Client
@@ -40,8 +44,13 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 	}
 
 	publisher := queue.NewPublisher(rdb, log)
+	registry, err := channelregistry.New(cfg.Channels.SMSFlowEndpoint)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Worker{
+		Channels:  &channelapp.Service{DB: db, Providers: registry, EncryptionKey: cfg.App.EncryptionKey, StopDispatch: cfg.Channels.StopDispatch},
 		Config:    cfg,
 		DB:        db,
 		Redis:     rdb,
@@ -69,7 +78,7 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob) error {
 	// Check if campaign is still active before sending
 	var campaign models.BulkMessageCampaign
-	if err := w.DB.Where("id = ?", job.CampaignID).Preload("Template").First(&campaign).Error; err != nil {
+	if err := w.DB.Where("id = ? AND organization_id = ?", job.CampaignID, job.OrganizationID).Preload("Template").First(&campaign).Error; err != nil {
 		w.Log.Error("Failed to load campaign", "error", err, "campaign_id", job.CampaignID)
 		return fmt.Errorf("failed to load campaign: %w", err)
 	}
@@ -81,6 +90,13 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	}
 
 	// Get WhatsApp account
+	if campaign.Channel == "sms" || campaign.SMSFallback["enabled"] == true {
+		err := w.handleChannelRecipient(ctx, job, &campaign)
+		if errors.Is(err, channelapp.ErrInvalid) || errors.Is(err, channelapp.ErrUnavailable) {
+			return w.failChannelRecipient(ctx, job)
+		}
+		return err
+	}
 	var account models.WhatsAppAccount
 	if err := w.DB.Where("name = ? AND organization_id = ?", campaign.WhatsAppAccount, job.OrganizationID).First(&account).Error; err != nil {
 		w.Log.Error("Failed to load WhatsApp account", "error", err, "account_name", campaign.WhatsAppAccount)

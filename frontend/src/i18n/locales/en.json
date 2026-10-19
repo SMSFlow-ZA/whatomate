@@ -280,7 +280,8 @@
     "skipToMain": "Skip to main content",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
-    "toggleMenu": "Toggle menu"
+    "toggleMenu": "Toggle menu",
+    "channels": "Channels"
   },
   "userMenu": {
     "myAccount": "My Account",

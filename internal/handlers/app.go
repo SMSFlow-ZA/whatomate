@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
+	"github.com/shridarpatil/whatomate/internal/channelapp"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
@@ -32,6 +33,7 @@ type App struct {
 	WhatsApp          *whatsapp.Client
 	WSHub             *websocket.Hub
 	Queue             queue.Queue
+	Channels          *channelapp.Service
 	CampaignSubCancel context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
