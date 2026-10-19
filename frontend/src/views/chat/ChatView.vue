@@ -59,6 +59,7 @@ import {
 import { toast } from 'vue-sonner'
 import {
   Search,
+  ArrowLeft,
   Send,
   Paperclip,
   FileText,
@@ -1711,9 +1712,9 @@ async function sendMediaMessage() {
 </script>
 
 <template>
-  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div class="flex h-full min-w-0 bg-[#0a0a0b] light:bg-gray-50">
     <!-- Contacts List -->
-    <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
+    <div class="w-full shrink-0 border-r border-white/[0.08] light:border-gray-200 flex-col bg-[#0a0a0b] light:bg-white md:flex md:w-80" :class="contactsStore.currentContact ? 'hidden' : 'flex'">
       <!-- Search Header -->
       <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
         <div class="flex items-center gap-2">
@@ -1863,7 +1864,7 @@ async function sendMediaMessage() {
     </div>
 
     <!-- Chat Area -->
-    <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
+    <div class="min-w-0 flex-1 flex-col bg-[#0f0f10] light:bg-gray-50 md:flex" :class="contactsStore.currentContact ? 'flex' : 'hidden'">
       <!-- No Contact Selected -->
       <div
         v-if="!contactsStore.currentContact"
@@ -1882,7 +1883,8 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
-          <div class="flex items-center gap-2">
+          <div class="flex min-w-0 items-center gap-2">
+            <Button class="shrink-0 md:hidden" variant="ghost" size="icon" :aria-label="t('chat.backToContacts', 'Back to contacts')" @click="router.push('/chat')"><ArrowLeft class="h-4 w-4" /></Button>
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">

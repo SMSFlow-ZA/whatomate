@@ -34,7 +34,7 @@ onMounted(async () => {
 onUnmounted(() => clearTimeout(timer))
 </script>
 <template>
-  <fieldset v-if="connections.length || active" :disabled="disabled" class="mb-3 space-y-3 rounded-lg border p-3 text-sm">
+  <fieldset v-if="connections.length || active" :disabled="disabled" class="mb-3 min-w-0 space-y-3 rounded-lg border p-3 text-sm">
     <legend class="px-1 font-medium">Delivery channel</legend>
     <div class="flex flex-wrap items-center gap-3">
       <label class="flex items-center gap-2">Send using
@@ -46,7 +46,7 @@ onUnmounted(() => clearTimeout(timer))
     </div>
     <template v-if="active">
       <label class="block">SMS connection
-        <select v-model="draft.connection_id" class="mt-1 block w-full rounded border bg-background p-2" required>
+        <select v-model="draft.connection_id" class="mt-1 block w-full min-w-0 max-w-full rounded border bg-background p-2" required>
           <option disabled value="">Select a connection</option><option v-for="c in connections" :key="c.id" :value="c.id">{{ c.name }} · maximum {{ c.max_segments }} segments</option>
         </select>
       </label>
