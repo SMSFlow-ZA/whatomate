@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
 import type { ChannelSendFields, DeliveryAttempt } from '@/lib/channels'
+import { newSMSClientMessageID } from '@/lib/channels'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -234,6 +235,9 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // Keep uncertain inbox requests on their original logical SMS identifier.
+  // A changed draft/connection or a confirmed success starts a new operation.
+  const pendingSMSSends = new Map<string, { fingerprint: string; id: string }>()
   async function sendMessage(
     contactId: string,
     type: string,
@@ -242,6 +246,16 @@ export const useContactsStore = defineStore('contacts', () => {
     whatsappAccount?: string,
     extra?: ChannelSendFields & { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
   ) {
+    let smsOperation: { fingerprint: string; id: string } | undefined
+    if (extra?.channel === 'sms' && !extra.client_message_id) {
+      const fingerprint = JSON.stringify([type, content, replyToMessageId, whatsappAccount, extra])
+      smsOperation = pendingSMSSends.get(contactId)
+      if (smsOperation?.fingerprint !== fingerprint) {
+        smsOperation = { fingerprint, id: newSMSClientMessageID() }
+        pendingSMSSends.set(contactId, smsOperation)
+      }
+      extra = { ...extra, client_message_id: smsOperation.id }
+    }
     try {
       const response = await messagesService.send(contactId, {
         type,
@@ -250,6 +264,7 @@ export const useContactsStore = defineStore('contacts', () => {
         whatsapp_account: whatsappAccount,
         ...extra,
       })
+      if (smsOperation && pendingSMSSends.get(contactId)?.id === smsOperation.id) pendingSMSSends.delete(contactId)
       // API returns { status: "success", data: { ... } }
       const newMessage = response.data.data || response.data
       // Use addMessage which has duplicate checking (WebSocket may also broadcast this)

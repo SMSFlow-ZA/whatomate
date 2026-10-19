@@ -402,7 +402,8 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 }
 
 // BackfillLastInboundAt sets last_inbound_at for existing contacts from their
-// most recent incoming message. Only updates contacts where the field is NULL.
+// most recent WhatsApp incoming message. Only updates contacts where the field
+// is NULL; SMS activity must never open the WhatsApp service window.
 func BackfillLastInboundAt(db *gorm.DB) error {
 	return db.Exec(`
 		UPDATE contacts c
@@ -411,6 +412,7 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 			SELECT contact_id, MAX(created_at) AS max_created
 			FROM messages
 			WHERE direction = 'incoming' AND deleted_at IS NULL
+			  AND COALESCE(channel, '') IN ('', 'whatsapp')
 			GROUP BY contact_id
 		) sub
 		WHERE c.id = sub.contact_id AND c.last_inbound_at IS NULL AND c.deleted_at IS NULL

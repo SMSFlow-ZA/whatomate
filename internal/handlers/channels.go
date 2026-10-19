@@ -146,15 +146,22 @@ func (a *App) UpdateChannelConnection(r *fastglue.Request) error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// Keep pending work and report cursors attached to their original account.
+		// The existing SMPP API does not enforce the retired V2 server binding.
+		if !crypto.IsEncrypted(c.Credentials) {
+			return r.SendErrorEnvelope(503, "Credential encryption unavailable", nil, "")
+		}
+		var existingCredentials channels.Credentials
+		raw, err := crypto.Decrypt(c.Credentials, a.Channels.EncryptionKey)
+		if err != nil || json.Unmarshal([]byte(raw), &existingCredentials) != nil {
+			return r.SendErrorEnvelope(503, "Credential encryption unavailable", nil, "")
+		}
 		credentials := req.Credentials
 		if len(credentials) == 0 {
-			if !crypto.IsEncrypted(c.Credentials) {
-				return r.SendErrorEnvelope(503, "Credential encryption unavailable", nil, "")
-			}
-			raw, err := crypto.Decrypt(c.Credentials, a.Channels.EncryptionKey)
-			if err != nil || json.Unmarshal([]byte(raw), &credentials) != nil {
-				return r.SendErrorEnvelope(503, "Credential encryption unavailable", nil, "")
-			}
+			credentials = existingCredentials
+		}
+		if original := existingCredentials["client_id"]; original != "" && credentials["client_id"] != original {
+			return r.SendErrorEnvelope(422, "Create a new connection for a different client account", nil, "")
 		}
 		info, err := p.Validate(ctx, channels.Connection{ID: id.String(), Credentials: credentials})
 		if err != nil || !channelapp.ValidCapabilities(c.Provider, info.Capabilities) {

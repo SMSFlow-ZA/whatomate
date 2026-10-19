@@ -34,8 +34,9 @@ type Config struct {
 }
 
 type ChannelsConfig struct {
-	StopDispatch    bool   `koanf:"stop_dispatch"`
-	SMSFlowEndpoint string `koanf:"smsflow_endpoint"` // trusted host setting; HTTPS origin only
+	StopDispatch       bool   `koanf:"stop_dispatch"`
+	SMSFlowEndpoint    string `koanf:"smsflow_endpoint"`     // trusted host setting; HTTPS origin only
+	SMSFlowReplyRoutes string `koanf:"smsflow_reply_routes"` // comma-separated deployment-verified two-way routes
 }
 
 type TTSConfig struct {

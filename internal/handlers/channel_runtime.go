@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 // InitializeChannels installs compiled modules; no executable code is accepted
 // from a customer. New connections remain impossible without encryption.
 func (a *App) InitializeChannels() error {
-	registry, err := channelregistry.New(a.Config.Channels.SMSFlowEndpoint)
+	registry, err := channelregistry.New(a.Config.Channels.SMSFlowEndpoint, strings.Split(a.Config.Channels.SMSFlowReplyRoutes, ",")...)
 	if err != nil {
 		return err
 	}

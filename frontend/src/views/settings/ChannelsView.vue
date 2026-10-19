@@ -45,6 +45,7 @@ onMounted(reload)
   <main class="h-full overflow-y-auto p-4 md:p-6"><div class="mx-auto max-w-4xl space-y-6 pb-12">
     <div><h1 class="text-2xl font-semibold">Channels</h1><p class="mt-2 text-muted-foreground">Connect your SMSFlow account for SMS conversations and optional WhatsApp fallback.</p></div>
     <p class="rounded-lg border p-4 text-sm">SMS usage is charged to your SMSFlow account. Connecting an account sends no SMS. Fallback stays off until you enable it in a sending workflow.</p>
+    <p class="text-sm text-muted-foreground">Use a dedicated SMSFlow API key with SMPP integration access. Messages use the existing SMPP integration service. Uncertain submissions wait for delivery reports and are never automatically sent again.</p>
     <p v-if="!encrypted" class="text-sm text-destructive">Connection creation requires host-managed credential encryption.</p>
     <p v-if="error" role="alert" class="text-sm text-destructive">{{ error }}</p>
     <section v-for="c in connections" :key="c.id" class="space-y-2 rounded-lg border p-4">

@@ -148,3 +148,6 @@ full_name = "Admin"
 stop_dispatch = false
 # Leave unset for SMSFlow's standard endpoint. Trusted host configuration only:
 # smsflow_endpoint = "https://portal.smsflow.co.za"
+# Comma-separated routes whose two-way operation has been verified by deployment.
+# Leave empty for one-way SMS; account bind mode alone does not prove replies.
+smsflow_reply_routes = ""

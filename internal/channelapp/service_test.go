@@ -25,6 +25,7 @@ type provider struct {
 	blockSend        <-chan struct{}
 	polls            atomic.Int32
 	permanentUnknown map[string]bool
+	nonReplayable    bool
 }
 
 func (*provider) Descriptor() channels.Descriptor {
@@ -34,7 +35,52 @@ func (p *provider) Validate(context.Context, channels.Connection) (channels.Conn
 	if p.validateError {
 		return channels.ConnectionInfo{}, &channels.ProviderError{Kind: "unavailable"}
 	}
-	return channels.ConnectionInfo{Capabilities: channels.Capabilities{Text: true, Inbound: true, DeliveryReports: true, Reconciliation: true, IdempotentSubmission: true}}, nil
+	return channels.ConnectionInfo{Capabilities: channels.Capabilities{Text: true, Inbound: true, DeliveryReports: true, Reconciliation: !p.nonReplayable, IdempotentSubmission: !p.nonReplayable}}, nil
+}
+
+func TestNonReplayableTransportIsFencedAcrossConcurrentDispatchAndRestart(t *testing.T) {
+	svc, p, org, contact, _ := setup(t)
+	p.nonReplayable = true
+	p.unknown = true
+	ctx := context.Background()
+	c, err := svc.CreateConnection(ctx, org.ID, "Existing SMPP", "fake", channels.Credentials{"secret": "private"}, 3)
+	require.NoError(t, err)
+	require.Equal(t, false, c.Capabilities["idempotent_submission"])
+	logical := uuid.New()
+	message, err := svc.EnqueueSMSWithID(ctx, org.ID, contact.ID, c.ID, logical, "One charge only", nil, true, "api")
+	require.NoError(t, err)
+	again, err := svc.EnqueueSMSWithID(ctx, org.ID, contact.ID, c.ID, logical, "One charge only", nil, true, "api")
+	require.NoError(t, err)
+	require.Equal(t, message.ID, again.ID)
+	_, err = svc.EnqueueSMSWithID(ctx, org.ID, contact.ID, c.ID, logical, "Changed content", nil, true, "api")
+	require.Error(t, err)
+	var workers sync.WaitGroup
+	errors := make(chan error, 8)
+	for range 8 {
+		workers.Add(1)
+		go func() { defer workers.Done(); errors <- svc.Dispatch(ctx, time.Now().Add(time.Second)) }()
+	}
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	require.EqualValues(t, 1, p.sends.Load(), "one carrier submission and charge despite concurrent workers")
+	var attempt models.ChannelAttempt
+	require.NoError(t, svc.DB.First(&attempt, "message_id = ?", logical).Error)
+	require.Equal(t, "unknown", attempt.Status)
+	p.permanentUnknown = map[string]bool{attempt.ID.String(): true}
+	restarted := &channelapp.Service{DB: svc.DB, Providers: svc.Providers, EncryptionKey: svc.EncryptionKey}
+	for range 3 {
+		require.NoError(t, restarted.Dispatch(ctx, time.Now().Add(5*time.Minute)))
+		require.NoError(t, restarted.ReconcileUnknown(ctx))
+	}
+	require.EqualValues(t, 1, p.sends.Load(), "unknown work must not be submitted again after restart")
+	p.page = channels.EventPage{NextCursor: "receipt-1", Events: []channels.Event{{ID: "delivered", Kind: "status", ClientMessageID: attempt.ID.String(), ProviderMessageID: "original", Status: "delivered"}}}
+	require.NoError(t, restarted.PollConnection(ctx, c.ID))
+	require.NoError(t, svc.DB.First(&attempt, "id = ?", attempt.ID).Error)
+	require.Equal(t, "delivered", attempt.Status)
+	require.EqualValues(t, 1, p.sends.Load())
 }
 
 func TestFailedRemoteValidationKeepsRecoverableConnectionIdentity(t *testing.T) {

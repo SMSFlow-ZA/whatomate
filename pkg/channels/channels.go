@@ -87,9 +87,13 @@ type EventPage struct {
 	HasMore    bool    `json:"has_more"`
 }
 
-// Send must preserve ClientMessageID across retries. A transport timeout is an
-// unknown outcome, not proof that no SMS was submitted. Poll is replayable;
-// the host commits its cursor only after persisting every event in the page.
+// The host durably claims each attempt before calling Send and never calls Send
+// again for an uncertain/expired claim. Providers must not automatically retry a
+// submission unless their transport guarantees durable replay. Advertise that
+// guarantee truthfully in IdempotentSubmission. A transport timeout is unknown,
+// not proof that no SMS was submitted. Poll is replayable; the host commits its
+// cursor only after persisting every event in the page. Providers without a
+// lookup API return unknown from Reconcile and recover through delivery reports.
 type Provider interface {
 	Descriptor() Descriptor
 	Validate(context.Context, Connection) (ConnectionInfo, error)

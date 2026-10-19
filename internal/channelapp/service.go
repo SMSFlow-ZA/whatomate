@@ -86,7 +86,11 @@ func (s *Service) CreateConnection(ctx context.Context, org uuid.UUID, name, pro
 }
 
 func ValidCapabilities(_ string, c channels.Capabilities) bool {
-	return c.Text && c.IdempotentSubmission && c.Reconciliation
+	// Dispatch commits a one-shot claim before the provider call. Expired or
+	// uncertain work is never resubmitted, including after process recreation.
+	// A transport may recover through receipts instead of a replay/lookup API;
+	// keep its advertised idempotency capability truthful.
+	return c.Text && (c.Reconciliation || c.DeliveryReports)
 }
 
 func (s *Service) maySendContact(db *gorm.DB, org uuid.UUID, user *uuid.UUID, contact *models.Contact, source string) bool {

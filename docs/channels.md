@@ -17,11 +17,17 @@ configuration and stopping a connection. Existing Admin roles receive these
 permissions. Connections are scoped to the current organization. Credentials
 are encrypted using the deployment encryption key and never returned to clients.
 
-SMSFlow customers use their own dedicated Client ID and Client Secret. SMS fees
+SMSFlow customers use their own dedicated SMPP-enabled Client ID and Client Secret. SMS fees
 are charged by SMSFlow, independently of the Whatomate subscription. Validation
-sends no SMS. One credential binds to one connection, preventing ambiguous reply
-routing when reused in another workspace. A failed validation retains a disabled
+sends no SMS. Connection-prefixed SMPP message references filter report routing
+even if credentials are reused in another workspace. A failed validation retains a disabled
 connection for revalidation with the same identity.
+
+The adapter reuses the existing SMPP integration's HTTPS contract for OAuth,
+registration, submission, statuses and replies. It needs no new SMSFlow API or
+per-instance container. `WHATOMATE_CHANNELS__SMSFLOW_REPLY_ROUTES` is a trusted,
+comma-separated deployment list of verified two-way routes; it defaults empty.
+One-way sending is available without advertising reply-bot capability.
 
 The inbox, campaign editor, bot message actions and API can select SMS. Normal
 agents can use enabled connections with their existing sending permissions;
@@ -71,10 +77,17 @@ as usual, with the current organization and CSRF headers for browser sessions.
   "type": "text",
   "content": { "body": "Your order is ready" },
   "channel": "sms",
+  "client_message_id": "<caller-generated UUID>",
   "channel_connection_id": "<connection UUID>",
   "consent_confirmed": true
 }
 ```
+
+Generate `client_message_id` once per intended SMS and reuse it when retrying
+an uncertain HTTP request. Repeating the same UUID and payload returns the same
+logical message; conflicting content is rejected. Omitting it creates a new
+message on each request. This host-side safeguard does not make repeated calls
+to the underlying SMPP submission endpoint safe.
 
 For WhatsApp with fallback, omit `channel` and add:
 
@@ -150,13 +163,21 @@ and message bodies do not belong in operational alerts.
 ## Provider compatibility
 
 Implement `channels.Provider` and advertise only supported capabilities.
-Validation must not send a message. Idempotent submission and reconciliation
-are prerequisites for an enabled text connection; inbound is optional. Stable
+Validation must not send a message. A text connection requires a recovery path
+through direct reconciliation or delivery reports; inbound is optional. Stable
 event identifiers and connection-scoped opaque cursors are mandatory for polling.
 Return safe classified `ProviderError` values, never credential-bearing errors.
 Register the implementation in the host composition root, pin its module version
 and rebuild/publish corresponding source with the application image.
 
-The SMSFlow module documents its public wire contract and HTTPS examples. It uses
-the versioned standard send path, which fails closed against an older API rather
-than silently losing idempotency on an unversioned endpoint.
+The host commits a durable one-shot claim before Send. It never calls Send again
+for an unknown or expired claim. Providers must truthfully advertise transport
+idempotency and must not retry a submission automatically without a durable replay
+guarantee. The existing SMPP adapter has no direct lookup: Reconcile retains the
+unknown status and Poll can resolve late delivery reports. Missing receipts never
+prove the original SMS was unsent. A new logical message is a new explicit send.
+
+The superseded V2-only preview is not compatible with this adapter's cursors.
+Retain its data for review and revalidate/replace test connections with dispatch
+held. Never reset existing unknown work to queued. No standard-V2 API migration
+is needed by this implementation.

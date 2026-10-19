@@ -44,7 +44,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 	}
 
 	publisher := queue.NewPublisher(rdb, log)
-	registry, err := channelregistry.New(cfg.Channels.SMSFlowEndpoint)
+	registry, err := channelregistry.New(cfg.Channels.SMSFlowEndpoint, strings.Split(cfg.Channels.SMSFlowReplyRoutes, ",")...)
 	if err != nil {
 		return nil, err
 	}

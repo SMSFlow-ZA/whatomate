@@ -3,15 +3,85 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/channelapp"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/pkg/channels"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 	"time"
 )
+
+type rotationProvider struct {
+	channels.Provider
+	validations int
+}
+
+func (*rotationProvider) Descriptor() channels.Descriptor {
+	return channels.Descriptor{ID: "rotation", Name: "Rotation fixture", Version: "1", APIVersion: 1, Channel: "sms"}
+}
+func (p *rotationProvider) Validate(context.Context, channels.Connection) (channels.ConnectionInfo, error) {
+	p.validations++
+	return channels.ConnectionInfo{Capabilities: channels.Capabilities{Text: true, DeliveryReports: true}}, nil
+}
+func TestSMPPCredentialRotationCannotChangeExistingClientIdentity(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
+	p := &rotationProvider{}
+	registry := channels.NewRegistry()
+	require.NoError(t, registry.Register(p))
+	app.Channels = &channelapp.Service{DB: app.DB, Providers: registry, EncryptionKey: strings.Repeat("k", 32)}
+	c, err := app.Channels.CreateConnection(context.Background(), org.ID, "Original", "rotation", channels.Credentials{"client_id": "owner-a", "client_secret": "old-secret"}, 3)
+	require.NoError(t, err)
+	for _, identity := range []string{"owner-b", "owner-a"} {
+		r := testutil.NewJSONRequest(t, map[string]any{"name": "Original", "enabled": true, "max_segments": 3, "credentials": map[string]string{"client_id": identity, "client_secret": "new-secret"}})
+		testutil.SetAuthContext(r, org.ID, user.ID)
+		testutil.SetPathParam(r, "id", c.ID.String())
+		require.NoError(t, app.UpdateChannelConnection(r))
+		if identity == "owner-b" {
+			require.Equal(t, 422, testutil.GetResponseStatusCode(r), string(testutil.GetResponseBody(r)))
+			require.Equal(t, 1, p.validations, "different account must be rejected before remote validation")
+		} else {
+			require.Equal(t, 200, testutil.GetResponseStatusCode(r), string(testutil.GetResponseBody(r)))
+			require.Equal(t, 2, p.validations)
+		}
+		require.NotContains(t, string(testutil.GetResponseBody(r)), "new-secret")
+	}
+}
+
+func TestSMSHTTPClientIdentifierReplaysOneLogicalMessage(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("phone_number", "27820000000").Error)
+	c := models.ChannelConnection{OrganizationID: org.ID, Name: "SMPP", Provider: "fake", Enabled: true, MaxSegments: 3, Credentials: "enc:unused", Capabilities: models.JSONB{"text": true}}
+	require.NoError(t, app.DB.Create(&c).Error)
+	app.Channels = &channelapp.Service{DB: app.DB, EncryptionKey: app.Config.App.EncryptionKey}
+	logical := uuid.New()
+	for _, text := range []string{"HTTP retry", "HTTP retry", "Different content"} {
+		r := testutil.NewJSONRequest(t, map[string]any{"type": "text", "channel": "sms", "channel_connection_id": c.ID, "client_message_id": logical.String(), "consent_confirmed": true, "content": map[string]string{"body": text}})
+		testutil.SetAuthContext(r, org.ID, user.ID)
+		testutil.SetPathParam(r, "id", contact.ID.String())
+		require.NoError(t, app.SendMessage(r))
+		if text == "Different content" {
+			require.Equal(t, 422, testutil.GetResponseStatusCode(r))
+		} else {
+			require.Equal(t, 200, testutil.GetResponseStatusCode(r), string(testutil.GetResponseBody(r)))
+			var response struct{ Data struct{ ID uuid.UUID } }
+			require.NoError(t, json.Unmarshal(testutil.GetResponseBody(r), &response))
+			require.Equal(t, logical, response.Data.ID)
+		}
+	}
+	var count int64
+	require.NoError(t, app.DB.Model(&models.ChannelAttempt{}).Where("message_id = ?", logical).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
 
 func TestChannelNotificationsRequireAuthorizedHTTPReads(t *testing.T) {
 	app := newTestApp(t)

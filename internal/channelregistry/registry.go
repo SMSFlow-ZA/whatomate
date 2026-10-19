@@ -9,14 +9,13 @@ import (
 )
 
 // Endpoint selection is trusted deployment configuration, never customer input.
-func New(smsflowEndpoint string) (*channels.Registry, error) {
-	provider := smsflow.New()
-	if smsflowEndpoint != "" {
-		var err error
-		provider, err = smsflow.NewWithClient(smsflowEndpoint, http.DefaultClient)
-		if err != nil {
-			return nil, err
-		}
+func New(smsflowEndpoint string, verifiedReplyRoutes ...string) (*channels.Registry, error) {
+	if smsflowEndpoint == "" {
+		smsflowEndpoint = smsflow.BaseURL
+	}
+	provider, err := smsflow.NewWithReplyRoutes(smsflowEndpoint, http.DefaultClient, verifiedReplyRoutes)
+	if err != nil {
+		return nil, err
 	}
 	registry := channels.NewRegistry()
 	if err := registry.Register(provider); err != nil {

@@ -537,6 +537,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 // SendMessageRequest represents a send message request
 type SendMessageRequest struct {
 	Channel             string              `json:"channel"`
+	ClientMessageID     string              `json:"client_message_id,omitempty"`
 	ChannelConnectionID uuid.UUID           `json:"channel_connection_id"`
 	ConsentConfirmed    bool                `json:"consent_confirmed"`
 	Fallback            *SMSFallbackOptions `json:"sms_fallback,omitempty"`
@@ -608,7 +609,14 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		if a.Channels == nil || req.Type != models.MessageTypeText {
 			return r.SendErrorEnvelope(422, "SMS supports text messages only", nil, "")
 		}
-		message, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{Contact: &contact, Channel: "sms", ChannelConnectionID: req.ChannelConnectionID, Type: req.Type, Content: req.Content.Body, ConsentConfirmed: req.ConsentConfirmed}, MessageSendOptions{SentByUserID: &userID})
+		var clientMessageID uuid.UUID
+		if req.ClientMessageID != "" {
+			clientMessageID, err = uuid.Parse(req.ClientMessageID)
+			if err != nil || clientMessageID == uuid.Nil {
+				return r.SendErrorEnvelope(422, "client_message_id must be a nonzero UUID", nil, "")
+			}
+		}
+		message, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{Contact: &contact, Channel: "sms", ChannelConnectionID: req.ChannelConnectionID, IdempotencyKey: clientMessageID, Type: req.Type, Content: req.Content.Body, ConsentConfirmed: req.ConsentConfirmed}, MessageSendOptions{SentByUserID: &userID})
 		if err != nil {
 			return r.SendErrorEnvelope(422, "SMS could not be queued; check connection, consent, opt-out and segment limit", nil, "sms_rejected")
 		}
