@@ -7,6 +7,8 @@ Managed SMSFlow instances support one organization per instance.
 
 Channel framework API 1 and the separately maintained SMSFlow adapter are under
 acceptance: [configuration, API and recovery](docs/channels.md).
+See the [SMSFlow customer setup guide](docs/smsflow-customer-guide.md) for
+account connection, message segments, fallback and delivery states.
 
 Modern, open-source WhatsApp Business Platform. Single binary app.
 

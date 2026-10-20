@@ -49,11 +49,11 @@ onMounted(reload)
     <p v-if="!encrypted" class="text-sm text-destructive">Connection creation requires host-managed credential encryption.</p>
     <p v-if="error" role="alert" class="text-sm text-destructive">{{ error }}</p>
     <section v-for="c in connections" :key="c.id" class="space-y-2 rounded-lg border p-4">
-      <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ c.name }}</h2><span class="text-sm">{{ c.enabled ? 'Enabled' : 'Dispatch disabled' }}</span></div>
+      <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="min-w-0 max-w-full break-words font-semibold">{{ c.name }}</h2><span class="text-sm">{{ c.enabled ? 'Enabled' : 'Dispatch disabled' }}</span></div>
       <p class="text-sm text-muted-foreground">{{ c.provider }} · {{ c.max_segments }} segments maximum · {{ c.capabilities.inbound ? 'Replies enabled' : 'No inbound route' }}</p>
       <p v-if="c.balance?.amount" class="text-sm" :class="c.low_balance ? 'text-destructive' : 'text-muted-foreground'">Balance: {{ c.balance.amount }} {{ c.balance.unit === 'currency' ? c.balance.currency : c.balance.unit }}<span v-if="c.low_balance"> · Low balance</span></p>
       <p v-if="c.error_code || c.balance_error_code || c.poll_failures" class="text-sm text-destructive">Action needed: {{ c.error_code || c.balance_error_code || 'event polling failed' }}. Already-submitted messages are retained for reconciliation.</p>
-      <div v-if="canWrite" class="flex gap-2"><Button variant="outline" :disabled="busy" @click="edit(c)">Edit / rotate credentials</Button><Button variant="outline" :disabled="busy" @click="toggle(c)">{{ c.enabled ? 'Stop pending SMS dispatch' : 'Enable dispatch' }}</Button></div>
+      <div v-if="canWrite" class="flex flex-col gap-2 sm:flex-row sm:flex-wrap"><Button variant="outline" :disabled="busy" @click="edit(c)">Edit / rotate credentials</Button><Button variant="outline" :disabled="busy" @click="toggle(c)">{{ c.enabled ? 'Stop pending SMS dispatch' : 'Enable dispatch' }}</Button></div>
     </section>
     <form v-if="canWrite" class="space-y-4 rounded-lg border p-5" @submit.prevent="save">
       <h2 class="font-semibold">{{ editing ? 'Edit connection' : 'Connect SMSFlow' }}</h2>

@@ -1,5 +1,8 @@
 # Channels and optional SMS fallback
 
+For account setup and everyday use, see the
+[SMSFlow customer guide](smsflow-customer-guide.md).
+
 Channel API **1** is exported from `pkg/channels`. The framework is part of the
 application; provider modules have independent versions and are registered at
 build time. There is no executable upload or hot-loading endpoint. The SMSFlow
