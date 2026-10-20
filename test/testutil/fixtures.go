@@ -278,14 +278,10 @@ func CreateTestTemplate(t *testing.T, db *gorm.DB, orgID uuid.UUID, accountName 
 
 // --- Permissions & Roles ---
 
-// GetOrCreateTestPermissions gets existing permissions or creates the default set.
+// GetOrCreateTestPermissions ensures the default set even when another test has
+// already created a custom permission. A partial table is not a complete seed.
 func GetOrCreateTestPermissions(t *testing.T, db *gorm.DB) []models.Permission {
 	t.Helper()
-
-	var existingPerms []models.Permission
-	if err := db.Order("resource, action").Find(&existingPerms).Error; err == nil && len(existingPerms) > 0 {
-		return existingPerms
-	}
 
 	perms := models.DefaultPermissions()
 	for i := range perms {

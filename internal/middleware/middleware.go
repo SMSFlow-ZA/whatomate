@@ -29,15 +29,17 @@ const (
 
 // JWTClaims represents JWT claims
 type JWTClaims struct {
-	UserID         uuid.UUID  `json:"user_id"`
-	OrganizationID uuid.UUID  `json:"organization_id"`
-	Email          string     `json:"email"`
-	RoleID         *uuid.UUID `json:"role_id,omitempty"`
-	IsSuperAdmin   bool       `json:"is_super_admin"`
-	SessionFamily  string     `json:"session_family,omitempty"`
-	AuthStamp      string     `json:"auth_stamp,omitempty"`
-	SessionID      string     `json:"sid,omitempty"`
-	SessionVersion string     `json:"session_version,omitempty"`
+	MFAAt          *jwt.NumericDate `json:"mfa_at,omitempty"`
+	MFAGeneration  uint64           `json:"mfa_generation,omitempty"`
+	UserID         uuid.UUID        `json:"user_id"`
+	OrganizationID uuid.UUID        `json:"organization_id"`
+	Email          string           `json:"email"`
+	RoleID         *uuid.UUID       `json:"role_id,omitempty"`
+	IsSuperAdmin   bool             `json:"is_super_admin"`
+	SessionFamily  string           `json:"session_family,omitempty"`
+	AuthStamp      string           `json:"auth_stamp,omitempty"`
+	SessionID      string           `json:"sid,omitempty"`
+	SessionVersion string           `json:"session_version,omitempty"`
 	jwt.RegisteredClaims
 }
 

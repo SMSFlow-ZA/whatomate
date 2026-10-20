@@ -146,6 +146,9 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	if denied, err := a.DenyGenericProtectedOrganization(r); denied {
+		return err
+	}
 
 	// Get the message ID from URL parameter
 	messageIDStr := r.RequestCtx.UserValue("message_id").(string)
@@ -256,7 +259,7 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 	}
 
 	r.RequestCtx.Response.Header.Set("Content-Type", contentType)
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=3600") // Cache for 1 hour, private
+	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-store") // Cache for 1 hour, private
 	r.RequestCtx.SetBody(data)
 
 	return nil

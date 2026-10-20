@@ -94,6 +94,9 @@ func ValidCapabilities(_ string, c channels.Capabilities) bool {
 }
 
 func (s *Service) maySendContact(db *gorm.DB, org uuid.UUID, user *uuid.UUID, contact *models.Contact, source string) bool {
+	if !models.GenericOrganizationAllowed(db.Statement.Context, db, org) {
+		return false
+	}
 	if user == nil || strings.HasPrefix(source, "campaign") {
 		return true
 	}
@@ -352,6 +355,9 @@ func (s *Service) Dispatch(ctx context.Context, now time.Time) error {
 			}
 			if attempt.ConnectionID == nil {
 				return ErrInvalid
+			}
+			if !models.GenericOrganizationAllowed(ctx, tx, attempt.OrganizationID) {
+				return stopAttempt(tx, &attempt, "blocked", "protected_organization")
 			}
 			if !conn.Enabled {
 				return stopAttempt(tx, &attempt, "cancelled", "connection_disabled")

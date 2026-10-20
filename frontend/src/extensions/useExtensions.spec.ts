@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { defineComponent } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useExtensions } from "./useExtensions";
+import { refreshExtensionSession } from './session';
 import { createExtensionRegistry, type ExtensionManifest } from "./registry";
 
 vi.mock("@/services/api", () => ({ api: {} }));
@@ -16,7 +17,7 @@ beforeEach(() => {
   });
 });
 
-it("reactively removes extension navigation and panel hooks on grant removal and logout", () => {
+it("reactively removes extension navigation and panel hooks on grant removal and logout", async () => {
   const Page = defineComponent({ render: () => null });
   const manifest: ExtensionManifest = {
     id: "cases",
@@ -65,6 +66,7 @@ it("reactively removes extension navigation and panel hooks on grant removal and
       role: { id: "admin", name: "admin", is_system: true, permissions: [] },
     },
   });
+  await refreshExtensionSession(async()=>({mfa_verified:true,modules:[{id:'cases',api_version:1}],permissions:['cases:work.assigned'],grants:[]}));
   const { navigation, panelsFor } = useExtensions(registry);
   const panels = panelsFor("contact.sidebar");
   expect(navigation.value).toHaveLength(0);
@@ -74,6 +76,11 @@ it("reactively removes extension navigation and panel hooks on grant removal and
   ];
   expect(navigation.value).toHaveLength(1);
   expect(panels.value).toHaveLength(1);
+  await refreshExtensionSession(async()=>({mfa_verified:true,modules:[],permissions:['cases:work.assigned'],grants:[]}));
+  expect(navigation.value).toHaveLength(0);
+  expect(panels.value).toHaveLength(0);
+  await refreshExtensionSession(async()=>({mfa_verified:true,modules:[{id:'cases',api_version:1}],permissions:['cases:work.assigned'],grants:[]}));
+  expect(navigation.value).toHaveLength(1);
   auth.user!.role!.permissions = [];
   expect(navigation.value).toHaveLength(0);
   expect(panels.value).toHaveLength(0);

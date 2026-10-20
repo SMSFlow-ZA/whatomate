@@ -59,7 +59,8 @@ func (d Descriptor) Validate() error {
 	}
 	for _, r := range d.Routes {
 		decoded, err := url.PathUnescape(r.Path)
-		if err != nil || decoded != r.Path || strings.ContainsAny(r.Path, "\\?#") || path.Clean(r.Path) != r.Path || !strings.HasPrefix(r.Path, "/api/extensions/"+d.ID+"/") || !validPermission(d.ID, r.Permission) {
+		base := "/api/extensions/" + d.ID
+		if err != nil || decoded != r.Path || strings.ContainsAny(r.Path, "\\?#") || (path.Clean(r.Path) != r.Path && r.Path!=base+"/") || (r.Path != base && !strings.HasPrefix(r.Path, base+"/")) || !validPermission(d.ID, r.Permission) {
 			return fmt.Errorf("invalid extension route for %s", d.ID)
 		}
 		switch r.Method {

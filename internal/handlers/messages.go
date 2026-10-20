@@ -165,6 +165,9 @@ func SLASendOptions() MessageSendOptions {
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	if req.Contact == nil || !a.GenericOrganizationAllowed(ctx, req.Contact.OrganizationID) {
+		return nil, fmt.Errorf("protected generic delivery denied")
+	}
 	if req.Contact == nil {
 		return nil, fmt.Errorf("contact required")
 	}

@@ -1,6 +1,6 @@
 # Extension MFA and emergency access
 
-`pkg/extensions/security` provides opt-in PostgreSQL-backed application TOTP MFA and separately approved, time-bound emergency access. It does not change shared authentication handlers, issue sessions, register HTTP routes or provide enrollment/login UI. These integrations must be completed and reviewed before claiming MFA enforcement for an application.
+`pkg/extensions/security` provides opt-in PostgreSQL-backed application TOTP MFA and separately approved, time-bound emergency access. The host integration now provides authenticated enrollment, challenge, recovery and revocation APIs, a profile-linked MFA screen, signed session proof and emergency routes. Protected deployment remains blocked until the complete host/module acceptance gates pass.
 
 ## TOTP and enrollment
 
@@ -18,17 +18,17 @@ Five failed factor attempts cause a durable five-minute lockout. Success resets 
 
 The service accepts `extensions.Actor` only from trusted host authentication. The host must never decode actor permissions or its `MFA` boolean from a request body. `VerifyTOTP` and `VerifyRecovery` must run after primary identity verification. A successful call returns a read-only `Verification` with organization, user, verification time and credential generation. A storage/audit/commit failure returns no proof.
 
-The future session issuer must bind this generation into access, refresh and WebSocket session state and compare it to `CheckGeneration` on every protected authentication path. It must also apply its MFA-required and verification-freshness policy. `CheckGeneration` checks revocation generation only; it does not prove a session performed MFA or require that MFA is currently enabled. `Generation` returns a detached status snapshot for that policy.
+The host session issuer binds MFA verification time and generation into signed access, refresh and WebSocket tokens. Refresh preserves the original verification time. The protected actor bridge reads current identity, session state, explicit organization-scoped role permissions and enabled credential generation for each authorization; API keys and primary-only password/SSO sessions cannot construct protected actors. `CheckGeneration` checks revocation generation only; it does not prove a session performed MFA or require that MFA is currently enabled. `Generation` returns a detached status snapshot for that policy.
 
 `Revoke` requires `security:mfa.revoke`, a trusted MFA-verified actor and the expected generation. It atomically increments generation, disables the factor, clears active/pending encrypted secrets, removes recovery hashes and revokes that user's outstanding emergency grants. A previously verified session generation then fails. The generation persists after revocation and must not be reset when re-enrolling.
 
-The current SDK Actor carries an MFA flag but no generation field. Its trusted bridge must validate the session generation before constructing the actor and preserve the credential snapshot throughout sensitive operations. Full primary-auth/session issuance/refresh/WebSocket wiring, race-safe credential snapshot binding and lost-factor administrator recovery are pending. Merely importing this service or setting `Actor.MFA=true` does not provide application MFA enforcement.
+The SDK Actor includes `MFAGeneration`. Enrollment replacement, confirmation, credential revocation and every emergency operation compare this trusted generation with the locked credential row inside their transaction. Stale MFA actors cannot mutate a newer or revoked factor. Primary-only enrollment is limited to generation zero; revocation does not restore self-enrollment rights. Lost-factor administrator recovery remains pending and has no unauthenticated reset route.
 
 ## Secrets and API snapshots
 
 `Secret`, `Enrollment` and `Activation` redact secrets in normal formatting, Go formatting and JSON. Enrollment, verification, credential status and grant snapshots have private state and read-only accessors. Returned recovery slices are detached. No API returns encrypted database credentials as a public DTO.
 
-A future trusted enrollment bridge must explicitly call `Secret.Reveal()` to show a provisioning secret or recovery code once over an authenticated encrypted channel. That return value is sensitive and must never enter logs, analytics, incident comments or persisted response caches. Automatic serialization intentionally cannot deliver raw enrollment material. A CLI or UI must deliberately implement this one-time display path.
+The trusted enrollment bridge explicitly calls `Secret.Reveal()` to show a provisioning secret or recovery code once over an authenticated encrypted channel. That return value is sensitive and must never enter logs, analytics, incident comments or persisted response caches. Automatic serialization intentionally cannot deliver raw enrollment material. A CLI or UI must deliberately implement this one-time display path.
 
 If activation commits but confirmation is lost, no recovery codes are returned and their plaintext cannot be reconstructed from storage. Reconcile status, authenticate using a fresh TOTP and use an authorized replacement enrollment to generate new recovery codes. A lost successful verification response may have consumed its TOTP counter or recovery code; it never grants a session without proof.
 
@@ -60,4 +60,12 @@ go test -race -tags integration ./pkg/extensions/security
 go vet -tags integration ./pkg/extensions/security
 ```
 
-CLI/enrollment/login UI, QR provisioning, primary-auth challenge/session binding, API and Guard wiring, key rotation, recovery-code rotation/reset tooling, emergency approval discovery/notification, production access review and full upstream regression acceptance remain pending. No deployment or production MFA claim is authorized by these package tests.
+QR provisioning, CLI, key rotation, recovery-code rotation/reset tooling, emergency approval discovery/notification, production access review and full upstream regression acceptance remain pending. No deployment or production MFA claim is authorized by these package tests.
+
+## Host API and session policy
+
+Authenticated routes under `/api/extensions/security` provide `GET /mfa` (status), `POST /mfa/enroll`, `/mfa/confirm`, `/mfa/challenge` and `/mfa/revoke`. Enrollment returns a setup key once with `Cache-Control: no-store`; confirmation returns ten recovery codes once. Challenge takes `code` and an optional `recovery` boolean and upgrades the authenticated browser session after successful factor verification. Primary identity always comes from server-authenticated claims. The screen at `/security/mfa` is linked from the profile and retains secrets only in component memory.
+
+Emergency `POST /emergency/request` takes exact `resource`, `permission`, `reason` and `duration_seconds`; `/approve` and `/revoke` take `id` and expected `version`; `/use` takes `id`, exact `resource` and `permission`. Request bodies never supply an Actor. Use returns only the decision for that check; it does not mint an access token or change a role. A protected operation must still authorize its own exact scope using the module policy.
+
+The host MFA freshness fallback is twelve hours and is configurable by trusted server configuration. This is a synthetic development policy, not an approved production security SLA. Refresh never extends this window. Ordinary upstream authentication remains available when security is disabled; protected extension actors fail closed without the configured security service, explicit grants and a current MFA proof.

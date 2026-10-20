@@ -14,6 +14,7 @@ type Actor struct {
 	Permissions    []string
 	SessionID      string
 	MFA            bool
+	MFAGeneration  uint64
 }
 
 func (a Actor) Has(permission string) bool {

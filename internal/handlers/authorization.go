@@ -32,6 +32,9 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			_ = r.SendErrorEnvelope(401, "Unauthorized", nil, "")
 			return nil
 		}
+		if a.extensionOwnsAuthorization(path, method) {
+			return r
+		}
 		if (path == "/api/channels" && method == "GET") || (path == "/api/channels/preview" && method == "POST") {
 			act := models.ActionRead
 			if method == "POST" {

@@ -264,7 +264,7 @@ func (s *Service) BeginEnrollment(ctx context.Context, a ext.Actor) (Enrollment,
 		if e != nil {
 			return e
 		}
-		if s.locked(c) || (c.enabled && !a.MFA) {
+		if s.locked(c) || !enrollmentActorCurrent(c, a) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "mfa.enrollment.denied", a.UserID, "verification_required")
 		}
@@ -296,7 +296,7 @@ func (s *Service) ConfirmEnrollment(ctx context.Context, a ext.Actor, enrollment
 		if e != nil {
 			return e
 		}
-		if c.pendingID != enrollmentID || !c.pendingExpires.Valid || !s.now().Before(c.pendingExpires.Time) || s.locked(c) || (c.enabled && !a.MFA) {
+		if c.pendingID != enrollmentID || !c.pendingExpires.Valid || !s.now().Before(c.pendingExpires.Time) || s.locked(c) || !enrollmentActorCurrent(c, a) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "mfa.enrollment.denied", a.UserID, "invalid_enrollment")
 		}
@@ -467,7 +467,7 @@ func (s *Service) Revoke(ctx context.Context, a ext.Actor, expected uint64) (Cre
 		if e != nil {
 			return e
 		}
-		if !c.enabled || c.generation != expected {
+		if !c.enabled || c.generation != expected || c.generation != a.MFAGeneration {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "mfa.revoke.denied", a.UserID, "stale_generation")
 		}
@@ -491,4 +491,12 @@ func (s *Service) Revoke(ctx context.Context, a ext.Actor, expected uint64) (Cre
 		return CredentialView{}, ErrDenied
 	}
 	return result, nil
+}
+
+// Both enrollment phases bind trusted MFA to the locked credential snapshot.
+func enrollmentActorCurrent(c credential, a ext.Actor) bool {
+	if a.MFA {
+		return c.enabled && a.MFAGeneration > 0 && a.MFAGeneration == c.generation
+	}
+	return !c.enabled && c.generation == 0
 }

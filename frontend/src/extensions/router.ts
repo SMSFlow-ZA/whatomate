@@ -1,11 +1,12 @@
 import { watch } from "vue";
-import type { RouteLocationNormalized, Router } from "vue-router";
+import type { RouteLocationNormalized, RouteRecordRaw, Router } from "vue-router";
 import type { ExtensionRegistry } from "./registry";
 import { parseExtensionPermission } from "./permissions";
 
 export interface ExtensionAuth {
   readonly isAuthenticated: boolean;
   readonly user: unknown;
+  readonly extensionRevision?: number;
   hasExtensionPermission(descriptor: string): boolean;
 }
 
@@ -47,8 +48,7 @@ export function bindExtensionRouter(
   auth: ExtensionAuth,
   parentName = "app-layout",
 ) {
-  let removers: Array<() => void> = [];
-  let ownedNames = new Set<string>();
+  const installed = new Map<string, { route: RouteRecordRaw; remove: () => void }>();
   const synchronize = () => {
     const routes = auth.isAuthenticated
       ? registry.discover((permission) =>
@@ -59,7 +59,7 @@ export function bindExtensionRouter(
       throw new Error("Extension application layout missing");
     const hostRoutes = router
       .getRoutes()
-      .filter((route) => !ownedNames.has(String(route.name)));
+      .filter((route) => !installed.has(String(route.name)));
     for (const route of routes) {
       if (
         hostRoutes.some(
@@ -70,11 +70,22 @@ export function bindExtensionRouter(
         throw new Error(`Extension route collision: ${String(route.name)}`);
       }
     }
-    for (const remove of removers) remove();
-    removers = [];
-    ownedNames = new Set(routes.map((route) => String(route.name)));
-    for (const route of routes)
-      removers.push(router.addRoute(parentName, route));
+    const desired = new Map(routes.map(route => [String(route.name), route]));
+    const signature = (route: RouteRecordRaw) => JSON.stringify([route.name, route.path, route.meta]);
+    // Equivalent user/catalog refreshes must not destroy a pending navigation's
+    // route records. Guards retain live authority closures, not cached grants.
+    for (const [name, existing] of installed) {
+      const replacement = desired.get(name);
+      if (!replacement || signature(existing.route) !== signature(replacement) ||
+          existing.route.component !== replacement.component) {
+        existing.remove();
+        installed.delete(name);
+      }
+    }
+    for (const [name, route] of desired) {
+      if (!installed.has(name))
+        installed.set(name, { route, remove: router.addRoute(parentName, route) });
+    }
     const current = router.currentRoute.value;
     if (
       isExtensionLocation(current) &&
@@ -86,7 +97,7 @@ export function bindExtensionRouter(
   // Validate before creating a watcher so initial collisions leave no subscription.
   synchronize();
   const stopWatch = watch(
-    () => [auth.isAuthenticated, auth.user],
+    () => [auth.isAuthenticated, auth.user, auth.extensionRevision],
     synchronize,
     { deep: true, flush: "sync" },
   );
@@ -99,9 +110,8 @@ export function bindExtensionRouter(
     stop() {
       stopWatch();
       removeGuard();
-      for (const remove of removers) remove();
-      removers = [];
-      ownedNames.clear();
+      for (const { remove } of installed.values()) remove();
+      installed.clear();
     },
   };
 }

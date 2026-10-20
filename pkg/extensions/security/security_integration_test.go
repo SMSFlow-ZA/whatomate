@@ -116,6 +116,7 @@ func TestSQLTOTPAndRecoverySingleUseAndCredentialRevocation(t *testing.T) {
 		t.Fatalf("recovery winners %d", n)
 	}
 	actor.MFA = true
+	actor.MFAGeneration = 1
 	view, e := s.Revoke(ctx, actor, generation)
 	if e != nil || view.Generation() != 2 || view.Enabled() {
 		t.Fatal("credential revocation", e)
@@ -143,6 +144,7 @@ func TestSQLBreakGlassSeparateApprovalScopeExpiryAndRevocation(t *testing.T) {
 	ctx := context.Background()
 	activation, _ := enroll(t, s, actor, clock.Load())
 	actor.MFA = true
+	actor.MFAGeneration = 1
 	grant, e := s.RequestBreakGlass(ctx, actor, "cases:case-1", "cases:read", "incident:synthetic", 20*time.Minute)
 	if e != nil {
 		t.Fatal(e)
@@ -158,6 +160,7 @@ func TestSQLBreakGlassSeparateApprovalScopeExpiryAndRevocation(t *testing.T) {
 	approver.MFA = false
 	enroll(t, s, approver, clock.Load())
 	approver.MFA = true
+	approver.MFAGeneration = 1
 	grant, e = s.ApproveBreakGlass(ctx, approver, grant.ID(), 1)
 	if e != nil {
 		t.Fatal(e)
@@ -228,6 +231,7 @@ func TestSQLExplicitBreakGlassRevocationAndPermissionAllowlist(t *testing.T) {
 	ctx := context.Background()
 	enroll(t, s, actor, clock.Load())
 	actor.MFA = true
+	actor.MFAGeneration = 1
 	if _, e := s.RequestBreakGlass(ctx, actor, "cases:case-1", "cases:delete", "incident:synthetic", time.Minute); !errors.Is(e, ErrDenied) {
 		t.Fatal("permission outside host allowlist", e)
 	}
@@ -240,6 +244,7 @@ func TestSQLExplicitBreakGlassRevocationAndPermissionAllowlist(t *testing.T) {
 	approver.MFA = false
 	enroll(t, s, approver, clock.Load())
 	approver.MFA = true
+	approver.MFAGeneration = 1
 	grant, e = s.ApproveBreakGlass(ctx, approver, grant.ID(), 1)
 	if e != nil {
 		t.Fatal(e)
@@ -301,5 +306,20 @@ func TestSQLEnrollmentExpiryAndReplacementRequireVerifiedMFA(t *testing.T) {
 	}
 	if _, e = s.RequestBreakGlass(ctx, actor, "cases:x", "cases:read", "incident:mfa", time.Minute); !errors.Is(e, ErrDenied) {
 		t.Fatal("unverified MFA emergency request", e)
+	}
+}
+
+// A trusted bridge may have read an MFA actor just before another request revokes
+// it. The security transaction must reject that stale actor even when MFA=true.
+func TestSQLStaleActorCannotEnrollAfterCredentialRevocation(t *testing.T) {
+	s, _, actor, clock := securityFixture(t)
+	activation, _ := enroll(t, s, actor, clock.Load())
+	actor.MFA = true
+	actor.MFAGeneration = activation.Verification().Generation()
+	if _, err := s.Revoke(context.Background(), actor, activation.Verification().Generation()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginEnrollment(context.Background(), actor); !errors.Is(err, ErrDenied) {
+		t.Fatalf("stale verified actor enrolled after revoke: %v", err)
 	}
 }

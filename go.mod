@@ -3,6 +3,7 @@ module github.com/shridarpatil/whatomate
 go 1.26.0
 
 require (
+	github.com/SMSFlow-ZA/whatomate-addons v0.0.0
 	github.com/aws/aws-sdk-go-v2 v1.41.9
 	github.com/aws/aws-sdk-go-v2/config v1.32.20
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.19
@@ -29,6 +30,9 @@ require (
 	gorm.io/driver/postgres v1.5.6
 	gorm.io/gorm v1.25.7
 )
+
+// Development pairing; release packaging must pin corresponding add-on source.
+replace github.com/SMSFlow-ZA/whatomate-addons => ../whatomate-addons
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect

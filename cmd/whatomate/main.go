@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
@@ -222,6 +224,13 @@ func runServer(args []string) {
 		Queue:          jobQueue,
 		HTTPClient:     httpClient,
 	}
+	// Schema installation precedes protected read callbacks and every worker.
+	if err := models.InstallProtectionGuards(db); err != nil {
+		lo.Fatal("Protection storage guards failed", "error", err)
+	}
+	if err := models.RegisterProtectionReadGuards(db); err != nil {
+		lo.Fatal("Protection read guards failed", "error", err)
+	}
 
 	// Initialize S3 client for call recordings (optional)
 	if err := app.InitializeExtensions(); err != nil {
@@ -231,6 +240,7 @@ func runServer(args []string) {
 		lo.Fatal("Channel registration failed", "error", err)
 	}
 	channelCancel := app.StartChannelWorker()
+	extensionCancel := app.StartExtensionWorker()
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
 		var err error
@@ -283,11 +293,17 @@ func runServer(args []string) {
 	setupRoutes(g, app, lo, cfg.Server.BasePath, rdb, cfg)
 
 	// Create server with CORS wrapper
+	maxRequestBytes := 15 * 1024 * 1024
+	if strings.TrimSpace(cfg.Extensions.Modules) != "" {
+		// The knowledge handler applies its own 20 MiB file and 64 KiB multipart
+		// bounds. Preserve the ordinary host limit when no modules are enabled.
+		maxRequestBytes = (20 << 20) + (64 << 10)
+	}
 	server := &fasthttp.Server{
 		Handler:            corsWrapper(g.Handler(), allowedOrigins),
 		ReadTimeout:        time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout:       time.Duration(cfg.Server.WriteTimeout) * time.Second,
-		MaxRequestBodySize: 15 * 1024 * 1024,
+		MaxRequestBodySize: maxRequestBytes,
 		Name:               "Whatomate",
 	}
 
@@ -340,6 +356,7 @@ func runServer(args []string) {
 
 	lo.Info("Shutting down...")
 	channelCancel()
+	extensionCancel()
 
 	// Stop campaign stats subscriber
 	lo.Info("Stopping campaign stats subscriber...")
@@ -428,6 +445,12 @@ func runWorker(args []string) {
 	lo.Info("Connected to PostgreSQL")
 
 	// Connect to Redis
+	if err := models.InstallProtectionGuards(db); err != nil {
+		lo.Fatal("Worker protection storage guards failed", "error", err)
+	}
+	if err := models.RegisterProtectionReadGuards(db); err != nil {
+		lo.Fatal("Worker protection read guards failed", "error", err)
+	}
 	if err := plan.Install(db, cfg.Plan); err != nil {
 		lo.Fatal("Managed plan initialization failed", "error", err)
 	}
@@ -493,6 +516,8 @@ func runWorker(args []string) {
 // ============================================================================
 
 func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePath string, rdb *redis.Client, cfg *config.Config) {
+	app.RegisterExtensionSecurityRoutes(g)
+	app.RegisterExtensionDomainRoutes(g)
 	// Health check
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)
@@ -590,7 +615,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		}
 		// Apply auth for all other /api routes (supports both JWT and API key)
 		if len(path) > 4 && path[:4] == "/api" {
-			return middleware.AuthWithDB(app.Config.JWT.Secret, app.DB, app.Redis)(r)
+			if middleware.AuthWithDB(app.Config.JWT.Secret, app.DB, app.Redis)(r) == nil {
+				return nil
+			}
+			// Auth/bootstrap and module endpoints own their stricter per-action
+			// authorization. Generic APIs must never bypass the protected boundary.
+			if !strings.HasPrefix(path, "/api/extensions/") && !strings.HasPrefix(path, "/api/auth/") {
+				if denied, err := app.DenyGenericProtectedOrganization(r); denied || err != nil {
+					return nil
+				}
+			}
+			return r
 		}
 		return r
 	})

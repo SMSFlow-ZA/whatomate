@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -76,6 +77,9 @@ func (a *App) DispatchWebhook(orgID uuid.UUID, eventType models.WebhookEvent, da
 }
 
 func (a *App) dispatchWebhookAsync(ctx context.Context, orgID uuid.UUID, eventType string, data any) {
+	if !a.GenericOrganizationAllowed(ctx, orgID) {
+		return
+	}
 	// Find all active webhooks for this org that subscribe to this event (use cache)
 	webhooks, err := a.getWebhooksCached(orgID)
 	if err != nil {
@@ -180,6 +184,9 @@ func (a *App) sendWebhook(ctx context.Context, webhook models.Webhook, eventType
 }
 
 func (a *App) sendWebhookRequest(ctx context.Context, webhook models.Webhook, jsonData []byte) error {
+	if !a.GenericOrganizationAllowed(ctx, webhook.OrganizationID) {
+		return fmt.Errorf("protected webhook denied")
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", webhook.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err

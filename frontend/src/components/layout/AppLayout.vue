@@ -301,9 +301,9 @@ const handleLogout = async () => {
     <main id="main-content" class="flex flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
       <ManagedPlanStatus />
       <div class="flex-1 min-h-0">
-      <RouterView v-if="extensionViewAllowed" v-slot="{ Component, route: viewRoute }">
+      <RouterView :key="route.meta.extensionModule ? authStore.extensionRevision : 'host'" v-if="extensionViewAllowed" v-slot="{ Component, route: viewRoute }">
         <Transition name="page" mode="out-in">
-          <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
+          <component :is="Component" :key="viewRoute.meta.extensionModule ? `${viewRoute.path}:${authStore.extensionRevision}` : viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
         </Transition>
       </RouterView>
       </div>

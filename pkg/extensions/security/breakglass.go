@@ -77,7 +77,7 @@ func (s *Service) RequestBreakGlass(ctx context.Context, a ext.Actor, resource, 
 	var denied bool
 	e = s.transaction(ctx, func(tx *sql.Tx) error {
 		c, e := loadCredential(ctx, tx, a.OrganizationID, a.UserID)
-		if errors.Is(e, sql.ErrNoRows) || e == nil && !c.enabled {
+		if errors.Is(e, sql.ErrNoRows) || e == nil && (!c.enabled || a.MFAGeneration == 0 || c.generation != a.MFAGeneration) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "breakglass.request.denied", resource, "active_mfa_required")
 		}
@@ -107,7 +107,7 @@ func (s *Service) ApproveBreakGlass(ctx context.Context, a ext.Actor, id string,
 	var denied bool
 	e := s.transaction(ctx, func(tx *sql.Tx) error {
 		approver, e := loadCredential(ctx, tx, a.OrganizationID, a.UserID)
-		if errors.Is(e, sql.ErrNoRows) || e == nil && !approver.enabled {
+		if errors.Is(e, sql.ErrNoRows) || e == nil && (!approver.enabled || a.MFAGeneration == 0 || approver.generation != a.MFAGeneration) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "breakglass.approve.denied", id, "active_mfa_required")
 		}
@@ -163,7 +163,7 @@ func (s *Service) AuthorizeBreakGlass(ctx context.Context, a ext.Actor, id, reso
 	var denied bool
 	e := s.transaction(ctx, func(tx *sql.Tx) error {
 		c, e := loadCredential(ctx, tx, a.OrganizationID, a.UserID)
-		if errors.Is(e, sql.ErrNoRows) || e == nil && !c.enabled {
+		if errors.Is(e, sql.ErrNoRows) || e == nil && (!c.enabled || a.MFAGeneration == 0 || c.generation != a.MFAGeneration) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "breakglass.use.denied", resource, "active_mfa_required")
 		}
@@ -200,7 +200,7 @@ func (s *Service) RevokeBreakGlass(ctx context.Context, a ext.Actor, id string, 
 	var denied bool
 	e := s.transaction(ctx, func(tx *sql.Tx) error {
 		c, e := loadCredential(ctx, tx, a.OrganizationID, a.UserID)
-		if errors.Is(e, sql.ErrNoRows) || e == nil && !c.enabled {
+		if errors.Is(e, sql.ErrNoRows) || e == nil && (!c.enabled || a.MFAGeneration == 0 || c.generation != a.MFAGeneration) {
 			denied = true
 			return s.audit(ctx, tx, a.OrganizationID, a.UserID, a.UserID, "breakglass.revoke.denied", id, "active_mfa_required")
 		}

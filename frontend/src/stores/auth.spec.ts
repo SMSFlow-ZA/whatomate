@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from './auth'
+import { refreshExtensionSession } from '@/extensions/session'
 
 const { post } = vi.hoisted(() => ({ post: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/services/api', () => ({ api: { post } }))
@@ -25,7 +26,7 @@ it('reports revocation failure instead of claiming that the session was logged o
   expect(store.isAuthenticated).toBe(true)
 })
 
-it('requires explicit extension grants even for superadmins and organization administrators', () => {
+it('requires explicit extension grants even for superadmins and organization administrators', async () => {
   const store = useAuthStore()
   const user = { id: 'user', email: 'user@example.test', full_name: 'User', organization_id: 'org', is_super_admin: true,
     role: { id: 'admin', name: 'admin', is_system: true, permissions: [] as {id:string;resource:string;action:string}[] } }
@@ -37,6 +38,8 @@ it('requires explicit extension grants even for superadmins and organization adm
   expect(store.hasExtensionPermission('cases:read')).toBe(false)
   user.role.permissions = [{ id: 'explicit', resource: 'cases', action: 'work.assigned' }]
   store.setAuth({ user })
+  expect(store.hasExtensionPermission('cases:work.assigned')).toBe(false)
+  await refreshExtensionSession(async()=>({mfa_verified:true,modules:[{id:'cases',api_version:1}],permissions:['cases:work.assigned'],grants:[]}))
   expect(store.hasExtensionPermission('cases:work.assigned')).toBe(true)
   for (const permission of ['cases:read', 'cases:work', 'cases:*', 'cases:work..assigned', 'cases:work.assigned:extra', '../cases:work.assigned']) {
     expect(store.hasExtensionPermission(permission)).toBe(false)

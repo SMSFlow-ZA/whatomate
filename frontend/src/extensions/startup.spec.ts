@@ -1,0 +1,20 @@
+import { expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+vi.mock('vue-router',async()=>{ const actual=await vi.importActual<typeof import('vue-router')>('vue-router');return {...actual,createWebHistory:actual.createMemoryHistory} })
+vi.mock('@/services/api',()=>({api:{get:vi.fn().mockRejectedValue(new Error('unauthenticated'))}}))
+vi.mock('@/services/websocket',()=>({wsService:{disconnect:vi.fn()}}))
+vi.mock('@/views/auth/LoginView.vue',()=>({default:{render:()=>null}}))
+vi.mock('@/views/dashboard/DashboardView.vue',()=>({default:{render:()=>null}}))
+vi.mock('@/components/layout/AppLayout.vue',()=>({default:{render:()=>null}}))
+it('resolves an initial unauthenticated root visit to login without a blank route',async()=>{
+ vi.stubEnv('VITE_EXTENSION_MODULES','directory,cases,knowledge,ai,conversation,reports')
+ vi.stubGlobal('window',{__BASE_PATH__:'',addEventListener:vi.fn(),removeEventListener:vi.fn(),setInterval:vi.fn(),clearInterval:vi.fn()})
+ vi.stubGlobal('localStorage',{getItem:vi.fn().mockReturnValue(null),setItem:vi.fn(),removeItem:vi.fn()})
+ setActivePinia(createPinia())
+ const {default:router}=await import('@/router')
+ const errors:unknown[]=[];router.onError(error=>errors.push(error))
+ await router.push('/')
+ expect(errors).toEqual([])
+ expect(router.currentRoute.value.path).toBe('/login')
+ expect(router.currentRoute.value.matched.map(r=>r.name)).toContain('login')
+})

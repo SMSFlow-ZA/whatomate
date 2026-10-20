@@ -185,6 +185,9 @@ type ExportRequest struct {
 
 // ExportData handles generic data export
 func (a *App) ExportData(r *fastglue.Request) error {
+	if denied, err := a.DenyGenericProtectedOrganization(r); denied {
+		return err
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

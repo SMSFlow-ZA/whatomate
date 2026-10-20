@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { clearExtensionSession } from '@/extensions/session'
 import { extensionRegistry, bindExtensionRouter, canEnterExtensionRoute, isExtensionLocation } from '@/extensions'
 
 // Permission-based route meta type
@@ -42,6 +43,11 @@ const router = createRouter({
       component: () => import('@/components/layout/AppLayout.vue'),
       meta: { requiresAuth: true },
       children: [
+        {
+          path: 'security/mfa',
+          name: 'extension-mfa',
+          component: () => import('@/views/auth/ExtensionMFAView.vue')
+        },
         {
           path: '',
           name: 'dashboard',
@@ -423,16 +429,23 @@ router.beforeEach(async (to, _from, next) => {
     authStore.restoreSession()
   }
 
-  if (!extensionBinding) {
-    extensionBinding = bindExtensionRouter(router, extensionRegistry, authStore)
-    // Initial URL resolution may have happened before permitted addon records
-    // were registered. Resolve once more beneath the authenticated app layout.
-    const resolved = router.resolve(to.fullPath)
-    if (resolved.meta.extensionModule && !to.meta.extensionModule) {
-      return next({ path: to.path, query: to.query, hash: to.hash, replace: true })
-    }
+  if (authStore.isAuthenticated && extensionRegistry.capabilities().some(m => m.enabled)) {
+    await authStore.refreshExtensionAccess()
   }
 
+  if (!extensionBinding) {
+    extensionBinding = bindExtensionRouter(router, extensionRegistry, authStore)
+  }
+
+  // Catalog refresh can add a permitted route after this navigation was resolved,
+  // including when the binding already existed before MFA/catalog readiness.
+  // Rematch before applying policy to stale catchall or former grant metadata.
+  const resolved = router.resolve(to.fullPath)
+  if (resolved.meta.extensionModule && canEnterExtensionRoute(resolved, authStore) &&
+      (resolved.name !== to.name || resolved.meta.permission !== to.meta.permission ||
+       resolved.meta.extensionModule !== to.meta.extensionModule)) {
+    return next({ path: to.path, query: to.query, hash: to.hash, replace: true })
+  }
   if (isExtensionLocation(to) && !canEnterExtensionRoute(to, authStore)) {
     return next(authStore.isAuthenticated
       ? { path: getFirstAccessibleRoute(authStore) }
@@ -463,4 +476,33 @@ router.beforeEach(async (to, _from, next) => {
   next()
 })
 
+// Recheck active sessions even without navigation. No readiness is persisted.
+const recheckExtensions = () => {
+  const auth = useAuthStore()
+  if (auth.isAuthenticated && extensionRegistry.capabilities().some(m => m.enabled)) void auth.refreshExtensionAccess()
+}
+window.addEventListener('focus', recheckExtensions)
+window.addEventListener('extension-security-changed', recheckExtensions)
+const onStorage = (event:StorageEvent) => {
+  const auth = useAuthStore()
+  if (event.key === 'user') {
+    let identity: {id?:string;organization_id?:string} | null = null
+    try { identity = event.newValue ? JSON.parse(event.newValue) : null } catch { /* Invalid storage is not authority. */ }
+    if (!identity || identity.id !== auth.user?.id || identity.organization_id !== auth.organizationId) auth.clearAuth()
+    else {
+      clearExtensionSession()
+      void auth.refreshUserData().then(recheckExtensions)
+    }
+  } else if (event.key === 'selected_organization_id' && event.newValue && event.newValue !== auth.organizationId) auth.clearAuth()
+}
+window.addEventListener('storage', onStorage)
+const extensionTimer = window.setInterval(() => {
+  if (isExtensionLocation(router.currentRoute.value)) recheckExtensions()
+}, 15000)
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  window.clearInterval(extensionTimer)
+  window.removeEventListener('focus', recheckExtensions)
+  window.removeEventListener('extension-security-changed', recheckExtensions)
+  window.removeEventListener('storage', onStorage)
+})
 export default router

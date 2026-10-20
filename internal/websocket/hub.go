@@ -26,7 +26,8 @@ type Hub struct {
 	mu sync.RWMutex
 
 	// logger
-	log logf.Logger
+	log           logf.Logger
+	deliveryGuard func(uuid.UUID, uuid.UUID, WSMessage) bool
 }
 
 // NewHub creates a new Hub instance
@@ -136,6 +137,9 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 			return
 		}
 		for client := range userClients {
+			if !h.allowDelivery(client, msg.Message) {
+				continue
+			}
 			select {
 			case client.send <- data:
 			default:
@@ -151,6 +155,9 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 	for _, userClients := range orgClients {
 		// Iterate through all clients (tabs) for each user
 		for client := range userClients {
+			if !h.allowDelivery(client, msg.Message) {
+				continue
+			}
 			// If ContactID is specified, only send to clients viewing that contact
 			if msg.ContactID != uuid.Nil && client.currentContact != nil && *client.currentContact != msg.ContactID {
 				continue
@@ -288,4 +295,26 @@ func (h *Hub) Register(client *Client) {
 // Unregister removes a client from the hub via the unregister channel
 func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
+}
+
+// SetDeliveryGuard installs host policy before Run. Every recipient is checked
+// immediately before enqueueing, including direct user broadcasts.
+func (h *Hub) SetDeliveryGuard(guard func(uuid.UUID, uuid.UUID, WSMessage) bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.deliveryGuard = guard
+}
+func (h *Hub) allowDelivery(client *Client, msg WSMessage) (allowed bool) {
+	defer func() {
+		if recover() != nil {
+			allowed = false
+		}
+	}()
+	if client.deliveryCheck != nil && !client.deliveryCheck() {
+		return false
+	}
+	if h.deliveryGuard == nil {
+		return true
+	}
+	return h.deliveryGuard(client.organizationID, client.userID, msg)
 }

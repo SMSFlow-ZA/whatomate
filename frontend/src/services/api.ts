@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import { clearExtensionSession, extensionSession } from '@/extensions/session'
 import type { ChannelSendFields } from '@/lib/channels'
 
 // Get base path from server-injected config or fallback
@@ -42,6 +43,7 @@ export function getRequestHeaders(opts?: { csrf?: boolean }): Record<string, str
 // Request interceptor to add CSRF token and organization header
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (config.url?.startsWith('/extensions/') && !('_extensionRevision' in config)) Object.assign(config, { _extensionRevision: extensionSession.revision })
     // Add CSRF token on mutating requests (cookie-based auth sends cookies automatically)
     const method = (config.method || '').toUpperCase()
     if (method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH') {
@@ -97,15 +99,25 @@ async function refreshAccessToken(): Promise<void> {
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const url = response.config.url || ''
+    if (url.startsWith('/extensions/') && url !== '/extensions/catalog') {
+      const revision = (response.config as InternalAxiosRequestConfig & {_extensionRevision?:number})._extensionRevision
+      if (revision !== extensionSession.revision) return Promise.reject(new Error('Extension session changed'))
+      if (url.startsWith('/extensions/security/') && (response.config.method || '').toUpperCase() !== 'GET') clearExtensionSession()
+      if (url === '/extensions/security/mfa' && response.data?.data?.verified === true) window.dispatchEvent(new Event('extension-security-changed'))
+    }
+    return response
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
+    if (error.response?.status === 401 || (error.response?.status === 403 && originalRequest?.url?.startsWith('/extensions/'))) clearExtensionSession()
     // Skip token refresh logic for auth endpoints
     const isAuthEndpoint = originalRequest?.url?.startsWith('/auth/')
 
     // Handle 401 errors - try to refresh token (but not for auth endpoints)
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthEndpoint) {
       originalRequest._retry = true
 
       // If a refresh is already in flight, queue this request to wait for it

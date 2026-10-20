@@ -40,7 +40,7 @@ var _ queue.JobHandler = (*Worker)(nil)
 func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*Worker, error) {
 	// The campaign worker has no compiled protected-domain composition yet.
 	// Standalone workers must not bypass the server's readiness gate.
-	if cfg == nil || cfg.Extensions.ProtectedMode || strings.TrimSpace(cfg.Extensions.Required) != "" || strings.TrimSpace(cfg.Extensions.RequiredInbound) != "" {
+	if cfg == nil || cfg.Extensions.ProtectedMode || strings.TrimSpace(cfg.Extensions.Modules) != "" || strings.TrimSpace(cfg.Extensions.Required) != "" || strings.TrimSpace(cfg.Extensions.RequiredInbound) != "" {
 		return nil, fmt.Errorf("worker extension composition is unavailable")
 	}
 	consumer, err := queue.NewRedisConsumer(rdb, log)
@@ -81,6 +81,9 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // HandleRecipientJob processes a single recipient message job
 func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob) error {
+	if job == nil || !models.GenericOrganizationAllowed(ctx, w.DB, job.OrganizationID) {
+		return fmt.Errorf("generic campaign dispatch denied for protected organization")
+	}
 	// Check if campaign is still active before sending
 	var campaign models.BulkMessageCampaign
 	if err := w.DB.Where("id = ? AND organization_id = ?", job.CampaignID, job.OrganizationID).Preload("Template").First(&campaign).Error; err != nil {

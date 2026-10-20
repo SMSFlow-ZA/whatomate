@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 
+	addonapi "github.com/SMSFlow-ZA/whatomate-addons/api"
+	"github.com/SMSFlow-ZA/whatomate-addons/conversation"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/assignment"
@@ -16,28 +18,35 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	extsecurity "github.com/shridarpatil/whatomate/pkg/extensions/security"
 	extensions "github.com/shridarpatil/whatomate/pkg/extensions/v1"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
+	"time"
 )
 
 // App holds all dependencies for handlers
 type App struct {
-	ExtensionRegistry *extensions.Registry
-	ExtensionGuard    *extensions.Guard
-	BuildSourceURL    string
-	Config            *config.Config
-	DB                *gorm.DB
-	Redis             *redis.Client
-	Log               logf.Logger
-	WhatsApp          *whatsapp.Client
-	WSHub             *websocket.Hub
-	Queue             queue.Queue
-	Channels          *channelapp.Service
-	CampaignSubCancel context.CancelFunc
+	ExtensionRegistry     *extensions.Registry
+	ExtensionGuard        *extensions.Guard
+	ExtensionSecurity     *extsecurity.Service
+	ExtensionMFAFreshness time.Duration
+	ExtensionAPI          map[string]http.Handler
+	ExtensionConversation *conversation.Service
+	ExtensionAccess       *addonapi.AccessStore
+	BuildSourceURL        string
+	Config                *config.Config
+	DB                    *gorm.DB
+	Redis                 *redis.Client
+	Log                   logf.Logger
+	WhatsApp              *whatsapp.Client
+	WSHub                 *websocket.Hub
+	Queue                 queue.Queue
+	Channels              *channelapp.Service
+	CampaignSubCancel     context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)

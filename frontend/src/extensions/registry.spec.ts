@@ -229,3 +229,19 @@ describe("compiled extension registry", () => {
     ]);
   });
 });
+
+it('validates and detaches same-module alternatives, then binds a single granted permission',()=>{
+ const manifest=moduleManifest()
+ const alternatives=['cases:work.assigned']
+ const routes=[{...manifest.routes[0],anyOf:alternatives}]
+ const navigation=[{...manifest.navigation[0],anyOf:alternatives}]
+ const registry=createExtensionRegistry([{...manifest,routes,navigation}],{'cases/Inbox':Page},['cases'])
+ alternatives.push('cases:delete')
+ expect(registry.discover(p=>p==='cases:delete').routes).toHaveLength(0)
+ const visible=registry.discover(p=>p==='cases:work.assigned')
+ expect(visible.routes[0].meta?.permission).toBe('cases:work.assigned')
+ expect(visible.navigation[0].permission).toBe('cases:work.assigned')
+ for(const anyOf of [['users:read'],['cases:*'],[],['cases:read']]) {
+  expect(()=>createExtensionRegistry([{...manifest,routes:[{...manifest.routes[0],anyOf}]}],{'cases/Inbox':Page},['cases'])).toThrow()
+ }
+})

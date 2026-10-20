@@ -68,7 +68,7 @@ func TestApp_ServeMedia_Success_WithContactsRead(t *testing.T) {
 	require.NoError(t, app.ServeMedia(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 	assert.Equal(t, "image/jpeg", string(req.RequestCtx.Response.Header.Peek("Content-Type")))
-	assert.Equal(t, "private, max-age=3600", string(req.RequestCtx.Response.Header.Peek("Cache-Control")))
+	assert.Equal(t, "private, no-store", string(req.RequestCtx.Response.Header.Peek("Cache-Control")))
 	assert.Equal(t, "\xFF\xD8\xFF\xE0jpeg-bytes", string(testutil.GetResponseBody(req)))
 }
 

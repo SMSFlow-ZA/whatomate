@@ -1,10 +1,11 @@
 # Compiled frontend extension registry
 
-`frontend/src/extensions/index.ts` exports an empty `extensionRegistry` by
-default. No addon routes, navigation or panels exist unless trusted build code
+`frontend/src/extensions/compiledCatalog.ts` provides a statically imported
+workspace catalog for directory, cases, knowledge, AI, synthetic conversation and
+reports. Trusted build variable `VITE_EXTENSION_MODULES` is a comma-separated
+allowlist, empty by default. No addon routes, navigation or panels exist unless trusted build code
 supplies its manifest, statically imported component map and explicit enabled
-module ID. This is a generic SDK boundary; it contains no addon feature pages and
-does not claim that any backend workflow is implemented or production ready.
+module ID. The catalog alone does not establish backend or release readiness.
 
 ## Public interface
 
@@ -72,7 +73,7 @@ a transition animation. Addon navigation labels render as plain Vue text.
 
 `useExtensions` supplies reactive `navigation` and `panelsFor(slot)` computed
 values. The layout consumes navigation. Panel hooks are reusable integration
-points; no real addon panel, directory screen or case-work screen is bundled.
+points. The compiled catalog supplies domain workspaces; no addon panel is declared.
 
 When introducing a real addon, the host integration must:
 
@@ -96,7 +97,7 @@ When introducing a real addon, the host integration must:
 5. Continue to enforce every operation in backend extension routes. Client-side
    hiding and route guards are presentation boundaries, not server authority.
 
-The default empty catalog contributes no routes, navigation or panels. It does
+The default disabled catalog contributes no routes, navigation or panels. It does
 not activate backend capabilities or claim that any addon workflow is complete.
 
 ## Verification
@@ -110,3 +111,45 @@ grant revocation, logout cleanup, reused-component query transitions and host
 route collision rejection. Auth and composable tests cover administrator default
 denial and reactive nav/panel cleanup. Run `npm run test:unit -- src/extensions`,
 the full unit suite and `npm run typecheck` before integration.
+
+
+## Authenticated catalog composition
+
+The application now intersects build enablement with authenticated
+`GET /api/extensions/catalog`, exact current backend permissions and the user's
+explicit current role permissions. An MFA-verified catalog is mandatory. Neither
+restored localStorage roles nor administrator flags establish extension readiness.
+The catalog and unit/audience grants live only in memory. `extensionScopes`
+returns detached, frozen scope choices; these are presentation choices, never
+server authority. Malformed catalogs, wildcard scopes and unsupported module APIs
+deny readiness.
+
+Login, account changes and logout clear readiness. Catalog changes remove routes,
+remount the protected RouterView immediately and invalidate outstanding protected
+API responses by revision. HTTP 401 and extension 403 clear visible extension
+authority; an unknown/denied case represented as 404 does not clear the session.
+Successful MFA status refresh rebuilds catalog readiness. Protected transitions,
+window focus and a 15-second timer on an active extension refresh authorization.
+Remote revocation is immediate at the backend; passive on-screen cleanup occurs
+when the next check or API response observes it (the request timeout can add up
+to 30 seconds). This is not a WebSocket-based revocation push claim.
+
+The default build still has no extension routes. To build the development
+workspaces explicitly, set for example:
+
+```text
+VITE_EXTENSION_MODULES=directory,cases,knowledge,ai,conversation,reports
+```
+
+This enables only compiled presentation modules. The corresponding backend
+modules, scoped grants, MFA and acceptance gates are independently required.
+
+
+Workspace routes and navigation may declare bounded `anyOf` alternatives in the
+same module namespace. These are explicit alternative entry permissions, not
+permission grants or administrator shortcuts. Discovery validates every descriptor,
+snapshots the array, and binds the first currently granted descriptor as the
+single concrete `meta.permission` and route-entry check. Cases therefore admit
+`read.own`, `read.triage` and `work.assigned` users; content publishing admits
+upload/review/publish/retire users without requiring document-read authority.
+Individual domain actions still enforce their own exact current permissions.

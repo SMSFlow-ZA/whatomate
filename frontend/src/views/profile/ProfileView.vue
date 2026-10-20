@@ -96,6 +96,7 @@ async function changePassword() {
           </CardContent>
         </Card>
 
+        <RouterLink to="/security/mfa" class="inline-block underline">Manage multi-factor authentication</RouterLink>
         <!-- Change Password -->
         <Card>
           <CardHeader>

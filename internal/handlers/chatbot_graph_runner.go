@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,6 +191,27 @@ func (a *App) runChatGraph(
 // message, buttons, and end. Other types return an error until their
 // PR lands.
 func (a *App) executeChatNode(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
+	// SMS graphs have no WhatsApp account. Resolve and cross-check the trusted
+	// session/contact organization instead of treating that absence as denial.
+	orgID := uuid.Nil
+	if ctx != nil && ctx.session != nil {
+		orgID = ctx.session.OrganizationID
+	}
+	if ctx != nil && ctx.contact != nil {
+		if orgID != uuid.Nil && orgID != ctx.contact.OrganizationID {
+			return nodeOutcome{}, fmt.Errorf("inconsistent bot scope")
+		}
+		orgID = ctx.contact.OrganizationID
+	}
+	if ctx != nil && ctx.account != nil {
+		if orgID != uuid.Nil && orgID != ctx.account.OrganizationID {
+			return nodeOutcome{}, fmt.Errorf("inconsistent bot scope")
+		}
+		orgID = ctx.account.OrganizationID
+	}
+	if !a.GenericOrganizationAllowed(context.Background(), orgID) {
+		return nodeOutcome{}, fmt.Errorf("protected generic bot denied")
+	}
 	switch node.Type {
 	case ChatNodeStart:
 		// Always-present entry sentinel. No side effect — falls through.

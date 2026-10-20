@@ -10,12 +10,16 @@ export interface ExtensionRoute {
   readonly title: string;
   readonly component: string;
   readonly permission: string;
+  /** Additional explicit same-module permissions that can open this workspace. */
+  readonly anyOf?: readonly string[];
 }
 export interface ExtensionNavigation {
   readonly id: string;
   readonly label: string;
   readonly route: string;
   readonly permission: string;
+  /** Additional explicit same-module permissions that can open this workspace. */
+  readonly anyOf?: readonly string[];
 }
 export type ExtensionPanelSlot =
   | "contact.sidebar"
@@ -95,6 +99,20 @@ function ensurePermission(permission: string, module: string): void {
   if (!parsed || parsed.resource !== module)
     fail(`invalid permission namespace for ${module}`);
 }
+function ensureAlternatives(entry: {permission:string;anyOf?:readonly string[]}, module:string): void {
+  ensurePermission(entry.permission,module);
+  if (entry.anyOf !== undefined) {
+    if (!Array.isArray(entry.anyOf) || !entry.anyOf.length || entry.anyOf.length > 32) fail("invalid permission alternatives");
+    const seen = new Set<string>([entry.permission]);
+    for (const permission of entry.anyOf) {
+      ensurePermission(permission,module);
+      unique(seen,permission,"permission alternative");
+    }
+  }
+}
+function matchedPermission(check:PermissionCheck, entry:{permission:string;anyOf?:readonly string[]}):string|undefined {
+  return [entry.permission,...(entry.anyOf || [])].find(permission=>permitted(check,permission));
+}
 function ensureComponent(key: string, module: string): void {
   const [owner, name, ...rest] = key.split("/");
   if (owner !== module || !name || !componentName.test(name) || rest.length)
@@ -136,8 +154,8 @@ export function createExtensionRegistry(
     const module: ExtensionManifest = {
       ...original,
       requires: [...original.requires],
-      routes: original.routes.map((route) => ({ ...route })),
-      navigation: original.navigation.map((item) => ({ ...item })),
+      routes: original.routes.map((route) => ({ ...route, ...(route.anyOf !== undefined ? {anyOf:[...route.anyOf]} : {}) })),
+      navigation: original.navigation.map((item) => ({ ...item, ...(item.anyOf !== undefined ? {anyOf:[...item.anyOf]} : {}) })),
       panels: original.panels.map((panel) => ({ ...panel })),
     };
     const routeIDs = new Set<string>(),
@@ -151,7 +169,7 @@ export function createExtensionRegistry(
       if (!route.title || route.title.length > 128) fail("invalid route title");
       unique(routeIDs, route.id, "route ID");
       unique(paths, route.path, "route path");
-      ensurePermission(route.permission, module.id);
+      ensureAlternatives(route, module.id);
       ensureComponent(route.component, module.id);
     }
     for (const item of module.navigation) {
@@ -161,7 +179,7 @@ export function createExtensionRegistry(
         fail("invalid navigation label");
       if (!routeIDs.has(item.route))
         fail(`unknown navigation route: ${item.route}`);
-      ensurePermission(item.permission, module.id);
+      ensureAlternatives(item, module.id);
     }
     for (const panel of module.panels) {
       ensureIdentifier(panel.id, "panel ID");
@@ -222,7 +240,8 @@ export function createExtensionRegistry(
         if (!enabled.has(module.id)) continue;
         const visibleRoutes = new Set<string>();
         for (const route of module.routes) {
-          if (!permitted(check, route.permission)) continue;
+          const permission = matchedPermission(check,route);
+          if (!permission) continue;
           visibleRoutes.add(route.id);
           routes.push({
             name: routeName(module.id, route.id),
@@ -230,23 +249,21 @@ export function createExtensionRegistry(
             component: components[route.component],
             meta: {
               requiresAuth: true,
-              permission: route.permission,
+              permission,
               extensionModule: module.id,
               title: route.title,
             },
-            beforeEnter: () => permitted(check, route.permission),
+            beforeEnter: () => permitted(check, permission),
           });
         }
         for (const item of module.navigation) {
-          if (
-            visibleRoutes.has(item.route) &&
-            permitted(check, item.permission)
-          )
+          const permission = matchedPermission(check,item);
+          if (visibleRoutes.has(item.route) && permission)
             navigation.push({
               id: `extension:${module.id}:${item.id}`,
               module: module.id,
               label: item.label,
-              permission: item.permission,
+              permission,
               to: { name: routeName(module.id, item.route) },
             });
         }

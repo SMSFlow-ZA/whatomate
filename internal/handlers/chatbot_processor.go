@@ -142,6 +142,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
+	if !a.GenericOrganizationAllowed(context.Background(), account.OrganizationID) {
+		return
+	}
 	// Eligibility precedes contact creation, reactions, media retrieval, message
 	// persistence, callbacks and bot processing. Do not log rejected payload/PII.
 	if err := a.checkExtensionInbound(context.Background(), account.OrganizationID, account.ID.String(), msg); err != nil {
@@ -824,6 +827,9 @@ type ApiResponse struct {
 // Mirrors fetchAPIContext in seeding implicit variables (phone_number) so flow-step
 // API templates can interpolate {{phone_number}} just like AI-context API templates.
 func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+	if !a.GenericOrganizationAllowed(context.Background(), settings.OrganizationID) {
+		return "", fmt.Errorf("protected AI denied")
+	}
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
@@ -841,6 +847,9 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 
 // buildAIContext fetches and combines all AI context data
 func (a *App) buildAIContext(orgID uuid.UUID, session *models.ChatbotSession, userMessage string) string {
+	if !a.GenericOrganizationAllowed(context.Background(), orgID) {
+		return ""
+	}
 	// Get WhatsApp account for cache key
 	whatsAppAccount := ""
 	if session != nil {

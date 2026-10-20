@@ -40,6 +40,21 @@ type ExtensionsConfig struct {
 	Required        string `koanf:"required"`
 	RequiredInbound string `koanf:"required_inbound"`
 	ProtectedMode   bool   `koanf:"protected_mode"`
+	// SecurityKey is a base64-encoded 32-byte secret supplied by the operator.
+	SecurityKey                  string `koanf:"security_key"`
+	MFAFreshnessSeconds          int    `koanf:"mfa_freshness_seconds"`
+	Modules                      string `koanf:"modules"`
+	RosterFreshnessSeconds       int    `koanf:"roster_freshness_seconds"`
+	SyntheticDevelopment         bool   `koanf:"synthetic_development"`
+	DevelopmentAIEndpoint        string `koanf:"development_ai_endpoint"`
+	DevelopmentModelDigest       string `koanf:"development_model_digest"`
+	DevelopmentEmbeddingDigest   string `koanf:"development_embedding_digest"`
+	ReportsMinGroup              int    `koanf:"reports_min_group"`
+	ConversationEmployeeAudience string `koanf:"conversation_employee_audience"`
+	EscalationAfterSeconds       int    `koanf:"escalation_after_seconds"`
+	EscalationWorkerIDs          string `koanf:"escalation_worker_ids"`
+	RoutingPrimaryIDs            string `koanf:"routing_primary_ids"`
+	RoutingBackupIDs             string `koanf:"routing_backup_ids"`
 }
 
 type ChannelsConfig struct {

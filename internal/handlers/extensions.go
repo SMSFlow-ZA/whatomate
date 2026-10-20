@@ -27,6 +27,9 @@ func (a *App) InitializeExtensions() error {
 	if a.Config == nil {
 		return fmt.Errorf("missing extension configuration")
 	}
+	if err := a.initializeExtensionSecurity(); err != nil {
+		return err
+	}
 	if a.Config.Extensions.ProtectedMode {
 		return fmt.Errorf("protected mode is unavailable until host read/event/MFA integration is accepted")
 	}
@@ -36,7 +39,11 @@ func (a *App) InitializeExtensions() error {
 	if a.ExtensionGuard == nil {
 		a.ExtensionGuard = ext.NewGuard()
 	}
+	if err := a.initializeCompiledModules(); err != nil {
+		return err
+	}
 	required := append(extensionIDs(a.Config.Extensions.Required), extensionIDs(a.Config.Extensions.RequiredInbound)...)
+	required = append(required, extensionIDs(a.Config.Extensions.Modules)...)
 	return a.ExtensionRegistry.Validate(required)
 }
 

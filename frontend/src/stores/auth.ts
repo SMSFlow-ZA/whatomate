@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/services/api'
 import { parseExtensionPermission } from '@/extensions/permissions'
+import { extensionSession, extensionIdentity, clearExtensionSession, extensionPermission, refreshExtensionSession } from '@/extensions/session'
 
 export interface UserSettings {
   email_notifications?: boolean
@@ -55,11 +56,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAvailable = computed(() => user.value?.is_available ?? true)
 
   function setAuth(authData: { user: User }) {
+    clearExtensionSession(`${authData.user.organization_id}:${authData.user.id}`)
     user.value = authData.user
     localStorage.setItem('user', JSON.stringify(authData.user))
   }
 
   function clearAuth() {
+    clearExtensionSession('')
     user.value = null
 
     // Tear the WebSocket down on any auth clear (logout or invalid session).
@@ -104,6 +107,7 @@ export const useAuthStore = defineStore('auth', () => {
           clearAuth()
           return false
         }
+        extensionIdentity(`${parsed.organization_id}:${parsed.id}`)
         user.value = parsed
         return true
       } catch {
@@ -119,6 +123,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await api.get('/me')
       const freshUser = response.data.data
+      extensionIdentity(`${freshUser.organization_id}:${freshUser.id}`)
       user.value = freshUser
       localStorage.setItem('user', JSON.stringify(freshUser))
       return true
@@ -145,6 +150,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function switchOrg(organizationId: string): Promise<void> {
+    clearExtensionSession()
     const response = await api.post('/auth/switch-org', { organization_id: organizationId })
     setAuth({ user: response.data.data.user })
     // Update localStorage org override
@@ -152,6 +158,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout(): Promise<void> {
+    clearExtensionSession()
     await api.post('/auth/refresh/logout', {})
     clearAuth()
   }
@@ -182,9 +189,15 @@ export const useAuthStore = defineStore('auth', () => {
   function hasExtensionPermission(descriptor: string): boolean {
     const parsed = parseExtensionPermission(descriptor)
     const permissions = user.value?.role?.permissions
-    return !!parsed && Array.isArray(permissions) && permissions.some(
+    return extensionPermission(descriptor) && !!parsed && Array.isArray(permissions) && permissions.some(
       permission => permission.resource === parsed.resource && permission.action === parsed.action
     )
+  }
+
+  async function refreshExtensionAccess(): Promise<boolean> {
+    if (!user.value) { clearExtensionSession(''); return false }
+    extensionIdentity(`${user.value.organization_id}:${user.value.id}`)
+    return refreshExtensionSession(async () => (await api.get('/extensions/catalog')).data.data)
   }
 
   function hasPermission(resource: string, action: string = 'read'): boolean {
@@ -220,6 +233,8 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     setAvailability,
     hasPermission,
-    hasExtensionPermission
+    hasExtensionPermission,
+    extensionRevision: computed(() => extensionSession.revision),
+    refreshExtensionAccess
   }
 })

@@ -300,6 +300,11 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 	if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Refresh token has been revoked", nil, "")
 	}
+	if claims.MFAAt != nil {
+		if err := a.extensionValidateMFA(ctx, claims); err != nil {
+			return extensionSecurityError(r, err)
+		}
+	}
 	// GETDEL consumes state atomically, including concurrent refresh requests.
 	owner, err := a.Redis.GetDel(ctx, refreshTokenKey(claims.ID)).Result()
 	if err != nil || owner != claims.UserID.String() {
@@ -324,6 +329,10 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 		}
 		a.Log.Error("Failed to generate access token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
+	}
+	accessToken, err = a.preserveMFA(accessToken, claims, "access")
+	if err != nil {
+		return extensionSecurityError(r, err)
 	}
 	newRefreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
@@ -402,6 +411,10 @@ func (a *App) generateRefreshToken(user *models.User, accessToken string) (strin
 	jti := uuid.NewString()
 	expiry := time.Duration(a.Config.JWT.RefreshExpiryDays) * 24 * time.Hour
 	signed, err := a.signPurposeToken(user, "refresh", access.SessionID, access.SessionVersion, jti, expiry, access.SessionFamily)
+	if err != nil {
+		return "", err
+	}
+	signed, err = a.preserveMFA(signed, access, "refresh")
 	if err != nil {
 		return "", err
 	}
@@ -611,6 +624,10 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	signed, err = a.preserveMFA(signed, session, "ws")
+	if err != nil {
+		return extensionSecurityError(r, err)
+	}
 	if err := a.Redis.Set(ctx, "auth:ws:"+jti, user.ID.String(), 30*time.Second).Err(); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
 	}

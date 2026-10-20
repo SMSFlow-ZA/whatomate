@@ -50,7 +50,8 @@ type Client struct {
 	authenticated bool
 
 	// Function to validate JWT tokens
-	authFn AuthenticateFn
+	authFn        AuthenticateFn
+	deliveryCheck func() bool
 
 	// Current contact being viewed (nil if none)
 	currentContact *uuid.UUID
@@ -166,6 +167,9 @@ func (c *Client) WritePump() {
 			}
 
 			// Send each message as a separate WebSocket frame
+			if !c.allowFrame() {
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
@@ -173,6 +177,9 @@ func (c *Client) WritePump() {
 			// Send any queued messages as separate frames
 			n := len(c.send)
 			for i := 0; i < n; i++ {
+				if !c.allowFrame() {
+					return
+				}
 				if err := c.conn.WriteMessage(websocket.TextMessage, <-c.send); err != nil {
 					return
 				}
@@ -292,4 +299,17 @@ func (c *Client) sendPong() {
 	case c.send <- data:
 	default:
 	}
+}
+
+// SetDeliveryCheck is installed before registration; it must check the original
+// signed session afresh, rather than retaining a cached identity or grants.
+func (c *Client) SetDeliveryCheck(check func() bool) { c.deliveryCheck = check }
+
+func (c *Client) allowFrame() (allowed bool) {
+	defer func() {
+		if recover() != nil {
+			allowed = false
+		}
+	}()
+	return c.deliveryCheck == nil || c.deliveryCheck()
 }

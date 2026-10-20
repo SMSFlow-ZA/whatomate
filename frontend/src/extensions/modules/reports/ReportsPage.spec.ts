@@ -1,0 +1,18 @@
+// @vitest-environment happy-dom
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import {createApp,nextTick,type App} from 'vue'
+const state=vi.hoisted(()=>({permission:'reports:operational',loadReport:vi.fn(),loadReportAccess:vi.fn(),loadTrend:vi.fn()}))
+vi.mock('vue-router',()=>({useRoute:()=>({meta:{permission:state.permission}})}))
+vi.mock('./api',()=>({loadReport:state.loadReport,loadReportAccess:state.loadReportAccess,loadTrend:state.loadTrend,downloadReport:vi.fn(),downloadTrend:vi.fn(),monthWindow:()=>({start:'2026-09-01',end:'2026-10-01'})}))
+import ReportsPage from './ReportsPage.vue'
+let app:App|undefined,host:HTMLElement
+const series={dimension:'zone',as_of:'2026-10-20T00:00:00Z',timezone:'UTC',scope:'current authorized cases',periods:[{month:'2026-09',new_cases:3,resolved_created_in_period:1,backlog:2,partial:false,groups:[{label:'Original zone',value:3,suppressed:false}]},{month:'2026-10',new_cases:2,resolved_created_in_period:0,backlog:4,partial:true,groups:[{label:'Second zone',value:2,suppressed:false}]}]}
+beforeEach(()=>{vi.clearAllMocks();state.permission='reports:operational';state.loadReportAccess.mockResolvedValue({permissions:['reports:operational','reports:aggregate'],grants:[]});state.loadReport.mockResolvedValue({report:{new_cases:3,resolved_created_in_period:1,backlog:2,messages:0,enquiries:0,by_zone:{'Original zone':3},by_department:{d:3},by_case_type:{t:3},partial:false},metadata:{scope:'current cases',as_of:'2026-10-20T00:00:00Z',timezone:'UTC',service_metrics:{available:false,reason:'not connected'}}});state.loadTrend.mockResolvedValue(series);host=document.createElement('div');document.body.append(host)})
+afterEach(()=>{app?.unmount();app=undefined;host.remove()})
+async function mount(){app=createApp(ReportsPage);app.mount(host);await vi.waitFor(()=>expect(host.querySelector('.trend')).not.toBeNull())}
+describe('actual trend result presentation',()=>{
+ it('labels source snapshot timestamps in UTC without converting them to the workstation timezone',async()=>{await mount();expect(host.querySelector('.scope')?.textContent).toContain('2026-10-20 00:00:00 UTC');expect(host.querySelector('.trend .footnote')?.textContent).toContain('2026-10-20 00:00:00 UTC')})
+ it('renders returned period counts and immutable cohort labels in chart and accessible table',async()=>{await mount();expect(host.querySelectorAll('.trend svg rect')).toHaveLength(2);expect(host.querySelector('.trend table')?.textContent).toContain('Original zone: 3');expect(host.querySelector('.trend table')?.textContent).toContain('2026-10');expect(host.querySelector('.trend table')?.textContent).toContain('Partial');expect(state.loadTrend).toHaveBeenCalledWith(expect.objectContaining({months:6,dimension:'zone'}))})
+ it('clears the existing trend when current access is rejected during a refresh',async()=>{await mount();state.loadTrend.mockRejectedValueOnce({response:{status:403}});(host.querySelector('header button') as HTMLButtonElement).click();await vi.waitFor(()=>expect(host.querySelector('[role=alert]')?.textContent).toContain('current report access changed'));expect(host.querySelector('.trend')).toBeNull()})
+ it('preserves the leadership route and never requests an operational period series',async()=>{state.permission='reports:aggregate';app=createApp(ReportsPage);app.mount(host);await vi.waitFor(()=>expect(host.querySelector('.metrics')).not.toBeNull());await nextTick();expect(state.loadReport).toHaveBeenCalledWith('board',expect.anything());expect(state.loadTrend).not.toHaveBeenCalled();expect(host.querySelector('.trend')).toBeNull()})
+})

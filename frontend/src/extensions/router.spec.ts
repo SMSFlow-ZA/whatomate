@@ -148,3 +148,26 @@ describe("extension router binding", () => {
     binding.stop();
   });
 });
+
+it('keeps registered route identity during an equivalent user refresh while navigation is pending', async () => {
+ let release!: () => void
+ let started!: () => void
+ const entered = new Promise<void>(resolve => { started = resolve })
+ const auth = reactive({ isAuthenticated: true, user: { permissions: ['cases:work.assigned'] }, extensionRevision: 1, hasExtensionPermission(permission: string) { return this.user.permissions.includes(permission) } })
+ const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'app-layout', component: Page, children: [{ path: 'profile', component: Page }] }, { path: '/login', component: Page }] })
+ const registry = createExtensionRegistry([manifest], { 'cases/Assigned': Page }, ['cases'])
+ const binding = bindExtensionRouter(router, registry, auth)
+ await router.push('/profile')
+ const original = router.getRoutes().find(route => route.name === 'extension:cases:assigned')
+ router.beforeResolve(async to => { if (to.meta.extensionModule) { started(); await new Promise<void>(resolve => { release = resolve }) } })
+ const navigation = router.push('/extensions/cases/assigned')
+ await entered
+ auth.user = { permissions: ['cases:work.assigned'] }
+ auth.extensionRevision++
+ const retained = router.getRoutes().find(route => route.name === 'extension:cases:assigned')
+ release()
+ await navigation
+ binding.stop()
+ expect(router.currentRoute.value.fullPath).toBe('/extensions/cases/assigned')
+ expect(retained).toBe(original)
+})

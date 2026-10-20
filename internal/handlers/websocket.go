@@ -41,6 +41,7 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 	err := up.Upgrade(r.RequestCtx, func(conn *websocket.Conn) {
 		done := make(chan struct{})
 		defer close(done)
+		var deliveryClaims *middleware.JWTClaims
 		authenticate := a.validateWSTokenFn()
 		validate := func(encoded string) (uuid.UUID, uuid.UUID, error) {
 			userID, orgID, err := authenticate(encoded)
@@ -49,12 +50,29 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 				if parseErr != nil {
 					return uuid.Nil, uuid.Nil, parseErr
 				}
+				deliveryClaims = claims
 				go a.watchWSSession(done, claims, 5*time.Second, func() { _ = conn.Close() })
 			}
 			return userID, orgID, err
 		}
 		// Create unauthenticated client — auth happens via first message
 		client := ws.NewUnauthenticatedClient(a.WSHub, conn, validate)
+		client.SetDeliveryCheck(func() bool {
+			if deliveryClaims == nil {
+				return false
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if middleware.ValidateSession(ctx, a.Redis, deliveryClaims) != nil {
+				return false
+			}
+			if _, err := middleware.CurrentIdentity(a.DB.WithContext(ctx), deliveryClaims); err != nil {
+				return false
+			}
+			// Generic sockets never receive protected payloads. Precise module
+			// socket channels require ExtensionActorFromClaims and resource policy.
+			return a.GenericOrganizationAllowed(ctx, deliveryClaims.OrganizationID)
+		})
 
 		// Start pumps in goroutines
 		// Client self-registers with hub after successful auth message

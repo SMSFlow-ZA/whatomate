@@ -1,0 +1,61 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+const { get } = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('vue-router', async () => { const actual = await vi.importActual<typeof import('vue-router')>('vue-router'); return { ...actual, createWebHistory: actual.createMemoryHistory } })
+vi.mock('@/services/api', () => ({ api: { get } }))
+vi.mock('@/services/websocket', () => ({ wsService: { disconnect: vi.fn() } }))
+vi.mock('@/views/auth/LoginView.vue', () => ({ default: { render: () => null } }))
+vi.mock('@/views/dashboard/DashboardView.vue', () => ({ default: { render: () => null } }))
+vi.mock('@/views/profile/ProfileView.vue', () => ({ default: { render: () => null } }))
+vi.mock('@/views/NotFoundView.vue', () => ({ default: { render: () => null } }))
+vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { render: () => null } }))
+const user = { id: 'synthetic-directory-user', email: 'directory@example.test', full_name: 'Directory operator', organization_id: 'synthetic-org', role: { id: 'directory-role', name: 'Directory operator', is_system: false, permissions: [{ id: 'read', resource: 'directory', action: 'read' }] } }
+const catalog = (permissions = ['directory:read']) => ({ data: { data: { mfa_verified: true, modules: [{ id: 'directory', api_version: 1 }], permissions, grants: [] } } })
+beforeEach(() => {
+ vi.resetModules(); get.mockReset()
+ vi.stubEnv('VITE_EXTENSION_MODULES', 'directory')
+ vi.stubGlobal('window', { __BASE_PATH__: '', addEventListener: vi.fn(), removeEventListener: vi.fn(), setInterval: vi.fn(), clearInterval: vi.fn() })
+ vi.stubGlobal('localStorage', { getItem: vi.fn((key: string) => key === 'user' ? JSON.stringify(user) : null), setItem: vi.fn(), removeItem: vi.fn() })
+ setActivePinia(createPinia())
+})
+describe('authenticated extension startup', () => {
+ it('retains the initial permitted deep link after the authenticated catalog is ready', async () => {
+  let finish!: (value: ReturnType<typeof catalog>) => void
+  get.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const { default: router } = await import('@/router')
+  const navigation = router.push('/extensions/directory/workspace?tab=roster#current')
+  while (!finish) await Promise.resolve()
+  expect(router.currentRoute.value.meta.extensionModule).toBeUndefined()
+  expect(get.mock.calls.map(args => args[0])).toEqual(['/extensions/catalog'])
+  get.mockResolvedValue(catalog())
+  finish(catalog())
+  await navigation
+  expect(router.currentRoute.value.fullPath).toBe('/extensions/directory/workspace?tab=roster#current')
+  expect(router.currentRoute.value.meta.extensionModule).toBe('directory')
+  expect(router.currentRoute.value.matched.map(route => route.name)).toContain('app-layout')
+ })
+ it('rematches a deep link when an existing binding learns the current grants', async () => {
+  get.mockResolvedValue(catalog([]))
+  const { default: router } = await import('@/router')
+  await router.push('/profile')
+  get.mockResolvedValue(catalog())
+  await router.push('/extensions/directory/workspace?tab=roster')
+  expect(router.currentRoute.value.fullPath).toBe('/extensions/directory/workspace?tab=roster')
+  expect(router.currentRoute.value.meta.extensionModule).toBe('directory')
+ })
+ it.each(['/extensions/directory/workspace', '/extensions/unknown/workspace'])('denies ungranted or unknown initial location %s', async path => {
+  get.mockResolvedValue(catalog(path.includes('/unknown/') ? ['directory:read'] : []))
+  const { default: router } = await import('@/router')
+  await router.push(path)
+  expect(router.currentRoute.value.path).toBe('/profile')
+  expect(router.currentRoute.value.meta.extensionModule).toBeUndefined()
+  expect(get.mock.calls.every(args => args[0] === '/extensions/catalog')).toBe(true)
+ })
+ it('sends an unauthenticated extension deep link to login without fetching protected data', async () => {
+  vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue(null), setItem: vi.fn(), removeItem: vi.fn() })
+  const { default: router } = await import('@/router')
+  await router.push('/extensions/directory/workspace?tab=roster')
+  expect(router.currentRoute.value.path).toBe('/login')
+  expect(router.currentRoute.value.query.redirect).toBe('/extensions/directory/workspace?tab=roster')
+  expect(get).not.toHaveBeenCalled()
+ })})
