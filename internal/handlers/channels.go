@@ -23,10 +23,10 @@ func (a *App) ListChannelConnections(r *fastglue.Request) error {
 		return nil
 	}
 	var rows []models.ChannelConnection
-	if err = a.DB.Where("organization_id = ?", org).Order("created_at").Find(&rows).Error; err != nil {
+	if err = a.genericChannelConnections(a.DB).Where("organization_id = ?", org).Order("created_at").Find(&rows).Error; err != nil {
 		return r.SendErrorEnvelope(503, "Channel settings unavailable", nil, "")
 	}
-	return r.SendEnvelope(map[string]any{"connections": rows})
+	return r.SendEnvelope(map[string]any{"connections": a.visibleChannelConnections(rows)})
 }
 func (a *App) AvailableChannels(r *fastglue.Request) error {
 	org, _, err := a.requireChannelConsumer(r, models.ActionRead)
@@ -34,10 +34,10 @@ func (a *App) AvailableChannels(r *fastglue.Request) error {
 		return nil
 	}
 	var rows []models.ChannelConnection
-	if err = a.DB.Where("organization_id = ? AND enabled = ?", org, true).Find(&rows).Error; err != nil {
+	if err = a.genericChannelConnections(a.DB).Where("organization_id = ? AND enabled = ?", org, true).Find(&rows).Error; err != nil {
 		return r.SendErrorEnvelope(503, "Channels unavailable", nil, "")
 	}
-	return r.SendEnvelope(map[string]any{"connections": rows})
+	return r.SendEnvelope(map[string]any{"connections": a.visibleChannelConnections(rows)})
 }
 func (a *App) ChannelProviders(r *fastglue.Request) error {
 	if _, _, err := a.requireAuth(r, models.ResourceSettingsChannels, models.ActionRead); err != nil {
@@ -84,6 +84,9 @@ func (a *App) UpdateChannelConnection(r *fastglue.Request) error {
 	id, err := parsePathUUID(r, "id", "channel connection")
 	if err != nil {
 		return nil
+	}
+	if a.channelConnectionProtected(id) {
+		return r.SendErrorEnvelope(404, "Channel connection not found", nil, "")
 	}
 	var c models.ChannelConnection
 	if err = a.DB.Where("id = ? AND organization_id = ?", id, org).First(&c).Error; err != nil {
@@ -221,6 +224,9 @@ func (a *App) DeleteChannelConnection(r *fastglue.Request) error {
 	id, err := parsePathUUID(r, "id", "channel connection")
 	if err != nil {
 		return nil
+	}
+	if a.channelConnectionProtected(id) {
+		return r.SendErrorEnvelope(404, "Channel connection not found", nil, "")
 	}
 	err = a.DB.Transaction(func(tx *gorm.DB) error {
 		var c models.ChannelConnection

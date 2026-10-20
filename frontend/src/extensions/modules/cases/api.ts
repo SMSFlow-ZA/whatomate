@@ -5,7 +5,7 @@ export interface Catalog { permissions: string[]; grants: {permission: string; u
 export async function loadCaseAccess() { return (await api.get<{data: Catalog}>('/extensions/catalog')).data.data }
 export async function listCases(q = '') { return (await api.get<{data: CaseRecord[]}>('/extensions/cases/', { params: { q } })).data.data }
 export async function readCase(id: string) { return (await api.get<{data: CaseRecord}>(`/extensions/cases/${encodeURIComponent(id)}`)).data.data }
-export async function createCase(input: {key: string; unit_id: string; narrative: string; snapshot: {zone: string; department: string; case_type: string}; draft: boolean}) { return (await api.post<{data: {id: string}}>('/extensions/cases/', input)).data.data }
+export async function createCase(input: {key: string; unit_id: string; narrative: string; snapshot?: {zone: string; department: string; case_type: string}; draft: boolean}) { return (await api.post<{data: {id: string}}>('/extensions/cases/', input)).data.data }
 export async function caseAction(c: CaseRecord, action: 'draft' | 'state' | 'assignment' | 'category' | 'participants', input: Record<string, unknown>) {
  const url = `/extensions/cases/${encodeURIComponent(c.id)}/${action}`
  const payload = { ...input, expected_version: c.version }

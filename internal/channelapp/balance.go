@@ -43,7 +43,7 @@ func BalanceUpdates(balance *channels.Balance, threshold string, now time.Time) 
 
 func (s *Service) RefreshBalances(ctx context.Context, now time.Time) error {
 	var rows []models.ChannelConnection
-	if err := s.DB.WithContext(ctx).Where("enabled = true AND validated_at IS NOT NULL AND (balance_checked_at IS NULL OR balance_checked_at < ?)", now.Add(-5*time.Minute)).Limit(20).Find(&rows).Error; err != nil {
+	if err := s.GenericConnections(s.DB.WithContext(ctx)).Where("enabled = true AND validated_at IS NOT NULL AND (balance_checked_at IS NULL OR balance_checked_at < ?)", now.Add(-5*time.Minute)).Limit(20).Find(&rows).Error; err != nil {
 		return err
 	}
 	for _, conn := range rows {

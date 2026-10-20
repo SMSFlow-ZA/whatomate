@@ -24,10 +24,14 @@ var ErrUnavailable = errors.New("channel unavailable or access denied")
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
 
 type Service struct {
-	StopDispatch  bool
-	DB            *gorm.DB
-	Providers     *channels.Registry
-	EncryptionKey string
+	StopDispatch bool
+	// ConnectionProtected excludes operator-bound private transports from generic dispatch and polling.
+	ConnectionProtected func(uuid.UUID) bool
+	// ProtectedConnectionIDs is a trusted startup snapshot, used before bounded queries.
+	ProtectedConnectionIDs []uuid.UUID
+	DB                     *gorm.DB
+	Providers              *channels.Registry
+	EncryptionKey          string
 	// AuthorizeSend rechecks the originating user's current permissions at dispatch.
 	// Nil uses current active identity + organization role permissions.
 	AuthorizeSend func(uuid.UUID, uuid.UUID) bool
@@ -125,6 +129,9 @@ func (s *Service) maySendContact(db *gorm.DB, org uuid.UUID, user *uuid.UUID, co
 }
 
 func (s *Service) connection(db *gorm.DB, org, id uuid.UUID) (*models.ChannelConnection, error) {
+	if s.IsConnectionProtected(id) {
+		return nil, ErrUnavailable
+	}
 	var c models.ChannelConnection
 	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND organization_id = ?", id, org).First(&c).Error; err != nil || !c.Enabled {
 		return nil, ErrUnavailable
@@ -132,6 +139,9 @@ func (s *Service) connection(db *gorm.DB, org, id uuid.UUID) (*models.ChannelCon
 	return &c, nil
 }
 func (s *Service) runtime(c *models.ChannelConnection) (channels.Provider, channels.Connection, error) {
+	if c == nil || s.IsConnectionProtected(c.ID) {
+		return nil, channels.Connection{}, ErrUnavailable
+	}
 	if len(s.EncryptionKey) < 32 || !crypto.IsEncrypted(c.Credentials) {
 		return nil, channels.Connection{}, ErrUnavailable
 	}
@@ -201,6 +211,9 @@ func (s *Service) EnqueueSMS(ctx context.Context, org, contactID, connectionID u
 	return s.EnqueueSMSWithID(ctx, org, contactID, connectionID, uuid.New(), text, user, consent, source)
 }
 func (s *Service) EnqueueSMSWithID(ctx context.Context, org, contactID, connectionID, messageID uuid.UUID, text string, user *uuid.UUID, consent bool, source string) (*models.Message, error) {
+	if s.IsConnectionProtected(connectionID) {
+		return nil, ErrUnavailable
+	}
 	if !consent || len(source) > 20 {
 		return nil, ErrInvalid
 	}
@@ -255,6 +268,9 @@ func (s *Service) EnqueueSMSWithID(ctx context.Context, org, contactID, connecti
 // AttachFallback must complete before the initial WhatsApp send. Roll back the
 // caller's logical message if attachment fails; no WhatsApp send has occurred.
 func (s *Service) AttachFallback(ctx context.Context, msg *models.Message, connectionID uuid.UUID, smsText string, consent bool, timeout time.Duration) error {
+	if s.IsConnectionProtected(connectionID) {
+		return ErrUnavailable
+	}
 	if !consent || timeout < 0 || timeout > 24*time.Hour {
 		return ErrInvalid
 	}
@@ -328,7 +344,7 @@ func (s *Service) Dispatch(ctx context.Context, now time.Time) error {
 	}
 	// An expired lease proves only that a process stopped responding, not that
 	// its POST was unsent. Recovery therefore moves it to reconciliation.
-	if err := s.DB.WithContext(ctx).Model(&models.ChannelAttempt{}).Where("channel = ? AND status = ? AND lease_until < ?", "sms", "sending", now).Updates(map[string]any{"status": "unknown", "claim_id": nil, "error_code": "lease_expired"}).Error; err != nil {
+	if err := s.GenericConnectionReferences(s.DB.WithContext(ctx), "connection_id").Model(&models.ChannelAttempt{}).Where("channel = ? AND status = ? AND lease_until < ?", "sms", "sending", now).Updates(map[string]any{"status": "unknown", "claim_id": nil, "error_code": "lease_expired"}).Error; err != nil {
 		return err
 	}
 	for range 20 {
@@ -339,7 +355,7 @@ func (s *Service) Dispatch(ctx context.Context, now time.Time) error {
 			// All operations lock connection before attempts. Settings, event
 			// ingestion and bot transitions use the same order.
 			due := tx.Model(&models.ChannelAttempt{}).Select("connection_id").Where("channel = 'sms' AND connection_id IS NOT NULL AND status IN ? AND due_at <= ?", []string{"queued", "waiting"}, now)
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("id IN (?)", due).Order("id").First(&conn).Error
+			err := s.GenericConnections(tx).Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("id IN (?)", due).Order("id").First(&conn).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -355,6 +371,9 @@ func (s *Service) Dispatch(ctx context.Context, now time.Time) error {
 			}
 			if attempt.ConnectionID == nil {
 				return ErrInvalid
+			}
+			if s.IsConnectionProtected(conn.ID) {
+				return nil
 			}
 			if !models.GenericOrganizationAllowed(ctx, tx, attempt.OrganizationID) {
 				return stopAttempt(tx, &attempt, "blocked", "protected_organization")
@@ -469,6 +488,9 @@ func updateSMSMessage(tx *gorm.DB, id uuid.UUID, status string) error {
 }
 
 func (s *Service) PollConnection(ctx context.Context, id uuid.UUID) error {
+	if s.IsConnectionProtected(id) {
+		return ErrUnavailable
+	}
 	var conn models.ChannelConnection
 	if err := s.DB.WithContext(ctx).First(&conn, "id = ?", id).Error; err != nil {
 		return err
@@ -583,14 +605,17 @@ func (s *Service) PollConnection(ctx context.Context, id uuid.UUID) error {
 func (s *Service) ReconcileUnknown(ctx context.Context) error {
 	// A restore/emergency hold stops sends, not recovery of an expired claim.
 	now := time.Now()
-	if err := s.DB.WithContext(ctx).Model(&models.ChannelAttempt{}).Where("channel='sms' AND status='sending' AND lease_until < ?", now).Updates(map[string]any{"status": "unknown", "claim_id": nil, "lease_until": nil, "error_code": "lease_expired"}).Error; err != nil {
+	if err := s.GenericConnectionReferences(s.DB.WithContext(ctx), "connection_id").Model(&models.ChannelAttempt{}).Where("channel='sms' AND status='sending' AND lease_until < ?", now).Updates(map[string]any{"status": "unknown", "claim_id": nil, "lease_until": nil, "error_code": "lease_expired"}).Error; err != nil {
 		return err
 	}
 	var attempts []models.ChannelAttempt
-	if err := s.DB.WithContext(ctx).Where("channel = ? AND status = ? AND (next_reconcile_at IS NULL OR next_reconcile_at <= ?)", "sms", "unknown", now).Order("next_reconcile_at NULLS FIRST, updated_at,id").Limit(20).Find(&attempts).Error; err != nil {
+	if err := s.GenericConnectionReferences(s.DB.WithContext(ctx), "connection_id").Where("channel = ? AND status = ? AND (next_reconcile_at IS NULL OR next_reconcile_at <= ?)", "sms", "unknown", now).Order("next_reconcile_at NULLS FIRST, updated_at,id").Limit(20).Find(&attempts).Error; err != nil {
 		return err
 	}
 	for _, attempt := range attempts {
+		if attempt.ConnectionID != nil && s.IsConnectionProtected(*attempt.ConnectionID) {
+			continue
+		}
 		// Schedule before every lookup, including unavailable/unknown results,
 		// so permanent uncertainty cannot monopolize the bounded batch.
 		delay := time.Duration(1<<min(attempt.ReconcileFailures, 5)) * 30 * time.Second
@@ -655,7 +680,7 @@ func (s *Service) Tick(ctx context.Context, now time.Time) error {
 
 func (s *Service) PollDue(ctx context.Context, now time.Time) error {
 	var connections []models.ChannelConnection
-	if err := s.DB.WithContext(ctx).Where("validated_at IS NOT NULL AND next_poll_at <= ?", now).Order("next_poll_at").Limit(20).Find(&connections).Error; err != nil {
+	if err := s.GenericConnections(s.DB.WithContext(ctx)).Where("validated_at IS NOT NULL AND next_poll_at <= ?", now).Order("next_poll_at").Limit(20).Find(&connections).Error; err != nil {
 		return err
 	}
 	for _, c := range connections {

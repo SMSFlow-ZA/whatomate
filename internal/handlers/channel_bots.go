@@ -129,7 +129,7 @@ func (a *App) ProcessSMSBotJobs(ctx context.Context, now time.Time) error {
 			if !claimed {
 				return gorm.ErrRecordNotFound
 			}
-			if err := tx.Where("status = ?", "pending").Order("created_at, id").First(&job).Error; err != nil {
+			if err := a.Channels.GenericConnectionReferences(tx, "connection_id").Where("status = ?", "pending").Order("created_at, id").First(&job).Error; err != nil {
 				return err
 			}
 			var conn models.ChannelConnection
@@ -138,6 +138,9 @@ func (a *App) ProcessSMSBotJobs(ctx context.Context, now time.Time) error {
 					job.ID = uuid.Nil
 				}
 				return err
+			}
+			if a.channelConnectionProtected(conn.ID) {
+				return gorm.ErrRecordNotFound
 			}
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&job, "id = ? AND status = 'pending'", job.ID).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {

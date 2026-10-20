@@ -196,8 +196,18 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function refreshExtensionAccess(): Promise<boolean> {
     if (!user.value) { clearExtensionSession(''); return false }
-    extensionIdentity(`${user.value.organization_id}:${user.value.id}`)
-    return refreshExtensionSession(async () => (await api.get('/extensions/catalog')).data.data)
+    const identity = `${user.value.organization_id}:${user.value.id}`
+    extensionIdentity(identity)
+    const epoch = extensionSession.revision
+    const load = async () => (await api.get('/extensions/catalog')).data.data
+    const ready = await refreshExtensionSession(load)
+    // An access-cookie 401 clears protected data before the API interceptor
+    // refreshes and retries. Its retried catalog belongs to the old epoch and
+    // must be discarded. Obtain one new current response, never reuse it.
+    if (!ready && user.value && `${user.value.organization_id}:${user.value.id}` === identity && extensionSession.revision !== epoch) {
+      return refreshExtensionSession(load)
+    }
+    return ready
   }
 
   function hasPermission(resource: string, action: string = 'read'): boolean {

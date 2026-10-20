@@ -77,11 +77,12 @@ type TemplateStatusUpdate struct {
 
 // WebhookStatus represents a message status update from Meta
 type WebhookStatus struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	Timestamp    string `json:"timestamp"`
-	RecipientID  string `json:"recipient_id"`
-	Conversation *struct {
+	BizOpaqueCallbackData string `json:"biz_opaque_callback_data,omitempty"`
+	ID                    string `json:"id"`
+	Status                string `json:"status"`
+	Timestamp             string `json:"timestamp"`
+	RecipientID           string `json:"recipient_id"`
+	Conversation          *struct {
 		ID string `json:"id"`
 	} `json:"conversation,omitempty"`
 	Pricing *struct {
@@ -169,10 +170,20 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 	body := r.RequestCtx.PostBody()
 	signature := r.RequestCtx.Request.Header.Peek("X-Hub-Signature-256")
 
+	protectedCarrier := a.ExtensionCarrier != nil || (a.Config != nil && a.Config.Extensions.CarrierEnabled)
+	if protectedCarrier && len(body) > 1024*1024 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
+	}
 	var payload WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		a.Log.Error("Failed to parse webhook payload", "error", err)
+		if !protectedCarrier {
+			a.Log.Error("Failed to parse webhook payload", "error", err)
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
+	}
+
+	if handled, err := a.protectedCarrierWebhook(r, payload, body, signature); handled {
+		return err
 	}
 
 	// Verify webhook signature before processing any fields.

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	addonapi "github.com/SMSFlow-ZA/whatomate-addons/api"
+	"github.com/SMSFlow-ZA/whatomate-addons/carrier"
 	"github.com/SMSFlow-ZA/whatomate-addons/conversation"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -36,6 +37,7 @@ type App struct {
 	ExtensionMFAFreshness time.Duration
 	ExtensionAPI          map[string]http.Handler
 	ExtensionConversation *conversation.Service
+	ExtensionCarrier      *carrier.Service
 	ExtensionAccess       *addonapi.AccessStore
 	BuildSourceURL        string
 	Config                *config.Config

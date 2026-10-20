@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -40,6 +41,17 @@ func (a *App) InitializeExtensions() error {
 		a.ExtensionGuard = ext.NewGuard()
 	}
 	if err := a.initializeCompiledModules(); err != nil {
+		return err
+	}
+	var carrierDB *sql.DB
+	if a.DB != nil {
+		var err error
+		carrierDB, err = a.DB.DB()
+		if err != nil {
+			return err
+		}
+	}
+	if err := a.initializeProtectedCarrier(context.Background(), carrierDB); err != nil {
 		return err
 	}
 	required := append(extensionIDs(a.Config.Extensions.Required), extensionIDs(a.Config.Extensions.RequiredInbound)...)

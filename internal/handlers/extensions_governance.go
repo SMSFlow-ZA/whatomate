@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/SMSFlow-ZA/whatomate-addons/ai"
+	"github.com/SMSFlow-ZA/whatomate-addons/carrier"
 	"github.com/SMSFlow-ZA/whatomate-addons/cases"
 	"github.com/SMSFlow-ZA/whatomate-addons/conversation"
 	"github.com/SMSFlow-ZA/whatomate-addons/directory"
@@ -15,9 +16,12 @@ import (
 )
 
 func (a *App) initializeGovernance(ctx context.Context, db *sql.DB) error {
+	if e := carrier.Migrate(ctx, db); e != nil {
+		return e
+	}
 	if e := governance.MigrateHTTP(ctx, db); e != nil {
 		return e
 	}
-	a.ExtensionAPI["governance"] = governance.NewHTTPHandler(db, governance.HTTPConfig{Enabled: true, RefreshActor: a.refreshExtensionActor, SubjectAliases: a.ExtensionAccess.EmployeeAliases, Adapters: []governance.PhysicalAdapter{cases.PrivacyAdapter{}, knowledge.PrivacyAdapter{}, directory.PrivacyAdapter{}, conversation.PrivacyAdapter{}, reports.PrivacyAdapter{}, ai.PrivacyAdapter{}}})
+	a.ExtensionAPI["governance"] = governance.NewHTTPHandler(db, governance.HTTPConfig{Enabled: true, RefreshActor: a.refreshExtensionActor, SubjectAliases: a.ExtensionAccess.EmployeeAliases, Adapters: []governance.PhysicalAdapter{cases.PrivacyAdapter{}, knowledge.PrivacyAdapter{}, directory.PrivacyAdapter{}, conversation.PrivacyAdapter{}, reports.PrivacyAdapter{}, ai.PrivacyAdapter{}, carrier.PrivacyAdapter{}}})
 	return a.ExtensionRegistry.Register(ext.Descriptor{ID: "governance", Version: "0.1.0", APIVersion: ext.APIVersion, Dependencies: []string{"security", "directory", "cases", "knowledge", "conversation", "reports", "ai"}, Capabilities: []string{"owner-inventory", "physical-lifecycle", "legal-holds", "offline-restore-journal"}})
 }

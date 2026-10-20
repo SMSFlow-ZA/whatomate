@@ -18,7 +18,15 @@ func (a *App) InitializeChannels() error {
 	if err != nil {
 		return err
 	}
-	a.Channels = &channelapp.Service{DB: a.DB, Providers: registry, EncryptionKey: a.Config.App.EncryptionKey, StopDispatch: a.Config.Channels.StopDispatch, Notify: func(org, _ uuid.UUID) {
+	var protectedIDs []uuid.UUID
+	for _, binding := range a.Config.Extensions.CarrierSMSBindings {
+		id, err := uuid.Parse(binding.ConnectionID)
+		if err != nil {
+			return err
+		}
+		protectedIDs = append(protectedIDs, id)
+	}
+	a.Channels = &channelapp.Service{ProtectedConnectionIDs: append([]uuid.UUID(nil), protectedIDs...), DB: a.DB, Providers: registry, EncryptionKey: a.Config.App.EncryptionKey, StopDispatch: a.Config.Channels.StopDispatch, Notify: func(org, _ uuid.UUID) {
 		if a.WSHub == nil {
 			return
 		}

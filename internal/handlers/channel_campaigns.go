@@ -8,7 +8,7 @@ import (
 )
 
 func (a *App) validateCampaignSMS(org, connection uuid.UUID, text string, consent bool) error {
-	if a.Channels == nil || !consent {
+	if a.Channels == nil || a.channelConnectionProtected(connection) || !consent {
 		return channelsError()
 	}
 	var c models.ChannelConnection

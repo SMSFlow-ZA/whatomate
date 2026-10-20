@@ -36,7 +36,31 @@ type Config struct {
 
 // ExtensionsConfig is trusted host configuration, never writable through APIs.
 // ProtectedMode stays unavailable until every read/event path is integrated.
+// ExtensionCarrierBinding is an operator-owned exact account binding. Secret
+// values are never returned by the extension catalog or configuration APIs.
+type ExtensionCarrierBinding struct {
+	OrganizationID string `koanf:"organization_id"`
+	AccountID      string `koanf:"account_id"`
+	PhoneID        string `koanf:"phone_id"`
+	AppSecret      string `koanf:"app_secret"`
+}
+
+// ExtensionCarrierSMSBinding reuses an existing validated compiled SMS provider
+// connection. Binding is operator-owned; generic users cannot alter this schedule.
+type ExtensionCarrierSMSBinding struct {
+	OrganizationID    string `koanf:"organization_id"`
+	ConnectionID      string `koanf:"connection_id"`
+	WhatsAppAccountID string `koanf:"whatsapp_account_id"`
+}
+
 type ExtensionsConfig struct {
+	CarrierEnabled         bool                         `koanf:"carrier_enabled"`
+	CarrierDispatchEnabled bool                         `koanf:"carrier_dispatch_enabled"`
+	CarrierBindings        []ExtensionCarrierBinding    `koanf:"carrier_bindings"`
+	CarrierSMSBindings     []ExtensionCarrierSMSBinding `koanf:"carrier_sms_bindings"`
+	// Synthetic profiles require an explicit canonical recipient allowlist.
+	CarrierAllowedRecipients []string `koanf:"carrier_allowed_recipients"`
+
 	Required        string `koanf:"required"`
 	RequiredInbound string `koanf:"required_inbound"`
 	ProtectedMode   bool   `koanf:"protected_mode"`

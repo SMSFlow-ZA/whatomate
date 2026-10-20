@@ -6,7 +6,7 @@ const access = ref<Catalog>({permissions: [], grants: []})
 const query = ref(''), busy = ref(false), error = ref(''), notice = ref('')
 const narrative = ref(''), category = ref(''), reason = ref(''), candidate = ref(''), target = ref<CaseState>('InProgress')
 const participant = ref(''), participantRole = ref('subject'), backups = ref('')
- const intake = ref({ unit_id: '', narrative: '', snapshot: { zone: '', department: '', case_type: '' }, draft: false })
+ const intake = ref({ unit_id: '', narrative: '', draft: false })
 // Retained across retries: an uncertain commit must replay exactly this key and payload.
 const intakeKey = ref(crypto.randomUUID()), pendingIntake = ref<string | null>(null)
 const can = (permission: string, unit?: string) => access.value.permissions.includes(permission) && !!unit && access.value.grants.some(g => g.permission === permission && g.unit_id === unit)
@@ -61,7 +61,7 @@ onMounted(() => run(refresh))
     <section v-if="selected.events?.length" aria-label="Case audit history"><h3>Decision history</h3><ol><li v-for="event in selected.events" :key="event.version"><strong>v{{ event.version }} · {{ event.kind || 'Case event' }}</strong><p>{{ event.from }} → {{ event.to }} · {{ new Date(event.occurred_at).toLocaleString() }}</p><p v-if="event.category_to">Category: {{ event.category_from }} → {{ event.category_to }}</p><p>{{ event.reason }}</p><small>Recorded {{ new Date(event.recorded_at).toLocaleString() }} by {{ event.actor_id }}</small></li></ol></section>
    </template><p v-else>Select a case to review its current details.</p></section>
   </div>
-  <section v-if="intakeUnits.length" class="panel intake" aria-label="Case intake"><h2>New case</h2><p>Save a draft or submit a new case. A retry after an uncertain save keeps the same intake reference.</p><form @submit.prevent="submitIntake"><fieldset :disabled="busy || !!pendingIntake"><label>Unit<select v-model="intake.unit_id" required><option disabled value="">Select an authorized unit</option><option v-for="unit in intakeUnits" :key="unit" :value="unit">{{ unit }}</option></select></label><label>Zone<input v-model="intake.snapshot.zone" required /></label><label>Department<input v-model="intake.snapshot.department" required /></label><label>Case type<input v-model="intake.snapshot.case_type" required /></label><label>Narrative<textarea v-model="intake.narrative" rows="5" maxlength="65536" required /></label><label class="checkbox"><input v-model="intake.draft" type="checkbox" />Save as draft</label></fieldset><button :disabled="busy">{{ pendingIntake ? 'Retry unchanged intake' : 'Save case' }}</button></form></section>
+  <section v-if="intakeUnits.length" class="panel intake" aria-label="Case intake"><h2>New case</h2><p>Save a draft or submit a new case. A retry after an uncertain save keeps the same intake reference.</p><form @submit.prevent="submitIntake"><fieldset :disabled="busy || !!pendingIntake"><label>Unit<select v-model="intake.unit_id" required><option disabled value="">Select an authorized unit</option><option v-for="unit in intakeUnits" :key="unit" :value="unit">{{ unit }}</option></select></label><label>Narrative<textarea v-model="intake.narrative" rows="5" maxlength="65536" required /></label><label class="checkbox"><input v-model="intake.draft" type="checkbox" />Save as draft</label></fieldset><button :disabled="busy">{{ pendingIntake ? 'Retry unchanged intake' : 'Save case' }}</button></form></section>
  </main>
 </template>
 <style scoped>
