@@ -38,6 +38,11 @@ var _ queue.JobHandler = (*Worker)(nil)
 
 // New creates a new Worker instance
 func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*Worker, error) {
+	// The campaign worker has no compiled protected-domain composition yet.
+	// Standalone workers must not bypass the server's readiness gate.
+	if cfg == nil || cfg.Extensions.ProtectedMode || strings.TrimSpace(cfg.Extensions.Required) != "" || strings.TrimSpace(cfg.Extensions.RequiredInbound) != "" {
+		return nil, fmt.Errorf("worker extension composition is unavailable")
+	}
 	consumer, err := queue.NewRedisConsumer(rdb, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %w", err)

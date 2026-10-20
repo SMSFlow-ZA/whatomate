@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
+  Package,
   X
 } from 'lucide-vue-next'
 import { wsService } from '@/services/websocket'
@@ -20,12 +21,16 @@ import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection } from './navigation'
 import BrandLogo from '@/components/shared/BrandLogo.vue'
+import { useExtensions } from '@/extensions/useExtensions'
+import { canEnterExtensionRoute } from '@/extensions/router'
 
 useI18n() // Enable $t() in template
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { navigation: extensionNavigation } = useExtensions()
+const extensionViewAllowed = computed(() => canEnterExtensionRoute(route, authStore))
 const isCollapsed = ref(false)
 const isMobileMenuOpen = ref(false)
 
@@ -225,6 +230,21 @@ const handleLogout = async () => {
               </template>
             </div>
           </template>
+          <div v-if="extensionNavigation.length" class="space-y-0.5 mt-2 border-t border-white/[0.06] light:border-gray-200 pt-2">
+            <RouterLink
+              v-for="item in extensionNavigation"
+              :key="item.id"
+              :to="item.to"
+              class="flex items-center rounded-lg px-2.5 py-2 text-[13px] font-medium text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900"
+              :aria-label="isCollapsed ? item.label : undefined"
+              :aria-current="route.name === item.to.name ? 'page' : undefined"
+              role="menuitem"
+              @click="isMobileMenuOpen = false"
+            >
+              <Package class="h-4 w-4 shrink-0 mr-2.5" aria-hidden="true" />
+              <span :class="isCollapsed && 'md:sr-only'">{{ item.label }}</span>
+            </RouterLink>
+          </div>
         </nav>
       </ScrollArea>
 
@@ -281,7 +301,7 @@ const handleLogout = async () => {
     <main id="main-content" class="flex flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
       <ManagedPlanStatus />
       <div class="flex-1 min-h-0">
-      <RouterView v-slot="{ Component, route: viewRoute }">
+      <RouterView v-if="extensionViewAllowed" v-slot="{ Component, route: viewRoute }">
         <Transition name="page" mode="out-in">
           <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
         </Transition>

@@ -16,6 +16,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	extensions "github.com/shridarpatil/whatomate/pkg/extensions/v1"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -25,6 +26,8 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
+	ExtensionRegistry *extensions.Registry
+	ExtensionGuard    *extensions.Guard
 	BuildSourceURL    string
 	Config            *config.Config
 	DB                *gorm.DB

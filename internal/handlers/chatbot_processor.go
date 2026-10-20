@@ -135,19 +135,20 @@ type IncomingTextMessage struct {
 
 // processIncomingMessageFull processes incoming WhatsApp messages with chatbot logic
 func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextMessage, profileName string) {
-	a.Log.Info("Processing incoming message",
-		"phone_number_id", phoneNumberID,
-		"from", msg.From,
-		"type", msg.Type,
-		"profile_name", profileName,
-	)
-
 	// Find the WhatsApp account by phone_number_id (use cache)
 	account, err := a.getWhatsAppAccountCached(phoneNumberID)
 	if err != nil {
 		a.Log.Error("WhatsApp account not found", "phone_id", phoneNumberID, "error", err)
 		return
 	}
+
+	// Eligibility precedes contact creation, reactions, media retrieval, message
+	// persistence, callbacks and bot processing. Do not log rejected payload/PII.
+	if err := a.checkExtensionInbound(context.Background(), account.OrganizationID, account.ID.String(), msg); err != nil {
+		a.Log.Info("Incoming message rejected by extension policy")
+		return
+	}
+	a.Log.Info("Processing incoming message", "type", msg.Type)
 
 	// Handle reaction messages specially - they update existing messages, not create new ones
 	if msg.Type == "reaction" && msg.Reaction != nil {

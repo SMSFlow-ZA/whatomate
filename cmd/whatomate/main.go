@@ -224,6 +224,9 @@ func runServer(args []string) {
 	}
 
 	// Initialize S3 client for call recordings (optional)
+	if err := app.InitializeExtensions(); err != nil {
+		lo.Fatal("Extension registration failed", "error", err)
+	}
 	if err := app.InitializeChannels(); err != nil {
 		lo.Fatal("Channel registration failed", "error", err)
 	}

@@ -50,6 +50,7 @@ internal/frontend/dist/*
 logs/
 
 # Temp files
+.work/
 tmp/
 temp/
 uploads/

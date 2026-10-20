@@ -202,6 +202,12 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
 			// Handle template status updates
+			// Non-message ingress has no eligibility contract yet. When a host
+			// requires that contract, reject those events before logging or writes.
+			if a.Config != nil && len(extensionIDs(a.Config.Extensions.RequiredInbound)) > 0 && change.Field != "messages" && change.Field != "message_template_status_update" {
+				a.Log.Info("Non-message event rejected by extension policy")
+				continue
+			}
 			if change.Field == "message_template_status_update" {
 				a.Log.Info("Received template status update",
 					"event", change.Value.Event,
@@ -289,8 +295,11 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 
 			// Process messages
 			for _, msg := range change.Value.Messages {
+				if err := a.checkExtensionWebhookInbound(context.Background(), phoneNumberID, msg); err != nil {
+					a.Log.Info("Incoming message rejected by extension policy")
+					continue
+				}
 				a.Log.Info("Received message",
-					"from", msg.From,
 					"type", msg.Type,
 					"phone_number_id", phoneNumberID,
 				)

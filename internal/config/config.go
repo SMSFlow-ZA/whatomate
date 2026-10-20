@@ -31,6 +31,15 @@ type Config struct {
 	TTS          TTSConfig          `koanf:"tts"`
 	Plan         PlanConfig         `koanf:"plan"`
 	Channels     ChannelsConfig     `koanf:"channels"`
+	Extensions   ExtensionsConfig   `koanf:"extensions"`
+}
+
+// ExtensionsConfig is trusted host configuration, never writable through APIs.
+// ProtectedMode stays unavailable until every read/event path is integrated.
+type ExtensionsConfig struct {
+	Required        string `koanf:"required"`
+	RequiredInbound string `koanf:"required_inbound"`
+	ProtectedMode   bool   `koanf:"protected_mode"`
 }
 
 type ChannelsConfig struct {

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/services/api'
+import { parseExtensionPermission } from '@/extensions/permissions'
 
 export interface UserSettings {
   email_notifications?: boolean
@@ -178,6 +179,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // Check if user has a specific permission
+  function hasExtensionPermission(descriptor: string): boolean {
+    const parsed = parseExtensionPermission(descriptor)
+    const permissions = user.value?.role?.permissions
+    return !!parsed && Array.isArray(permissions) && permissions.some(
+      permission => permission.resource === parsed.resource && permission.action === parsed.action
+    )
+  }
+
   function hasPermission(resource: string, action: string = 'read'): boolean {
     // Super admins have all permissions
     if (user.value?.is_super_admin) {
@@ -210,6 +219,7 @@ export const useAuthStore = defineStore('auth', () => {
     switchOrg,
     logout,
     setAvailability,
-    hasPermission
+    hasPermission,
+    hasExtensionPermission
   }
 })

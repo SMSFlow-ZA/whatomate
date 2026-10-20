@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { extensionRegistry, bindExtensionRouter, canEnterExtensionRoute, isExtensionLocation } from '@/extensions'
 
 // Permission-based route meta type
 declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     permission?: string // Resource permission required (e.g., 'analytics', 'chat')
+    extensionModule?: string
   }
 }
 
@@ -36,6 +38,7 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'app-layout',
       component: () => import('@/components/layout/AppLayout.vue'),
       meta: { requiresAuth: true },
       children: [
@@ -411,12 +414,29 @@ function getFirstAccessibleRoute(authStore: ReturnType<typeof useAuthStore>): st
 }
 
 // Navigation guard
+let extensionBinding: ReturnType<typeof bindExtensionRouter> | undefined
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 
   // Hydrate the store from localStorage before any route decision — an authenticated user hitting /login must be redirected away.
   if (!authStore.isAuthenticated && (to.meta.requiresAuth !== false || to.name === 'login' || to.name === 'register')) {
     authStore.restoreSession()
+  }
+
+  if (!extensionBinding) {
+    extensionBinding = bindExtensionRouter(router, extensionRegistry, authStore)
+    // Initial URL resolution may have happened before permitted addon records
+    // were registered. Resolve once more beneath the authenticated app layout.
+    const resolved = router.resolve(to.fullPath)
+    if (resolved.meta.extensionModule && !to.meta.extensionModule) {
+      return next({ path: to.path, query: to.query, hash: to.hash, replace: true })
+    }
+  }
+
+  if (isExtensionLocation(to) && !canEnterExtensionRoute(to, authStore)) {
+    return next(authStore.isAuthenticated
+      ? { path: getFirstAccessibleRoute(authStore) }
+      : { name: 'login', query: { redirect: to.fullPath } })
   }
 
   // Check if route requires auth
@@ -427,7 +447,7 @@ router.beforeEach(async (to, _from, next) => {
 
     // Check permission-based access
     const requiredPermission = to.meta.permission
-    if (requiredPermission) {
+    if (requiredPermission && !to.meta.extensionModule) {
       if (!authStore.hasPermission(requiredPermission, 'read')) {
         // Redirect to first accessible page
         return next({ path: getFirstAccessibleRoute(authStore) })
