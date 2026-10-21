@@ -49,6 +49,7 @@ export function bindExtensionRouter(
   parentName = "app-layout",
 ) {
   const installed = new Map<string, { route: RouteRecordRaw; remove: () => void }>();
+  let pendingRedirect: string | undefined;
   const synchronize = () => {
     const routes = auth.isAuthenticated
       ? registry.discover((permission) =>
@@ -91,7 +92,17 @@ export function bindExtensionRouter(
       isExtensionLocation(current) &&
       !canEnterExtensionRoute(current, auth)
     ) {
-      void router.replace(auth.isAuthenticated ? "/profile" : "/login");
+      const target = auth.isAuthenticated ? "/profile" : "/login";
+      // A fallback guard can itself refresh a failed catalog. Repeated authority
+      // invalidations must not cancel/restart that same pending navigation.
+      // Logout may still supersede an in-flight profile redirect immediately.
+      if (pendingRedirect !== target) {
+        pendingRedirect = target;
+        const settled = () => {
+          if (pendingRedirect === target) pendingRedirect = undefined;
+        };
+        void router.replace(target).then(settled, settled);
+      }
     }
   };
   // Validate before creating a watcher so initial collisions leave no subscription.

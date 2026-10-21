@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick, reactive } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { bindExtensionRouter } from "./router";
@@ -170,4 +170,29 @@ it('keeps registered route identity during an equivalent user refresh while navi
  binding.stop()
  expect(router.currentRoute.value.fullPath).toBe('/extensions/cases/assigned')
  expect(retained).toBe(original)
+})
+
+it.each([false, true])('bounds revocation redirects while the fallback guard is pending (logout=%s)', async logout => {
+ const auth = reactive({ isAuthenticated: true, user: { permissions: ['cases:work.assigned'] }, extensionRevision: 1, hasExtensionPermission(permission: string) { return this.user.permissions.includes(permission) } })
+ const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'app-layout', component: Page, children: [{ path: 'profile', component: Page }] }, { path: '/login', component: Page }] })
+ const registry = createExtensionRegistry([manifest], { 'cases/Assigned': Page }, ['cases'])
+ const binding = bindExtensionRouter(router, registry, auth)
+ await router.push('/extensions/cases/assigned')
+ let release!: () => void
+ const pending = new Promise<void>(resolve => { release = resolve })
+ router.beforeEach(to => to.path === '/profile' ? pending : true)
+ const redirects = vi.spyOn(router, 'replace')
+ auth.user.permissions = []
+ await nextTick()
+ // Each failed catalog refresh invalidates authority again while the router is
+ // still on the protected route. It must not cancel/restart its own fallback.
+ auth.extensionRevision++; auth.extensionRevision++; auth.extensionRevision++
+ const profileRedirects = redirects.mock.calls.filter(([to]) => to === '/profile').length
+ if (logout) auth.isAuthenticated = false
+ release()
+ await new Promise(resolve => setTimeout(resolve, 0))
+ const location = router.currentRoute.value.path
+ binding.stop(); redirects.mockRestore()
+ expect(profileRedirects).toBe(1)
+ expect(location).toBe(logout ? '/login' : '/profile')
 })
