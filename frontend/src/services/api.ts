@@ -85,15 +85,26 @@ function onRefreshComplete(success: boolean) {
 // a single tab. Falls back to a plain request where Web Locks is unavailable
 // (older browsers / insecure contexts).
 async function refreshAccessToken(): Promise<void> {
-  const doRefresh = () =>
-    axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })
+  // One deadline covers both waiting for another tab and the HTTP request.
+  // A stalled holder must not leave this tab's queued 401s pending forever.
+  const controller = new AbortController()
+  const deadline = setTimeout(() => controller.abort(), 30000)
+  const doRefresh = () => axios.post(`${API_BASE_URL}/auth/refresh`, {}, {
+    withCredentials: true,
+    timeout: 30000,
+    signal: controller.signal,
+  })
 
-  if (navigator.locks?.request) {
-    await navigator.locks.request('whm-token-refresh', async () => {
+  try {
+    if (navigator.locks?.request) {
+      await navigator.locks.request('whm-token-refresh', { signal: controller.signal }, async () => {
+        await doRefresh()
+      })
+    } else {
       await doRefresh()
-    })
-  } else {
-    await doRefresh()
+    }
+  } finally {
+    clearTimeout(deadline)
   }
 }
 
