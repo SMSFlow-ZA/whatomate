@@ -30,7 +30,7 @@ it.each(['withdraw', 'refresh'])('removes previously retrieved source cards on %
   await vi.waitFor(() => expect(host.textContent).toContain('Status: published'))
   const form = Array.from(host.querySelectorAll('form')).find(f => f.textContent?.includes('Search current publications'))!
   const audience = form.querySelector('input')!; audience.value = 'employees'; audience.dispatchEvent(new Event('input'))
-  const words = form.querySelector('input[type=search]')!; words.value = 'Synthetic'; words.dispatchEvent(new Event('input'))
+  const words = form.querySelector<HTMLInputElement>('input[type=search]')!; words.value = 'Synthetic'; words.dispatchEvent(new Event('input'))
   form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
   await vi.waitFor(() => expect(host.querySelectorAll('h3')).toHaveLength(1))
   const label = action === 'withdraw' ? 'Withdraw publication' : 'Refresh status'
