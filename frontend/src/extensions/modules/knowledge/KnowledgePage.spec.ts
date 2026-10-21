@@ -38,3 +38,16 @@ it.each(['withdraw', 'refresh'])('removes previously retrieved source cards on %
   await vi.waitFor(() => expect(host.querySelectorAll('h3')).toHaveLength(0))
   expect(host.textContent).toContain('No current results loaded.')
 })
+it('explains a known publication collision without retrying the write', async () => {
+ const job = { id: 'synthetic-conflict', status: 'approved', version: 4, metadata: { document_id: 'DEMO-CONFLICT', version: '2', effective_at: '2026-10-20T00:00:00Z', audiences: ['employees'] } }
+ mocks.can.mockReturnValue(true); mocks.loadJobs.mockResolvedValue([job]); mocks.loadJob.mockResolvedValue(job)
+ mocks.transition.mockRejectedValue({ response: { status: 409, data: { error: { code: 'publication_conflict' } } } })
+ app = createApp(KnowledgePage); app.mount(host)
+ await vi.waitFor(() => expect(host.querySelector('tbody button')).not.toBeNull())
+ ;(host.querySelector('tbody button') as HTMLButtonElement).click()
+ await vi.waitFor(() => expect(host.textContent).toContain('Status: approved'))
+ Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Publish approved version')!.click()
+ await vi.waitFor(() => expect(host.textContent).toContain('Another publication uses this version or effective date. Upload a distinct version and effective date, then obtain a new review.'))
+ expect(mocks.transition).toHaveBeenCalledTimes(1)
+ expect(host.textContent).toContain('Status: approved')
+})
