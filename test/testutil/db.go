@@ -143,7 +143,10 @@ func runMigrations(db *gorm.DB) error {
 			return err
 		}
 	}
-	return channelmigration.Run(db)
+	if err := channelmigration.Run(db); err != nil { return err }
+	// Production initializes the explicit ordinary/protected host singleton.
+	// Test databases must do the same; a missing policy table is never permission.
+	return models.InstallProtectedHostGuard(db)
 }
 
 // cleanupTables removes all data from tables (for PostgreSQL cleanup).

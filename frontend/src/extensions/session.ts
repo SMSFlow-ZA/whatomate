@@ -1,14 +1,16 @@
 import { reactive, readonly } from 'vue'
 import { parseExtensionPermission } from './permissions'
+import { parseAIProcessingDisclosure, type AIProcessingDisclosure } from './processingDisclosure'
 
 export interface ExtensionGrant { permission: string; unit_id?: string; audience?: string }
-interface Catalog { modules: {id:string;api_version:number}[]; permissions:string[]; grants:ExtensionGrant[]; mfa_verified:boolean }
-const state = reactive({ identity:'', ready:false, revision:0, modules:[] as string[], permissions:[] as string[], grants:[] as ExtensionGrant[] })
+interface Catalog { modules: {id:string;api_version:number}[]; permissions:string[]; grants:ExtensionGrant[]; mfa_verified:boolean; ai_processing?:unknown }
+const state = reactive({ identity:'', ready:false, revision:0, modules:[] as string[], permissions:[] as string[], grants:[] as ExtensionGrant[], aiProcessing:null as AIProcessingDisclosure|null, aiProcessingUnavailable:false })
 export const extensionSession = readonly(state)
 let flight: Promise<boolean> | undefined
 let flightEpoch = -1
 export function clearExtensionSession(identity = state.identity) {
   state.identity = identity; state.ready = false; state.modules = []; state.permissions = []; state.grants = []; state.revision++
+  state.aiProcessing=null; state.aiProcessingUnavailable=false
 }
 export function extensionIdentity(identity: string) { if (identity !== state.identity) clearExtensionSession(identity) }
 export function extensionPermission(permission:string):boolean {
@@ -55,6 +57,11 @@ export function refreshExtensionSession(load:()=>Promise<unknown>):Promise<boole
       // Changes invalidate pending data requests and remount protected views.
       const changed = !state.ready || JSON.stringify([state.modules,state.permissions,state.grants]) !== JSON.stringify([modules,permissions,grants])
       state.modules = modules; state.permissions = permissions; state.grants = grants; state.ready = true
+      // Metadata is independent from authority: malformed optional disclosure
+      // blocks new AI submissions, without changing MFA/permissions/navigation.
+      const hasProcessing=Object.prototype.hasOwnProperty.call(c,'ai_processing')
+      state.aiProcessing=hasProcessing?parseAIProcessingDisclosure(c.ai_processing):null
+      state.aiProcessingUnavailable=hasProcessing && state.aiProcessing===null
       if (changed) state.revision++
       return true
     } catch { if (state.revision === epoch && state.identity === identity) clearExtensionSession(); return false }

@@ -130,16 +130,8 @@ func (a *App) protectedCarrierCredentials(ctx context.Context, m delivery.Messag
 	if a.Config == nil || !a.Config.Extensions.CarrierEnabled || !a.Config.Extensions.CarrierDispatchEnabled || a.ExtensionCarrier == nil || a.ExtensionConversation == nil || a.DB == nil {
 		return protectedcarrier.Credentials{}, errCarrierComposition
 	}
-	if a.Config.Extensions.SyntheticDevelopment {
-		allowed := false
-		for _, v := range a.Config.Extensions.CarrierAllowedRecipients {
-			if v == m.Sender {
-				allowed = true
-			}
-		}
-		if !allowed {
-			return protectedcarrier.Credentials{}, errCarrierComposition
-		}
+	if !extensionCarrierRecipientAllowed(a.Config.Extensions, m.Sender) {
+		return protectedcarrier.Credentials{}, errCarrierComposition
 	}
 	if e := a.ExtensionConversation.AuthorizeDelivery(ctx, m); e != nil {
 		return protectedcarrier.Credentials{}, errCarrierComposition

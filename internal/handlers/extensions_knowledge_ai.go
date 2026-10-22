@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"github.com/SMSFlow-ZA/whatomate-addons/ai"
@@ -23,12 +22,7 @@ func (a *App) initializeKnowledge(ctx context.Context, db *sql.DB) error {
 
 func (a *App) initializeAI(ctx context.Context, db *sql.DB) error {
 	c := a.Config.Extensions
-	// Production composition is a separate reviewed provider configuration. Enabling
-	// a local provider must never imply a South African deployment attestation.
-	if !c.SyntheticDevelopment {
-		return fmt.Errorf("AI composition requires an explicit reviewed provider; local profile is synthetic only")
-	}
-	provider, e := ai.NewDevelopmentProvider(ai.DevelopmentConfig{SyntheticDevelopment: true, Endpoint: c.DevelopmentAIEndpoint, ModelDigest: c.DevelopmentModelDigest, EmbeddingDigest: c.DevelopmentEmbeddingDigest, Timeout: 110 * time.Second})
+	provider, e := newExtensionAIProvider(extensionAIProviderConfigFromHost(c))
 	if e != nil {
 		return e
 	}
@@ -65,8 +59,17 @@ func (a *App) initializeAI(ctx context.Context, db *sql.DB) error {
 			refreshed, e := a.refreshExtensionActor(ctx, original)
 			return e == nil && user == refreshed.UserID && refreshed.AudienceAllowed("knowledge:read", audience)
 		})
-		return ai.Service{Catalog: ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}, Authorizer: auth, Provider: provider, Now: time.Now}, nil
+		vectors, e := a.extensionVectors(ctx, db, current.OrganizationID)
+		if e != nil {
+			return ai.Service{}, e
+		}
+		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}
+		// A typed nil *VectorRepository is nonnil when assigned to an interface.
+		if vectors != nil {
+			retriever.Vectors = vectors
+		}
+		return ai.Service{Catalog: retriever, Authorizer: auth, Provider: provider, Now: time.Now}, nil
 	}
 	a.ExtensionAPI["ai"] = ai.NewHTTPHandler(db, cfg)
-	return a.ExtensionRegistry.Register(ext.Descriptor{ID: "ai", Version: "0.1.0", APIVersion: ext.APIVersion, Dependencies: []string{"security", "knowledge", "cases"}, Capabilities: []string{"synthetic-local-inference", "source-bound-quotes", "human-corrections"}})
+	return a.ExtensionRegistry.Register(ext.Descriptor{ID: "ai", Version: "0.1.0", APIVersion: ext.APIVersion, Dependencies: []string{"security", "knowledge", "cases"}, Capabilities: []string{"configured-advisory-inference", "source-bound-quotes", "human-corrections"}})
 }

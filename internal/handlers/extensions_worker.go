@@ -9,11 +9,12 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
-// StartExtensionWorker runs the explicit synthetic or bound carrier composition.
+// StartExtensionWorker runs independent knowledge indexing and the explicit
+// synthetic or bound carrier composition.
 // Dispatch remains held unless an exact trusted transport binding is enabled.
 func (a *App) StartExtensionWorker() context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
-	if a.Config == nil || (!a.Config.Extensions.SyntheticDevelopment && a.ExtensionCarrier == nil) || a.ExtensionConversation == nil {
+	if a.Config == nil || a.ExtensionConversation == nil || (!a.Config.Extensions.SyntheticDevelopment && a.ExtensionCarrier == nil && !a.Config.Extensions.KnowledgeVectorEnabled) {
 		return cancel
 	}
 	run := func(timeout time.Duration, work func(context.Context)) {
@@ -34,6 +35,10 @@ func (a *App) StartExtensionWorker() context.CancelFunc {
 			}
 		}()
 	}
+	if a.Config.Extensions.KnowledgeVectorEnabled {
+		// Indexing is independent of ingress, escalation and carrier delivery.
+		run(75*time.Second, func(tick context.Context) { _ = a.extensionVectorTick(tick) })
+	}
 	if a.ExtensionCarrier != nil {
 		// Inference may take longer than a transport attempt. Escalation has its own
 		// loop so a slow provider cannot stop unrelated due-case routing.
@@ -42,7 +47,7 @@ func (a *App) StartExtensionWorker() context.CancelFunc {
 		run(15*time.Second, func(tick context.Context) { _ = a.ExtensionCarrier.ReconcilePending(tick) })
 		run(75*time.Second, func(tick context.Context) { _ = a.ExtensionCarrier.PollSMSReceipts(tick) })
 		run(15*time.Second, func(tick context.Context) { _, _ = a.ExtensionConversation.EscalateDue(tick) })
-	} else {
+	} else if a.Config.Extensions.SyntheticDevelopment {
 		run(15*time.Second, a.extensionSyntheticTick)
 	}
 	return cancel

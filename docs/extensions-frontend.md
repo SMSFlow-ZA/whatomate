@@ -153,3 +153,19 @@ single concrete `meta.permission` and route-entry check. Cases therefore admit
 `read.own`, `read.triage` and `work.assigned` users; content publishing admits
 upload/review/publish/retire users without requiring document-read authority.
 Individual domain actions still enforce their own exact current permissions.
+
+The authenticated catalog optionally includes `ai_processing` for an operator with
+`ai:assist` when this deployment configures production Global Standard processing.
+It contains only a bounded public scope/country/notice projection, including the
+possibility of international embedding generation. The notice describes reviewed
+deployment configuration; it is not telemetry or independent locality certification.
+No provider endpoint, key, approval identifier or freeform private operator text is
+serialized. Invalid configured metadata is represented by a present null field.
+
+The AI page displays validated disclosure above new-request controls and removes
+the assumption that inference is local. Malformed optional metadata disables new
+answer/category submissions with a warning while preserving saved-record controls
+and the existing authenticated permissions/navigation. Legacy catalogs without the
+optional field remain compatible. Disclosure changes do not change the authority
+revision or remount other protected views; logout, identity switch and failed
+authority refresh clear the metadata with the rest of session state.

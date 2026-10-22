@@ -488,6 +488,9 @@ func updateSMSMessage(tx *gorm.DB, id uuid.UUID, status string) error {
 }
 
 func (s *Service) PollConnection(ctx context.Context, id uuid.UUID) error {
+	if err := genericPollingHostAllowed(ctx, s.DB, false); err != nil {
+		return err
+	}
 	if s.IsConnectionProtected(id) {
 		return ErrUnavailable
 	}
@@ -504,11 +507,21 @@ func (s *Service) PollConnection(ctx context.Context, id uuid.UUID) error {
 	cancel()
 	if err != nil {
 		delay := time.Duration(1<<min(conn.PollFailures, 5)) * 30 * time.Second
-		_ = s.DB.WithContext(ctx).Model(&conn).Updates(map[string]any{"poll_failures": conn.PollFailures + 1, "next_poll_at": time.Now().Add(delay), "error_code": "poll_failed"}).Error
+		if updateErr := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if guardErr := genericPollingHostAllowed(ctx, tx, true); guardErr != nil {
+				return guardErr
+			}
+			return tx.Model(&conn).Updates(map[string]any{"poll_failures": conn.PollFailures + 1, "next_poll_at": time.Now().Add(delay), "error_code": "poll_failed"}).Error
+		}); updateErr != nil {
+			return updateErr
+		}
 		return err
 	}
 	changed := map[uuid.UUID]bool{}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := genericPollingHostAllowed(ctx, tx, true); err != nil {
+			return err
+		}
 		var locked models.ChannelConnection
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", id).Error; err != nil {
 			return err

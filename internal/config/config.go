@@ -35,7 +35,8 @@ type Config struct {
 }
 
 // ExtensionsConfig is trusted host configuration, never writable through APIs.
-// ProtectedMode stays unavailable until every read/event path is integrated.
+// ProtectedMode requires the complete reviewed composition and persists a
+// monotonic database boundary; ordinary mode cannot reopen that database.
 // ExtensionCarrierBinding is an operator-owned exact account binding. Secret
 // values are never returned by the extension catalog or configuration APIs.
 type ExtensionCarrierBinding struct {
@@ -65,20 +66,38 @@ type ExtensionsConfig struct {
 	RequiredInbound string `koanf:"required_inbound"`
 	ProtectedMode   bool   `koanf:"protected_mode"`
 	// SecurityKey is a base64-encoded 32-byte secret supplied by the operator.
-	SecurityKey                  string `koanf:"security_key"`
-	MFAFreshnessSeconds          int    `koanf:"mfa_freshness_seconds"`
-	Modules                      string `koanf:"modules"`
-	RosterFreshnessSeconds       int    `koanf:"roster_freshness_seconds"`
-	SyntheticDevelopment         bool   `koanf:"synthetic_development"`
-	DevelopmentAIEndpoint        string `koanf:"development_ai_endpoint"`
-	DevelopmentModelDigest       string `koanf:"development_model_digest"`
-	DevelopmentEmbeddingDigest   string `koanf:"development_embedding_digest"`
-	ReportsMinGroup              int    `koanf:"reports_min_group"`
-	ConversationEmployeeAudience string `koanf:"conversation_employee_audience"`
-	EscalationAfterSeconds       int    `koanf:"escalation_after_seconds"`
-	EscalationWorkerIDs          string `koanf:"escalation_worker_ids"`
-	RoutingPrimaryIDs            string `koanf:"routing_primary_ids"`
-	RoutingBackupIDs             string `koanf:"routing_backup_ids"`
+	SecurityKey                string `koanf:"security_key"`
+	MFAFreshnessSeconds        int    `koanf:"mfa_freshness_seconds"`
+	Modules                    string `koanf:"modules"`
+	RosterFreshnessSeconds     int    `koanf:"roster_freshness_seconds"`
+	SyntheticDevelopment       bool   `koanf:"synthetic_development"`
+	DevelopmentAIEndpoint      string `koanf:"development_ai_endpoint"`
+	DevelopmentModelDigest     string `koanf:"development_model_digest"`
+	DevelopmentEmbeddingDigest string `koanf:"development_embedding_digest"`
+	// Production AI is an explicit operator-owned HTTPS deployment. Country and
+	// attestation identify reviewed evidence; enabling a module invents neither.
+	AIProvider                          string   `koanf:"ai_provider"`
+	AIEndpoint                          string   `koanf:"ai_endpoint"`
+	AIEmbeddingEndpoint                 string   `koanf:"ai_embedding_endpoint"`
+	AIAllowedEndpoints                  []string `koanf:"ai_allowed_endpoints"`
+	AIDeploymentAttestation             string   `koanf:"ai_deployment_attestation"`
+	AICountry                           string   `koanf:"ai_country"`
+	AIModel                             string   `koanf:"ai_model"`
+	AIEmbeddingModel                    string   `koanf:"ai_embedding_model"`
+	AIPromptRevision                    string   `koanf:"ai_prompt_revision"`
+	AIAPIKey                            string   `koanf:"ai_api_key"`
+	AIEmbeddingDimensions               int      `koanf:"ai_embedding_dimensions"`
+	AIProcessingScope                   string   `koanf:"ai_processing_scope"`
+	AIInternationalProcessingApproval   string   `koanf:"ai_international_processing_approval"`
+	AIInternationalProcessingDisclosure string   `koanf:"ai_international_processing_disclosure"`
+	KnowledgeVectorEnabled              bool     `koanf:"knowledge_vector_enabled"`
+	KnowledgeVectorIdentity             string   `koanf:"knowledge_vector_identity"`
+	ReportsMinGroup                     int      `koanf:"reports_min_group"`
+	ConversationEmployeeAudience        string   `koanf:"conversation_employee_audience"`
+	EscalationAfterSeconds              int      `koanf:"escalation_after_seconds"`
+	EscalationWorkerIDs                 string   `koanf:"escalation_worker_ids"`
+	RoutingPrimaryIDs                   string   `koanf:"routing_primary_ids"`
+	RoutingBackupIDs                    string   `koanf:"routing_backup_ids"`
 }
 
 type ChannelsConfig struct {

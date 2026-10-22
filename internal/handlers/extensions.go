@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/models"
 	ext "github.com/shridarpatil/whatomate/pkg/extensions/v1"
 )
 
@@ -28,11 +29,22 @@ func (a *App) InitializeExtensions() error {
 	if a.Config == nil {
 		return fmt.Errorf("missing extension configuration")
 	}
+	if a.Config.Extensions.ProtectedMode {
+		if err := validateProtectedExtensionSettings(a.Config.Extensions); err != nil {
+			return err
+		}
+	}
+	if a.DB != nil {
+		protected, err := models.ProtectedHostEnabled(a.DB)
+		if err != nil {
+			return fmt.Errorf("protected host state unavailable: %w", err)
+		}
+		if protected && !a.Config.Extensions.ProtectedMode {
+			return fmt.Errorf("protected database requires protected host configuration")
+		}
+	}
 	if err := a.initializeExtensionSecurity(); err != nil {
 		return err
-	}
-	if a.Config.Extensions.ProtectedMode {
-		return fmt.Errorf("protected mode is unavailable until host read/event/MFA integration is accepted")
 	}
 	if a.ExtensionRegistry == nil {
 		a.ExtensionRegistry = ext.NewRegistry()
@@ -54,9 +66,23 @@ func (a *App) InitializeExtensions() error {
 	if err := a.initializeProtectedCarrier(context.Background(), carrierDB); err != nil {
 		return err
 	}
+	if err := a.initializeExtensionVectors(context.Background(), carrierDB); err != nil {
+		return fmt.Errorf("knowledge vector initialization failed: %w", err)
+	}
 	required := append(extensionIDs(a.Config.Extensions.Required), extensionIDs(a.Config.Extensions.RequiredInbound)...)
 	required = append(required, extensionIDs(a.Config.Extensions.Modules)...)
-	return a.ExtensionRegistry.Validate(required)
+	if err := a.ExtensionRegistry.Validate(required); err != nil {
+		return err
+	}
+	if a.Config.Extensions.ProtectedMode {
+		if a.DB == nil || a.ExtensionSecurity == nil || a.ExtensionAccess == nil || a.ExtensionConversation == nil {
+			return fmt.Errorf("protected ER composition incomplete")
+		}
+		if err := models.EnableProtectedHost(a.DB); err != nil {
+			return fmt.Errorf("protected host activation failed: %w", err)
+		}
+	}
+	return nil
 }
 
 func (a *App) checkExtensionInbound(ctx context.Context, org uuid.UUID, account string, msg IncomingTextMessage) error {

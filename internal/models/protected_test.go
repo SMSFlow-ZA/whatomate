@@ -43,3 +43,32 @@ func TestProtectionReadGuardsExcludeBeforeCountAndSearch(t *testing.T) {
 		t.Fatal("unguarded contact count")
 	}
 }
+
+func TestProtectionReadGuardsCoverAliasedModels(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: "host=invalid", PreferSimpleProtocol: true}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterProtectionReadGuards(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []any{&Message{}, &Contact{}} {
+		table := "messages"
+		if _, contact := model.(*Contact); contact {
+			table = "contacts"
+		}
+		query := db.Model(model).Table(table + " AS protected_alias").Find(model)
+		sql := query.Statement.SQL.String()
+		if !strings.Contains(sql, `"protected_alias"."protection_module"`) || !strings.Contains(sql, "NOT EXISTS") {
+			t.Fatalf("aliased %s escaped read protection: %s", table, sql)
+		}
+		if strings.Contains(sql, "= messages.contact_id") || strings.Contains(sql, "= contacts.id") {
+			t.Fatalf("aliased relation uses hidden table name: %s", sql)
+		}
+		var count int64
+		query = db.Table(table + " AS protected_alias").Count(&count)
+		if !strings.Contains(query.Statement.SQL.String(), `"protected_alias"."protection_module"`) {
+			t.Fatalf("table-only alias escaped protection: %s", query.Statement.SQL.String())
+		}
+	}
+}

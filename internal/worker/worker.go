@@ -38,10 +38,11 @@ var _ queue.JobHandler = (*Worker)(nil)
 
 // New creates a new Worker instance
 func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*Worker, error) {
-	// The campaign worker has no compiled protected-domain composition yet.
-	// Standalone workers must not bypass the server's readiness gate.
-	if cfg == nil || cfg.Extensions.ProtectedMode || strings.TrimSpace(cfg.Extensions.Modules) != "" || strings.TrimSpace(cfg.Extensions.Required) != "" || strings.TrimSpace(cfg.Extensions.RequiredInbound) != "" {
-		return nil, fmt.Errorf("worker extension composition is unavailable")
+	if err := ValidateConfiguration(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateWorkerDatabase(db); err != nil {
+		return nil, err
 	}
 	consumer, err := queue.NewRedisConsumer(rdb, log)
 	if err != nil {
@@ -64,6 +65,33 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 		Consumer:  consumer,
 		Publisher: publisher,
 	}, nil
+}
+
+// ValidateConfiguration is shared with server option preflight so an unsupported
+// generic consumer cannot fail only after irreversible protected activation.
+func ValidateConfiguration(cfg *config.Config) error {
+	if cfg == nil || cfg.Extensions.ProtectedMode || strings.TrimSpace(cfg.Extensions.Modules) != "" || strings.TrimSpace(cfg.Extensions.Required) != "" || strings.TrimSpace(cfg.Extensions.RequiredInbound) != "" || cfg.Extensions.CarrierEnabled || cfg.Extensions.CarrierDispatchEnabled || len(cfg.Extensions.CarrierBindings) > 0 || len(cfg.Extensions.CarrierSMSBindings) > 0 {
+		return fmt.Errorf("worker extension composition is unavailable")
+	}
+	return nil
+}
+
+// A restored protected database cannot be made ordinary by omitting process
+// flags. Check before constructing any Redis consumer or touching queue state.
+func validateWorkerDatabase(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("worker persisted protection database unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	protected, err := models.ProtectedHostEnabled(db.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("worker persisted protection unavailable: %w", err)
+	}
+	if protected {
+		return fmt.Errorf("worker persisted protection requires protected server composition")
+	}
+	return nil
 }
 
 // Run starts the worker and processes jobs until context is cancelled

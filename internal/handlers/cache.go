@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -415,75 +416,47 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 	if err := a.DB.Where("id = ? AND is_active = ?", userID, true).First(&current).Error; err != nil {
 		return nil, err
 	}
-	if orgID != uuid.Nil && current.OrganizationID != orgID && !current.IsSuperAdmin {
+	if current.IsSuperAdmin {
+		return &UserPermissions{IsSuperAdmin: true}, nil
+	}
+	// Role UUID replacement is an authorization generation change even when an
+	// offline administrator cannot invalidate Redis. Resolve the effective role
+	// and its current organization/soft-delete state before considering a hit.
+	roleID := current.RoleID
+	roleOrg := current.OrganizationID
+	if orgID != uuid.Nil {
+		roleOrg = orgID
 		var membership models.UserOrganization
-		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&membership).Error; err != nil {
+		err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&membership).Error
+		switch {
+		case err == nil:
+			// An existing membership with no role explicitly grants no access.
+			roleID = membership.RoleID
+		case errors.Is(err, gorm.ErrRecordNotFound) && orgID == current.OrganizationID:
+			// Only absent legacy home-organization membership may use users.role_id.
+		default:
 			return nil, err
 		}
-		if membership.RoleID == nil {
-			return nil, gorm.ErrRecordNotFound
-		}
+	}
+	if roleID == nil || *roleID == uuid.Nil || roleOrg == uuid.Nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var role models.CustomRole
+	if err := a.DB.Where("id = ? AND organization_id = ?", *roleID, roleOrg).First(&role).Error; err != nil {
+		return nil, err
 	}
 	// Try cache first (if Redis is available)
 	if a.Redis != nil {
 		cached, err := a.Redis.Get(ctx, cacheKey).Result()
 		if err == nil && cached != "" {
 			var perms UserPermissions
-			if err := json.Unmarshal([]byte(cached), &perms); err == nil {
-				perms.IsSuperAdmin = current.IsSuperAdmin
+			if err := json.Unmarshal([]byte(cached), &perms); err == nil && perms.RoleID == role.ID && !perms.IsSuperAdmin {
 				return &perms, nil
 			}
 		}
 	}
 
-	// Cache miss - fetch from database
-	var user models.User
-	if err := a.DB.Where("id = ?", userID).First(&user).Error; err != nil {
-		return nil, err
-	}
-
-	if user.IsSuperAdmin {
-		return &UserPermissions{IsSuperAdmin: true}, nil
-	}
-	// Determine which role to use
-	// Determine which role to use. For a specific org the role has to come from
-	// that org's membership row — falling back to users.role_id would carry the
-	// user's home-org role (possibly admin) into a tenant they only belong to as
-	// a plain member. The fallback survives only for the user's own org, where
-	// legacy rows may predate user_organizations.
-	var roleID *uuid.UUID
-	if orgID != uuid.Nil {
-		var userOrg models.UserOrganization
-		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&userOrg).Error; err == nil {
-			roleID = userOrg.RoleID
-		}
-		if roleID == nil && orgID == user.OrganizationID {
-			roleID = user.RoleID
-		}
-	} else {
-		roleID = user.RoleID
-	}
-
-	if roleID == nil {
-		if !user.IsSuperAdmin {
-			return nil, gorm.ErrRecordNotFound
-		}
-		// Super admin in an org they hold no membership in: the flag alone grants
-		// access (HasPermission short-circuits on it), with no role-derived perms.
-		perms := UserPermissions{IsSuperAdmin: true, Permissions: []string{}}
-		if a.Redis != nil {
-			if data, err := json.Marshal(perms); err == nil {
-				a.Redis.Set(ctx, cacheKey, data, userPermissionsCacheTTL)
-			}
-		}
-		return &perms, nil
-	}
-
-	// Fetch role and load permissions via JOIN
-	var role models.CustomRole
-	if err := a.DB.Where("id = ?", roleID).First(&role).Error; err != nil {
-		return nil, err
-	}
+	// Cache miss or changed authorization generation: load the current role.
 	if err := a.loadRolePermissions(&role); err != nil {
 		return nil, err
 	}
@@ -493,7 +466,7 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 		RoleID:       role.ID,
 		RoleName:     role.Name,
 		IsSystem:     role.IsSystem,
-		IsSuperAdmin: user.IsSuperAdmin,
+		IsSuperAdmin: false,
 		Permissions:  make([]string, 0, len(role.Permissions)),
 	}
 

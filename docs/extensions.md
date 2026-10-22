@@ -46,3 +46,45 @@ compose real modules, enforce current authenticated grants/MFA, finish domain UI
 dispatch/recovery and migrations, verify omission/disable/rollback boundaries,
 and run end-to-end authorization, concurrency and regression acceptance. This
 development code is disabled by default and has not been deployed.
+
+## Optional durable knowledge vectors
+
+`extensions.knowledge_vector_enabled` defaults to false. Enabling it requires the
+compiled knowledge/AI modules, an actual administrator-installed `public.vector`
+extension, dimensions 1–2000, and `knowledge_vector_identity` identifying reviewed
+exact embedding deployment/model-generation evidence. A moving logical
+`ai_embedding_model` alias is not that identity. Release composition must establish
+the external model identity; a nonempty configuration value does not verify it.
+
+The host exposes `initializeExtensionVectors(ctx, db)` for the startup migration
+phase after module/provider initialization and before protected activation. It
+enumerates trusted current host organizations, creates immutable tenant vector
+profiles and registers the fixed internal indexing principal. A disabled indexing
+grant remains disabled after startup. There is no browser registration/indexing
+route and no application `CREATE EXTENSION`.
+
+`extensionVectors(ctx, db, tenant)` performs verification only, never DDL or grant
+registration. It rejects a different host database pool, unknown/deleted tenant,
+missing vector relation/profile, changed model-generation identity or dimensions.
+The operator AI ServiceFor path uses this helper after authenticated actor refresh
+and knowledge grant synchronization; native vector failures deny service creation.
+When disabled it leaves existing FTS/candidate behavior intact. Assign a returned
+repository to `ai.HybridRetriever.Vectors` only when its pointer is nonnil, to avoid
+a typed nil interface selecting the native path accidentally.
+
+`extensionVectorTick(ctx) error` is the bounded indexing hook for an independently
+scheduled server worker lane. It creates the same configured provider, verifies
+each current organization/profile without migration and processes at most one page
+per organization. Remaining deadline is shared across organizations; failures are
+joined after other tenants are checked. The provider executes outside database
+transactions, and the knowledge owner revalidates publication/page/grant state
+before committing the derived vector. Schedule it separately from ingress,
+delivery settlement and escalation; do not invoke it from request handling.
+
+The native backend uses exact pgvector cosine search and keeps FTS first. It does
+not establish large-workload capacity or install an approximate vector index.
+Publication/page erasure cascades to derived vectors. See the add-on repository's
+`docs/knowledge-vector.md` for source currentness, worker and model-generation
+boundaries. Host hook tests use isolated schemas on actual PostgreSQL/pgvector,
+not a plain PostgreSQL substitute. These hooks do not by themselves establish
+complete protected-host/deployment acceptance.

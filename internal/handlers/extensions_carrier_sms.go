@@ -54,16 +54,8 @@ func (a *App) initializeProtectedSMS(ctx context.Context) error {
 	a.ExtensionCarrier.PollSMS = a.pollProtectedSMS
 	if a.Config.Extensions.CarrierDispatchEnabled {
 		a.ExtensionCarrier.SendSMSObserved = (protectedcarrier.SMSSender{Resolve: func(ctx context.Context, m delivery.Message) (channels.Provider, channels.Connection, error) {
-			if a.Config.Extensions.SyntheticDevelopment {
-				allowed := false
-				for _, number := range a.Config.Extensions.CarrierAllowedRecipients {
-					if number == m.Sender {
-						allowed = true
-					}
-				}
-				if !allowed {
-					return nil, channels.Connection{}, errCarrierComposition
-				}
+			if !extensionCarrierRecipientAllowed(a.Config.Extensions, m.Sender) {
+				return nil, channels.Connection{}, errCarrierComposition
 			}
 			if a.ExtensionConversation == nil || a.ExtensionConversation.AuthorizeDelivery(ctx, m) != nil {
 				return nil, channels.Connection{}, errCarrierComposition

@@ -39,10 +39,10 @@ func (a *App) initializeReports(ctx context.Context, db *sql.DB) error {
 
 func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 	c := a.Config.Extensions
-	if !c.SyntheticDevelopment || c.RosterFreshnessSeconds <= 0 || c.EscalationAfterSeconds <= 0 || c.ConversationEmployeeAudience == "" || c.ConversationEmployeeAudience == "*" {
-		return fmt.Errorf("conversation requires explicit synthetic eligibility, audience and timing configuration")
+	if err := validateExtensionConversationConfig(c); err != nil {
+		return err
 	}
-	provider, e := ai.NewDevelopmentProvider(ai.DevelopmentConfig{SyntheticDevelopment: true, Endpoint: c.DevelopmentAIEndpoint, ModelDigest: c.DevelopmentModelDigest, EmbeddingDigest: c.DevelopmentEmbeddingDigest, Timeout: 110 * time.Second})
+	provider, e := newExtensionAIProvider(extensionAIProviderConfigFromHost(c))
 	if e != nil {
 		return e
 	}
@@ -52,7 +52,12 @@ func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 	if e = (&cases.SQLRepository{DB: db}).MigrateOutboxDelivery(ctx); e != nil {
 		return e
 	}
-	cfg := conversation.HTTPConfig{EnabledSyntheticDevelopment: true, Freshness: time.Duration(c.RosterFreshnessSeconds) * time.Second, Clock: time.Now, Aliases: a.ExtensionAccess.EmployeeAliases, EscalationAfter: time.Duration(c.EscalationAfterSeconds) * time.Second}
+	cfg := conversation.HTTPConfig{EnabledSyntheticDevelopment: c.SyntheticDevelopment, Freshness: time.Duration(c.RosterFreshnessSeconds) * time.Second, Clock: time.Now, Aliases: a.ExtensionAccess.EmployeeAliases, EscalationAfter: time.Duration(c.EscalationAfterSeconds) * time.Second}
+	if !c.SyntheticDevelopment && c.AIProcessingScope == "global_standard" {
+		// The provider was validated above. Use a server-owned public notice,
+		// never freeform operator configuration or approval identifiers.
+		cfg.ProcessingDisclosure = &conversation.ProcessingDisclosure{Revision: "global-standard-v1", Text: extensionGlobalAIProcessingNotice}
+	}
 	cfg.LoadEscalationCase = func(ctx context.Context, org, unit, id string) (cases.Case, error) {
 		_, record, e := a.extensionTimerWorker(ctx, db, org, unit, id)
 		return record, e
@@ -112,7 +117,15 @@ func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 		if e != nil {
 			return conversation.Answer{}, e
 		}
-		result := (ai.Service{Catalog: ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}, Provider: provider, Authorizer: auth, Now: time.Now}).Answer(ctx, principal, c.ConversationEmployeeAudience, question)
+		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}
+		vectors, e := a.extensionVectors(ctx, db, employee.OrganizationID)
+		if e != nil {
+			return conversation.Answer{}, e
+		}
+		if vectors != nil {
+			retriever.Vectors = vectors
+		}
+		result := (ai.Service{Catalog: retriever, Provider: provider, Authorizer: auth, Now: time.Now}).Answer(ctx, principal, c.ConversationEmployeeAudience, question)
 		answer := conversation.Answer{Text: result.Text, Handoff: result.Handoff}
 		for _, source := range result.Citations {
 			answer.Citations = append(answer.Citations, source.Reference)

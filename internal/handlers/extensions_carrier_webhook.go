@@ -20,7 +20,7 @@ import (
 // Authentication covers the complete batch; mixed or unsupported batches deny.
 func (a *App) protectedCarrierWebhook(r *fastglue.Request, p WebhookPayload, body, signature []byte) (bool, error) {
 	if a.ExtensionCarrier == nil {
-		if a.Config != nil && a.Config.Extensions.CarrierEnabled {
+		if a.Config != nil && (a.Config.Extensions.CarrierEnabled || a.Config.Extensions.ProtectedMode) {
 			return true, r.SendErrorEnvelope(fasthttp.StatusForbidden, "Protected carrier unavailable", nil, "")
 		}
 		return false, nil
@@ -76,6 +76,7 @@ func (a *App) protectedCarrierWebhook(r *fastglue.Request, p WebhookPayload, bod
 		return deny()
 	}
 	if boundCount == 0 && ordinaryCount > 0 {
+		if a.Config.Extensions.ProtectedMode { return deny() }
 		return false, nil
 	}
 	var incoming []conversation.Inbound

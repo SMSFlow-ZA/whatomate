@@ -121,6 +121,9 @@ func runServer(args []string) {
 	if err != nil {
 		lo.Fatal("Failed to load config", "error", err)
 	}
+	if err := preflightServerWorkers(cfg, *numWorkers); err != nil {
+		lo.Fatal("Server worker preflight failed", "error", err)
+	}
 	validateBuildSource(cfg, lo)
 
 	// Validate JWT secret

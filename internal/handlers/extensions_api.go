@@ -91,5 +91,9 @@ func (a *App) ExtensionCatalog(r *fastglue.Request) error {
 	}
 	permissions := append([]string{}, trusted.Permissions...)
 	grants := append([]addonapi.Grant{}, trusted.Grants...)
-	return r.SendEnvelope(map[string]any{"modules": a.ExtensionRegistry.Manifest(), "permissions": permissions, "grants": grants, "mfa_verified": true})
+	catalog := map[string]any{"modules": a.ExtensionRegistry.Manifest(), "permissions": permissions, "grants": grants, "mfa_verified": true}
+	if disclosure, present := a.extensionCatalogAIProcessing(trusted); present {
+		catalog["ai_processing"] = disclosure
+	}
+	return r.SendEnvelope(catalog)
 }

@@ -2,11 +2,16 @@ package models
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
+
 	"github.com/google/uuid"
 	ext "github.com/shridarpatil/whatomate/pkg/extensions/v1"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var protectedTableExpression = regexp.MustCompile(`(?i)^\s*(?:"?[a-z_][a-z0-9_]*"?\.)?"?(contacts|messages)"?(?:\s|$)`)
 
 // ProtectionFields are separate from editable JSON metadata. Database triggers
 // make the complete tuple immutable after insertion, including ordinary rows.
@@ -39,16 +44,27 @@ func RegisterProtectionReadGuards(db *gorm.DB) error {
 	}
 	guard := func(tx *gorm.DB) {
 		table := tx.Statement.Table
-		if table != "contacts" && table != "messages" {
+		modelTable := table
+		if tx.Statement.Schema != nil {
+			modelTable = tx.Statement.Schema.Table
+		}
+		if modelTable != "contacts" && modelTable != "messages" && tx.Statement.TableExpr != nil {
+			// Table-only counts have no model schema; preserve guards when GORM
+			// replaces the physical table name with its trusted SQL alias.
+			if match := protectedTableExpression.FindStringSubmatch(tx.Statement.TableExpr.SQL); len(match) == 2 {
+				modelTable = strings.ToLower(match[1])
+			}
+		}
+		if modelTable != "contacts" && modelTable != "messages" {
 			return
 		}
 		for _, field := range []string{"protection_organization_id", "protection_module", "protection_resource", "protection_classification"} {
 			tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Table: table, Name: field}, Value: ""}}})
 		}
-		if table == "messages" {
-			tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: `NOT EXISTS (SELECT 1 FROM contacts protection_parent WHERE protection_parent.id = messages.contact_id AND (protection_parent.protection_organization_id <> '' OR protection_parent.protection_module <> '' OR protection_parent.protection_resource <> '' OR protection_parent.protection_classification <> ''))`}}})
+		if modelTable == "messages" {
+			tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: `NOT EXISTS (SELECT 1 FROM contacts protection_parent WHERE protection_parent.id = ? AND (protection_parent.protection_organization_id <> '' OR protection_parent.protection_module <> '' OR protection_parent.protection_resource <> '' OR protection_parent.protection_classification <> ''))`, Vars: []any{clause.Column{Table: table, Name: "contact_id"}}}}})
 		} else {
-			tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: `NOT EXISTS (SELECT 1 FROM messages protection_child WHERE protection_child.contact_id = contacts.id AND (protection_child.protection_organization_id <> '' OR protection_child.protection_module <> '' OR protection_child.protection_resource <> '' OR protection_child.protection_classification <> ''))`}}})
+			tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: `NOT EXISTS (SELECT 1 FROM messages protection_child WHERE protection_child.contact_id = ? AND (protection_child.protection_organization_id <> '' OR protection_child.protection_module <> '' OR protection_child.protection_resource <> '' OR protection_child.protection_classification <> ''))`, Vars: []any{clause.Column{Table: table, Name: "id"}}}}})
 		}
 	}
 	if err := db.Callback().Query().Before("gorm:query").Register("extensions:protected_read", guard); err != nil {
@@ -64,6 +80,9 @@ func InstallProtectionGuards(db *gorm.DB) error {
 		return fmt.Errorf("protection requires PostgreSQL")
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		if err := installProtectedHostGuard(tx); err != nil {
+			return err
+		}
 		if err := tx.Exec(`CREATE OR REPLACE FUNCTION whatomate_protection_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF TG_OP = 'UPDATE' AND ROW(OLD.organization_id, OLD.protection_organization_id, OLD.protection_module, OLD.protection_resource, OLD.protection_classification) IS DISTINCT FROM ROW(NEW.organization_id, NEW.protection_organization_id, NEW.protection_module, NEW.protection_resource, NEW.protection_classification) THEN

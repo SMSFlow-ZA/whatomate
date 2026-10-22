@@ -70,6 +70,9 @@ func TestProtectedConnectionWorkersKeepOrdinaryWorkMoving(t *testing.T) {
 	if e = db.AutoMigrate(&models.ChannelConnection{}, &models.ChannelAttempt{}); e != nil {
 		t.Fatal(e)
 	}
+	if e = models.InstallProtectedHostGuard(db); e != nil {
+		t.Fatal(e)
+	}
 	now := time.Now().UTC()
 	key := strings.Repeat("k", 32)
 	encrypted, e := crypto.Encrypt(`{"client_id":"synthetic","client_secret":"synthetic"}`, key)
