@@ -46,7 +46,7 @@ func (a *App) initializeCompiledModules() error {
 	}
 	ctx := context.Background()
 	access := &addonapi.AccessStore{DB: db}
-	if e = access.Migrate(ctx); e != nil {
+	if e = a.extensionSchemaMigration(ctx, db, func() error { return access.Migrate(ctx) }); e != nil {
 		return e
 	}
 	a.ExtensionAccess = access
@@ -77,7 +77,7 @@ func (a *App) initializeCompiledModules() error {
 				return e
 			}
 		case "cases":
-			if e = (&cases.SQLRepository{DB: db}).Migrate(ctx); e != nil {
+			if e = a.extensionSchemaMigration(ctx, db, func() error { return (&cases.SQLRepository{DB: db}).Migrate(ctx) }); e != nil {
 				return e
 			}
 			a.ExtensionAPI[id] = cases.NewHTTPHandler(db, cases.HTTPConfig{Enabled: true, ResolveCandidate: a.resolveExtensionCaseCandidate, ResolveIntake: a.resolveExtensionIntake, AuthorizeEmergency: a.authorizeEmergencyCaseRead})
@@ -101,7 +101,7 @@ func (a *App) initializeCompiledModules() error {
 			if a.Config.Extensions.RosterFreshnessSeconds <= 0 {
 				return fmt.Errorf("directory freshness policy required")
 			}
-			if e = directory.MigrateHTTP(ctx, db); e != nil {
+			if e = a.extensionSchemaMigration(ctx, db, func() error { return directory.MigrateHTTP(ctx, db) }); e != nil {
 				return e
 			}
 			a.ExtensionAPI[id] = directory.NewHTTPHandler(db, directory.HTTPConfig{Freshness: time.Duration(a.Config.Extensions.RosterFreshnessSeconds) * time.Second, Clock: time.Now})

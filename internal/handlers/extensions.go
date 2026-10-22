@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/plan"
+	"github.com/shridarpatil/whatomate/internal/protectedschema"
 	ext "github.com/shridarpatil/whatomate/pkg/extensions/v1"
 )
 
@@ -28,6 +30,19 @@ func extensionIDs(raw string) []string {
 func (a *App) InitializeExtensions() error {
 	if a.Config == nil {
 		return fmt.Errorf("missing extension configuration")
+	}
+	if a.Config.Database.SchemaManagedExternally {
+		if a.DB == nil {
+			return fmt.Errorf("external protected schema database unavailable")
+		}
+		db, err := a.DB.DB()
+		if err != nil {
+			return err
+		}
+		if err := protectedschema.Verify(context.Background(), db, a.Config); err != nil {
+			return err
+		}
+		a.DB = plan.WithExternalSchema(a.DB)
 	}
 	if a.Config.Extensions.ProtectedMode {
 		if err := validateProtectedExtensionSettings(a.Config.Extensions); err != nil {
@@ -78,8 +93,10 @@ func (a *App) InitializeExtensions() error {
 		if a.DB == nil || a.ExtensionSecurity == nil || a.ExtensionAccess == nil || a.ExtensionConversation == nil {
 			return fmt.Errorf("protected ER composition incomplete")
 		}
-		if err := models.EnableProtectedHost(a.DB); err != nil {
-			return fmt.Errorf("protected host activation failed: %w", err)
+		if !a.Config.Database.SchemaManagedExternally {
+			if err := models.EnableProtectedHost(a.DB); err != nil {
+				return fmt.Errorf("protected host activation failed: %w", err)
+			}
 		}
 	}
 	return nil

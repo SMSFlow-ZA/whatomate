@@ -71,7 +71,7 @@ func (a *App) initializeProtectedCarrier(ctx context.Context, db *sql.DB) error 
 			return errCarrierComposition
 		}
 	}
-	if e := carrier.Migrate(ctx, db); e != nil {
+	if e := a.extensionSchemaMigration(ctx, db, func() error { return carrier.Migrate(ctx, db) }); e != nil {
 		return e
 	}
 	service := &carrier.Service{DB: db, Bindings: bindings, Conversation: a.ExtensionConversation, Clock: time.Now}

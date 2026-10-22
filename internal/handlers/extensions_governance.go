@@ -16,10 +16,10 @@ import (
 )
 
 func (a *App) initializeGovernance(ctx context.Context, db *sql.DB) error {
-	if e := carrier.Migrate(ctx, db); e != nil {
+	if e := a.extensionSchemaMigration(ctx, db, func() error { return carrier.Migrate(ctx, db) }); e != nil {
 		return e
 	}
-	if e := governance.MigrateHTTP(ctx, db); e != nil {
+	if e := a.extensionSchemaMigration(ctx, db, func() error { return governance.MigrateHTTP(ctx, db) }); e != nil {
 		return e
 	}
 	a.ExtensionAPI["governance"] = governance.NewHTTPHandler(db, governance.HTTPConfig{Enabled: true, RefreshActor: a.refreshExtensionActor, SubjectAliases: a.ExtensionAccess.EmployeeAliases, Adapters: []governance.PhysicalAdapter{cases.PrivacyAdapter{}, knowledge.PrivacyAdapter{}, directory.PrivacyAdapter{}, conversation.PrivacyAdapter{}, reports.PrivacyAdapter{}, ai.PrivacyAdapter{}, carrier.PrivacyAdapter{}}})

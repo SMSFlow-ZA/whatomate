@@ -20,7 +20,7 @@ func (a *App) initializeReports(ctx context.Context, db *sql.DB) error {
 	if a.Config.Extensions.ReportsMinGroup < 2 {
 		return fmt.Errorf("explicit report disclosure policy required")
 	}
-	if e := (reports.Store{DB: db}).Migrate(ctx); e != nil {
+	if e := a.extensionSchemaMigration(ctx, db, func() error { return (reports.Store{DB: db}).Migrate(ctx) }); e != nil {
 		return e
 	}
 	a.ExtensionAPI["reports"] = reports.NewHTTPHandler(db, reports.HTTPConfig{Enabled: true, MinGroup: a.Config.Extensions.ReportsMinGroup, Clock: time.Now, RefreshActor: a.refreshExtensionActor, Activities: func(ctx context.Context, actor addonapi.Actor, board bool) ([]reports.ActivityFact, error) {
@@ -46,10 +46,10 @@ func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 	if e != nil {
 		return e
 	}
-	if e = conversation.Migrate(ctx, db); e != nil {
+	if e = a.extensionSchemaMigration(ctx, db, func() error { return conversation.Migrate(ctx, db) }); e != nil {
 		return e
 	}
-	if e = (&cases.SQLRepository{DB: db}).MigrateOutboxDelivery(ctx); e != nil {
+	if e = a.extensionSchemaMigration(ctx, db, func() error { return (&cases.SQLRepository{DB: db}).MigrateOutboxDelivery(ctx) }); e != nil {
 		return e
 	}
 	cfg := conversation.HTTPConfig{EnabledSyntheticDevelopment: c.SyntheticDevelopment, Freshness: time.Duration(c.RosterFreshnessSeconds) * time.Second, Clock: time.Now, Aliases: a.ExtensionAccess.EmployeeAliases, EscalationAfter: time.Duration(c.EscalationAfterSeconds) * time.Second}

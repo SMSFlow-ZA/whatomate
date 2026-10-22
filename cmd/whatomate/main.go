@@ -21,6 +21,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/plan"
+	"github.com/shridarpatil/whatomate/internal/protectedschema"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -30,6 +31,7 @@ import (
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"github.com/zerodha/logf"
+	"gorm.io/gorm"
 )
 
 var (
@@ -124,6 +126,9 @@ func runServer(args []string) {
 	if err := preflightServerWorkers(cfg, *numWorkers); err != nil {
 		lo.Fatal("Server worker preflight failed", "error", err)
 	}
+	if preflightExternalSchema(cfg, *migrate, SourceRevision) != nil {
+		lo.Fatal("External protected schema requires a compiled verified release and forbids -migrate")
+	}
 	validateBuildSource(cfg, lo)
 
 	// Validate JWT secret
@@ -154,11 +159,50 @@ func runServer(args []string) {
 	}
 
 	// Connect to PostgreSQL
-	db, err := database.NewPostgres(&cfg.Database, cfg.App.Debug)
+	var db *gorm.DB
+	if cfg.Database.SchemaManagedExternally {
+		db, err = protectedschema.OpenRuntime(cfg)
+	} else {
+		db, err = database.NewPostgres(&cfg.Database, cfg.App.Debug)
+	}
 	if err != nil {
 		lo.Fatal("Failed to connect to database", "error", err)
 	}
 	lo.Info("Connected to PostgreSQL")
+	var schemaLease *protectedschema.Lease
+	if cfg.Database.SchemaManagedExternally {
+		pool, err := db.DB()
+		if err != nil {
+			lo.Fatal("External protected schema database unavailable")
+		}
+		check, done := context.WithTimeout(context.Background(), 30*time.Second)
+		schemaLease, err = protectedschema.Acquire(check, pool, cfg)
+		done()
+		if err != nil {
+			lo.Fatal("External protected schema verification refused")
+		}
+		defer schemaLease.Close()
+		db = plan.WithExternalSchema(db)
+		monitor, stop := context.WithCancel(context.Background())
+		defer stop()
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-monitor.Done():
+					return
+				case <-ticker.C:
+					check, done := context.WithTimeout(monitor, 5*time.Second)
+					err := schemaLease.Check(check)
+					done()
+					if err != nil {
+						lo.Fatal("Protected schema migration lease lost; runtime held")
+					}
+				}
+			}
+		}()
+	}
 
 	// Run migrations if requested
 	if *migrate {
@@ -177,11 +221,15 @@ func runServer(args []string) {
 	}
 
 	// Connect to Redis
-	if err := plan.EnsureSupport(db, cfg.Plan, cfg.DefaultAdmin.Email); err != nil {
-		lo.Fatal("Managed support initialization failed", "error", err)
-	}
-	if err := plan.Install(db, cfg.Plan); err != nil {
-		lo.Fatal("Managed plan initialization failed", "error", err)
+	if !cfg.Database.SchemaManagedExternally {
+		if err := plan.EnsureSupport(db, cfg.Plan, cfg.DefaultAdmin.Email); err != nil {
+			lo.Fatal("Managed support initialization failed", "error", err)
+		}
+		if err := plan.Install(db, cfg.Plan); err != nil {
+			lo.Fatal("Managed plan initialization failed", "error", err)
+		}
+	} else if err := plan.VerifyExternalPlan(db, cfg.Plan); err != nil {
+		lo.Fatal("External protected plan verification refused")
 	}
 	rdb, err := database.NewRedis(&cfg.Redis)
 	if err != nil {
@@ -228,8 +276,10 @@ func runServer(args []string) {
 		HTTPClient:     httpClient,
 	}
 	// Schema installation precedes protected read callbacks and every worker.
-	if err := models.InstallProtectionGuards(db); err != nil {
-		lo.Fatal("Protection storage guards failed", "error", err)
+	if !cfg.Database.SchemaManagedExternally {
+		if err := models.InstallProtectionGuards(db); err != nil {
+			lo.Fatal("Protection storage guards failed", "error", err)
+		}
 	}
 	if err := models.RegisterProtectionReadGuards(db); err != nil {
 		lo.Fatal("Protection read guards failed", "error", err)
@@ -243,6 +293,11 @@ func runServer(args []string) {
 	}
 	if err := app.InitializeExtensions(); err != nil {
 		lo.Fatal("Extension registration failed", "error", err)
+	}
+	if schemaLease != nil {
+		if err := schemaLease.Check(context.Background()); err != nil {
+			lo.Fatal("External schema lease unavailable before workers")
+		}
 	}
 	channelCancel := app.StartChannelWorker()
 	extensionCancel := app.StartExtensionWorker()
@@ -295,6 +350,11 @@ func runServer(args []string) {
 	g.Before(middleware.CSRFProtection())
 
 	// Setup routes
+	if schemaLease != nil {
+		if err := schemaLease.Check(context.Background()); err != nil {
+			lo.Fatal("External schema lease unavailable before handlers")
+		}
+	}
 	setupRoutes(g, app, lo, cfg.Server.BasePath, rdb, cfg)
 
 	// Create server with CORS wrapper
@@ -430,6 +490,9 @@ func runWorker(args []string) {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		lo.Fatal("Failed to load config", "error", err)
+	}
+	if preflightStandaloneWorker(cfg) != nil {
+		lo.Fatal("Generic standalone worker unavailable for protected extensions")
 	}
 	validateBuildSource(cfg, lo)
 

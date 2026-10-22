@@ -13,7 +13,7 @@ import (
 )
 
 func (a *App) initializeKnowledge(ctx context.Context, db *sql.DB) error {
-	if e := knowledge.MigrateHTTP(ctx, db); e != nil {
+	if e := a.extensionSchemaMigration(ctx, db, func() error { return knowledge.MigrateHTTP(ctx, db) }); e != nil {
 		return e
 	}
 	a.ExtensionAPI["knowledge"] = knowledge.NewHTTPHandler(db, knowledge.HTTPConfig{Enabled: true, Authorize: a.authorizeExtensionKnowledge})
@@ -26,7 +26,7 @@ func (a *App) initializeAI(ctx context.Context, db *sql.DB) error {
 	if e != nil {
 		return e
 	}
-	if e = (ai.SQLStore{DB: db}).Migrate(ctx); e != nil {
+	if e = a.extensionSchemaMigration(ctx, db, func() error { return (ai.SQLStore{DB: db}).Migrate(ctx) }); e != nil {
 		return e
 	}
 	cfg := ai.HTTPConfig{Enabled: true, Classifier: provider, Labels: []string{"Attendance concern", "Workplace concern", "Conflict of interest", "Escalation request"}}

@@ -47,6 +47,9 @@ func exactID(s string) bool {
 func (c configuration) validate(now time.Time) error { return c.validateBindings(now, true) }
 
 func (c configuration) validateBindings(now time.Time, requireFunctionHash bool) error {
+	if _, e := c.Supervisor.CPUQuota(); e != nil {
+		return denied
+	}
 	hex := strings.ReplaceAll(c.InstanceID, "-", "")
 	if !exactID(c.InstanceID) || !exactID(c.OrganizationID) || !exactID(c.WorkerUserID) || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$`).MatchString(c.ProfileID) || !strings.HasPrefix(c.InstanceRoot, "/srv/") || filepath.Clean(c.InstanceRoot) != c.InstanceRoot || !strings.HasSuffix(c.InstanceRoot, "/er/"+hex) || c.DatabaseName != "er_"+hex || c.DatabaseRole != "er_processing_"+hex || c.DatabaseDSNFile != c.InstanceRoot+"/config/processing.dsn" || c.Supervisor.JobRoot != c.InstanceRoot+"/jobs" || c.Supervisor.DefinitionsRoot != c.InstanceRoot+"/definitions" || c.Supervisor.MaxConcurrent != 1 || c.Supervisor.DockerPath != "/usr/bin/docker" || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.DefinitionsReviewSHA256) || (requireFunctionHash && !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.AuthorizationFunctionSHA256)) || c.DefinitionsVerifiedAt.IsZero() || c.DefinitionsVerifiedAt.After(now) || !c.DefinitionsValidUntil.After(now.Add(7*time.Minute)) || c.DefinitionsValidUntil.Sub(c.DefinitionsVerifiedAt) > 24*time.Hour || !c.Supervisor.Worker.SignaturesValidUntil.Equal(c.DefinitionsValidUntil) || len(c.Audiences) == 0 || len(c.Audiences) > 32 {
 		return denied
@@ -139,6 +142,10 @@ func definitions(ctx context.Context, c configuration) error {
 	if c.validate(time.Now().UTC()) != nil {
 		return denied
 	}
+	cpu, e := c.Supervisor.CPUQuota()
+	if e != nil {
+		return denied
+	}
 	digest, e := documents.DefinitionsDigest(c.Supervisor.DefinitionsRoot)
 	if e != nil || digest != c.Supervisor.DefinitionsHash {
 		return denied
@@ -155,7 +162,7 @@ func definitions(ctx context.Context, c configuration) error {
 		// ClamAV 1.4 sigtool --info validates the CVD checksum and digital signature.
 		// Only signed CVD containers are accepted, never local .ndb/.cld substitutes.
 		check, cancel := context.WithTimeout(ctx, 45*time.Second)
-		command := exec.CommandContext(check, c.Supervisor.DockerPath, "run", "--rm", "--pull=never", "--network", "none", "--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "512m", "--memory-swap", "512m", "--cpus", "1", "--pids-limit", "32", "--mount", "type=bind,src="+c.Supervisor.DefinitionsRoot+",dst=/defs,readonly", "--entrypoint", "/usr/bin/sigtool", c.Supervisor.Image, "--info", "/defs/"+entry.Name())
+		command := exec.CommandContext(check, c.Supervisor.DockerPath, "run", "--rm", "--pull=never", "--network", "none", "--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "512m", "--memory-swap", "512m", "--cpus", cpu, "--pids-limit", "32", "--mount", "type=bind,src="+c.Supervisor.DefinitionsRoot+",dst=/defs,readonly", "--entrypoint", "/usr/bin/sigtool", c.Supervisor.Image, "--info", "/defs/"+entry.Name())
 		output, e := command.Output()
 		cancel()
 		if e != nil || len(output) > 16384 || !bytes.Contains(output, []byte("Verification OK.")) {

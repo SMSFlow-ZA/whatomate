@@ -99,10 +99,12 @@ func (a *App) initializeExtensionVectors(ctx context.Context, db *sql.DB) error 
 		if e != nil {
 			return e
 		}
-		if e = repository.Migrate(ctx); e != nil {
-			return e
-		}
-		if e = repository.RegisterIndexer(ctx, extensionVectorIndexer); e != nil {
+		if e = a.extensionSchemaMigration(ctx, db, func() error {
+			if err := repository.Migrate(ctx); err != nil {
+				return err
+			}
+			return repository.RegisterIndexer(ctx, extensionVectorIndexer)
+		}); e != nil {
 			return e
 		}
 		if e = repository.Verify(ctx); e != nil {

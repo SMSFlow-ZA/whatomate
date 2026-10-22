@@ -97,7 +97,15 @@ func recoverPublications(conn *gorm.DB, roots []string) error {
 	if err != nil {
 		return err
 	}
-	if err := conn.Exec("CREATE TABLE IF NOT EXISTS whatomate_media_publications(id uuid PRIMARY KEY)").Error; err != nil {
+	if external, _ := conn.Get(externalSchemaSetting); external == true {
+		var present bool
+		if err := conn.Raw("SELECT to_regclass('whatomate_media_publications') IS NOT NULL").Scan(&present).Error; err != nil {
+			return err
+		}
+		if !present {
+			return errors.New("externally installed media publication schema unavailable")
+		}
+	} else if err := InstallMediaSchema(conn); err != nil {
 		return err
 	}
 	journalRoot, err := os.OpenRoot(clean[0])

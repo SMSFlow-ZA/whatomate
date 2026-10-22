@@ -190,15 +190,20 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host            string `koanf:"host"`
-	Port            int    `koanf:"port"`
-	User            string `koanf:"user"`
-	Password        string `koanf:"password"`
-	Name            string `koanf:"name"`
-	SSLMode         string `koanf:"ssl_mode"`
-	MaxOpenConns    int    `koanf:"max_open_conns"`
-	MaxIdleConns    int    `koanf:"max_idle_conns"`
-	ConnMaxLifetime int    `koanf:"conn_max_lifetime"`
+	// Externally migrated protected releases verify a compiled catalog contract;
+	// runtime never receives schema ownership or permission to install migrations.
+	SchemaManagedExternally bool   `koanf:"schema_managed_externally"`
+	SchemaRelease           string `koanf:"schema_release"`
+	SchemaSHA256            string `koanf:"schema_sha256"`
+	Host                    string `koanf:"host"`
+	Port                    int    `koanf:"port"`
+	User                    string `koanf:"user"`
+	Password                string `koanf:"password"`
+	Name                    string `koanf:"name"`
+	SSLMode                 string `koanf:"ssl_mode"`
+	MaxOpenConns            int    `koanf:"max_open_conns"`
+	MaxIdleConns            int    `koanf:"max_idle_conns"`
+	ConnMaxLifetime         int    `koanf:"conn_max_lifetime"`
 }
 
 type RedisConfig struct {

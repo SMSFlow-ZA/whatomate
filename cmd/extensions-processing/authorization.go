@@ -50,6 +50,19 @@ func ownerAuthorization(db *sql.DB, c configuration) func(context.Context, *sql.
 		if e != nil || !safe || hex.EncodeToString(sum[:]) != c.AuthorizationFunctionSHA256 {
 			return denied
 		}
+		// Binding rows are an offline owner capability. Neither the invoking
+		// worker nor its NOLOGIN function owner may rewrite them, even through a
+		// later column-level grant. Do not trust only a function-body hash.
+		e = tx.QueryRowContext(ctx, `SELECT b.relowner<>f.proowner AND b.relowner<>(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user)
+ AND NOT EXISTS(SELECT 1 FROM pg_catalog.aclexplode(COALESCE(b.relacl,pg_catalog.acldefault('r',b.relowner))) a WHERE a.grantee<>b.relowner AND a.privilege_type IN('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'))
+ AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute col CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a WHERE col.attrelid=b.oid AND a.grantee<>b.relowner AND a.privilege_type IN('INSERT','UPDATE','REFERENCES'))
+ AND NOT pg_catalog.has_table_privilege(current_user,b.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ AND NOT pg_catalog.has_any_column_privilege(current_user,b.oid,'INSERT,UPDATE,REFERENCES')
+ FROM pg_catalog.pg_class b JOIN pg_catalog.pg_proc f ON f.oid=pg_catalog.to_regprocedure($1)
+ WHERE b.oid=pg_catalog.to_regclass('public.er_processing_authorization_bindings') AND b.relkind='r'`, authorizationSignature).Scan(&safe)
+		if e != nil || !safe {
+			return denied
+		}
 		var allowed bool
 		if tx.QueryRowContext(ctx, `SELECT public.er_processing_authorize_v1($1::uuid,$2::uuid,$3,$4::text[])`, c.OrganizationID, c.WorkerUserID, c.ProfileID, j.Metadata.Audiences).Scan(&allowed) != nil || !allowed {
 			return denied

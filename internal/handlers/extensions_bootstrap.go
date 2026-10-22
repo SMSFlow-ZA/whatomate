@@ -36,7 +36,7 @@ func (a *App) initializeExtensionSecurity() error {
 	if e != nil {
 		return e
 	}
-	if e = service.Migrate(context.Background()); e != nil {
+	if e = a.extensionSchemaMigration(context.Background(), db, func() error { return service.Migrate(context.Background()) }); e != nil {
 		return e
 	}
 	a.ExtensionSecurity = service

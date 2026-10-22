@@ -16,7 +16,7 @@ func validConfiguration() configuration {
 	now := time.Now().UTC()
 	hex := "11111111222243338444555555555555"
 	root := "/srv/whatomate/er/" + hex
-	return configuration{InstanceID: "11111111-2222-4333-8444-555555555555", OrganizationID: "22222222-3333-4444-8555-666666666666", WorkerUserID: "33333333-4444-4555-8666-777777777777", ProfileID: "reviewed-worker-v1", InstanceRoot: root, DatabaseName: "er_" + hex, DatabaseRole: "er_processing_" + hex, DatabaseDSNFile: root + "/config/processing.dsn", Audiences: []string{"staff"}, DefinitionsVerifiedAt: now.Add(-time.Hour), DefinitionsValidUntil: now.Add(time.Hour), AuthorizationFunctionSHA256: strings.Repeat("c", 64), DefinitionsReviewSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Supervisor: documents.SupervisorConfig{JobRoot: root + "/jobs", DefinitionsRoot: root + "/definitions", MaxConcurrent: 1, DockerPath: "/usr/bin/docker", Image: "registry.example.invalid/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Worker: documents.Config{SignaturesValidUntil: now.Add(time.Hour)}}}
+	return configuration{InstanceID: "11111111-2222-4333-8444-555555555555", OrganizationID: "22222222-3333-4444-8555-666666666666", WorkerUserID: "33333333-4444-4555-8666-777777777777", ProfileID: "reviewed-worker-v1", InstanceRoot: root, DatabaseName: "er_" + hex, DatabaseRole: "er_processing_" + hex, DatabaseDSNFile: root + "/config/processing.dsn", Audiences: []string{"staff"}, DefinitionsVerifiedAt: now.Add(-time.Hour), DefinitionsValidUntil: now.Add(time.Hour), AuthorizationFunctionSHA256: strings.Repeat("c", 64), DefinitionsReviewSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Supervisor: documents.SupervisorConfig{JobRoot: root + "/jobs", DefinitionsRoot: root + "/definitions", MaxConcurrent: 1, CPUs: 1, DockerPath: "/usr/bin/docker", Image: "registry.example.invalid/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Worker: documents.Config{SignaturesValidUntil: now.Add(time.Hour)}}}
 }
 func TestProductionConfigurationRequiresExactPrivateBindings(t *testing.T) {
 	c := validConfiguration()
@@ -29,6 +29,26 @@ func TestProductionConfigurationRequiresExactPrivateBindings(t *testing.T) {
 		if err := c.validate(time.Now()); err == nil {
 			t.Fatal("unsafe production configuration accepted")
 		}
+	}
+}
+
+func TestProductionMilliCPUQuotaIsValidatedBeforeDefinitionContainers(t *testing.T) {
+	c := validConfiguration()
+	c.Supervisor.CPUs = 0
+	c.Supervisor.CPUMillis = 500
+	if e := c.validate(time.Now()); e != nil {
+		t.Fatal("500m configuration refused", e)
+	}
+	for _, bad := range []int{-1, 99, 4001} {
+		c.Supervisor.CPUMillis = bad
+		if c.validate(time.Now()) == nil {
+			t.Fatal("invalid CPU bound accepted", bad)
+		}
+	}
+	c.Supervisor.CPUs = 1
+	c.Supervisor.CPUMillis = 500
+	if c.validate(time.Now()) == nil {
+		t.Fatal("ambiguous CPU settings accepted")
 	}
 }
 
