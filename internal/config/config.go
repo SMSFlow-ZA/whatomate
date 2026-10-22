@@ -217,12 +217,22 @@ type JWTConfig struct {
 }
 
 type WhatsAppConfig struct {
-	WebhookVerifyToken string `koanf:"webhook_verify_token"`
-	APIVersion         string `koanf:"api_version"`
-	BaseURL            string `koanf:"base_url"` // Meta Graph API base URL
-	AppID              string `koanf:"app_id"`   // WhatsApp App ID for frontend
-	AppSecret          string `koanf:"app_secret"`
-	ConfigID           string `koanf:"config_id"` // WhatsApp Config ID for frontend
+	WebhookSubscriptionOverrides []WhatsAppWebhookSubscriptionOverride `koanf:"webhook_subscription_overrides"`
+	WebhookVerifyToken           string                                `koanf:"webhook_verify_token"`
+	APIVersion                   string                                `koanf:"api_version"`
+	BaseURL                      string                                `koanf:"base_url"` // Meta Graph API base URL
+	AppID                        string                                `koanf:"app_id"`   // WhatsApp App ID for frontend
+	AppSecret                    string                                `koanf:"app_secret"`
+	ConfigID                     string                                `koanf:"config_id"` // WhatsApp Config ID for frontend
+}
+
+// Webhook subscription routing is trusted operator configuration, bound to the
+// exact current organization, account UUID and WABA. Never accept it in an API body.
+type WhatsAppWebhookSubscriptionOverride struct {
+	OrganizationID string `koanf:"organization_id"`
+	AccountID      string `koanf:"account_id"`
+	BusinessID     string `koanf:"business_id"`
+	CallbackURL    string `koanf:"callback_url"`
 }
 
 type AIConfig struct {

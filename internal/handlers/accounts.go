@@ -538,7 +538,11 @@ func (a *App) SubscribeApp(r *fastglue.Request) error {
 
 	// Subscribe the app to webhooks
 	ctx := context.Background()
-	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(account)); err != nil {
+	subscriptionAccount, err := a.whatsAppSubscriptionAccount(account)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid account webhook subscription configuration", nil, "")
+	}
+	if err := a.WhatsApp.SubscribeApp(ctx, subscriptionAccount); err != nil {
 		a.Log.Error("Failed to subscribe app to webhooks", "error", err, "account", account.Name)
 		return r.SendEnvelope(map[string]any{
 			"success": false,
@@ -640,6 +644,20 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
 	}
+	// Validate trusted routing before registration/subscription side effects. A
+	// configured WABA requires its pre-existing exact account UUID; new signup
+	// must not temporarily subscribe that WABA to the shared app callback.
+	subscriptionCandidate := *account
+	if oldAccount != nil {
+		subscriptionCandidate.WebhookVerifyToken = oldAccount.WebhookVerifyToken
+	}
+	subscriptionAccount, err := a.whatsAppSubscriptionAccount(&subscriptionCandidate)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid account webhook subscription configuration", nil, "")
+	}
+	if subscriptionAccount.SubscriptionOverride != nil {
+		account.WebhookVerifyToken = subscriptionCandidate.WebhookVerifyToken
+	}
 
 	// Reserve a managed number before registration/subscription side effects.
 	// Pending registration still consumes an allowance. Keep plaintext credentials
@@ -667,8 +685,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	regErr := a.attemptAutoRegistration(ctx, account, phoneInfo, accessToken, priorStatus)
 
 	// 5. Subscribe app to WABA webhooks
-	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(account)); err != nil {
-		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+	subscriptionErr := a.WhatsApp.SubscribeApp(ctx, subscriptionAccount)
+	if subscriptionErr != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", subscriptionErr)
 	}
 
 	// 6. Encrypt credentials at rest
@@ -704,6 +723,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 	a.logAudit(orgID, userID,
 		"account", account.ID, auditAction, auditOld, account)
+	if subscriptionErr != nil && subscriptionAccount.SubscriptionOverride != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Account saved; webhook override subscription failed. Keep dispatch held and verify routing before retrying.", nil, "")
+	}
 
 	// Construction of response map (reusing accountToResponse)
 	out := map[string]any{

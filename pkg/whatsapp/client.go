@@ -568,9 +568,34 @@ type SubscribeAppResponse struct {
 // Calls POST /{api_version}/{waba_id}/subscribed_apps
 func (c *Client) SubscribeApp(ctx context.Context, account *Account) error {
 	url := fmt.Sprintf("%s/%s/%s/subscribed_apps", c.getBaseURL(), account.APIVersion, account.BusinessID)
+	var body any
+	if account.SubscriptionOverride != nil {
+		if err := account.SubscriptionOverride.Validate(); err != nil {
+			return err
+		}
+		body = account.SubscriptionOverride
+	}
 
-	respBody, err := c.doRequest(ctx, http.MethodPost, url, nil, account.AccessToken)
+	requestClient := c
+	if body != nil {
+		// The verification token is in the body. A 307/308 redirect must not
+		// forward it to another endpoint, even if the access header is stripped.
+		copyClient := *c
+		httpClient := http.Client{Timeout: DefaultTimeout}
+		if c.HTTPClient != nil {
+			httpClient = *c.HTTPClient
+		}
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		copyClient.HTTPClient = &httpClient
+		requestClient = &copyClient
+	}
+	respBody, err := requestClient.doRequest(ctx, http.MethodPost, url, body, account.AccessToken)
 	if err != nil {
+		if body != nil {
+			// Provider errors may reflect submitted verification credentials. Do
+			// not expose those errors, retry, or fall back to app-default routing.
+			return fmt.Errorf("failed to subscribe app with webhook override")
+		}
 		return fmt.Errorf("failed to subscribe app to webhooks: %w", err)
 	}
 

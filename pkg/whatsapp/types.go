@@ -13,6 +13,17 @@ type Account struct {
 	AppID       string
 	APIVersion  string
 	AccessToken string
+	// SubscriptionOverride is explicit subscription-only routing. Nil preserves
+	// the app-default subscription request; ordinary message sends ignore it.
+	SubscriptionOverride *WebhookSubscriptionOverride
+}
+
+// WebhookSubscriptionOverride routes supported webhooks for one WABA to an
+// alternate endpoint. The endpoint must already verify this token and process
+// signed webhooks; configuring it does not prove provider activation.
+type WebhookSubscriptionOverride struct {
+	CallbackURL string `json:"override_callback_uri"`
+	VerifyToken string `json:"verify_token"`
 }
 
 // Button represents an interactive button

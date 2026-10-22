@@ -16,6 +16,8 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // WebhookVerify handles Meta's webhook verification challenge
@@ -44,7 +46,10 @@ func (a *App) WebhookVerify(r *fastglue.Request) error {
 
 	// Then check against tokens stored in WhatsApp accounts
 	var account models.WhatsAppAccount
-	result := a.DB.Where("webhook_verify_token = ?", token).First(&account)
+	// GORM can interpolate the secret into SQL logs even for a failed lookup.
+	// Silence this query only; neither known nor unknown tokens may be logged.
+	result := a.DB.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).
+		Where("webhook_verify_token = ?", token).First(&account)
 	if result.Error == nil {
 		a.Log.Info("Webhook verified successfully (account token)", "account", account.Name)
 		r.RequestCtx.SetStatusCode(fasthttp.StatusOK)
@@ -52,7 +57,7 @@ func (a *App) WebhookVerify(r *fastglue.Request) error {
 		return nil
 	}
 
-	a.Log.Warn("Webhook verification failed - token not found", "token", token)
+	a.Log.Warn("Webhook verification failed - token not found")
 	return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Verification failed", nil, "")
 }
 
