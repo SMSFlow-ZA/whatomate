@@ -39,7 +39,9 @@ func (a *App) InitializeChannels() error {
 
 func (a *App) StartChannelWorker() context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
-	if a.Channels == nil {
+	// Protected transports use the extension-owned delivery/receipt workers.
+	// The generic lanes also reconcile, poll and run bots when dispatch is held.
+	if a.Channels == nil || (a.Config != nil && a.Config.Extensions.ProtectedMode) {
 		return cancel
 	}
 	a.wg.Add(2)
