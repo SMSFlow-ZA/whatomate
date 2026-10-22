@@ -159,6 +159,13 @@ func TestExternalSchemaFullProtectedInitializationDMLOnly(t *testing.T) {
 	if e = plan.RecoverMediaPublications(a.DB, []string{t.TempDir()}); e != nil {
 		t.Fatalf("DML-only media recovery: %v", e)
 	}
+	if e = plan.VerifyExternalPlan(a.DB, c.Plan); e != nil {
+		t.Fatalf("DML-only plan verification after media recovery: %v", e)
+	}
+	var alive int
+	if e = a.DB.Raw("SELECT 1").Scan(&alive).Error; e != nil || alive != 1 {
+		t.Fatalf("DML-only application pool unusable after media recovery: %v", e)
+	}
 	if _, e = raw.Exec("CREATE TABLE forbidden(id integer)"); e == nil {
 		t.Fatal("runtime can create table")
 	}

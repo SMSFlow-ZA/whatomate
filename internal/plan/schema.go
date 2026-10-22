@@ -9,7 +9,12 @@ import (
 const externalSchemaSetting = "whatomate:verified-external-schema"
 
 // WithExternalSchema is used only after the compiled schema verifier succeeds.
-func WithExternalSchema(db *gorm.DB) *gorm.DB { return db.Set(externalSchemaSetting, true) }
+func WithExternalSchema(db *gorm.DB) *gorm.DB {
+	// Set returns a mutable statement. Return a reusable cloning session so
+	// Connection callbacks cannot replace this handle's pool with their pinned
+	// connection and leave it closed afterward. Preserve the verified setting.
+	return db.Set(externalSchemaSetting, true).Session(&gorm.Session{})
+}
 func InstallMediaSchema(db *gorm.DB) error {
 	return db.Exec("CREATE TABLE IF NOT EXISTS whatomate_media_publications(id uuid PRIMARY KEY)").Error
 }
