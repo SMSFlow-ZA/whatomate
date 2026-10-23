@@ -13,7 +13,6 @@ import (
 	"flag"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -26,7 +25,7 @@ import (
 	"github.com/SMSFlow-ZA/whatomate-addons/processing"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/shridarpatil/whatomate/internal/protectedschema"
 )
 
 var denied = errors.New("production document controller unavailable; inspect private owner state")
@@ -142,10 +141,6 @@ func definitions(ctx context.Context, c configuration) error {
 	if c.validate(time.Now().UTC()) != nil {
 		return denied
 	}
-	cpu, e := c.Supervisor.CPUQuota()
-	if e != nil {
-		return denied
-	}
 	digest, e := documents.DefinitionsDigest(c.Supervisor.DefinitionsRoot)
 	if e != nil || digest != c.Supervisor.DefinitionsHash {
 		return denied
@@ -161,11 +156,7 @@ func definitions(ctx context.Context, c configuration) error {
 		}
 		// ClamAV 1.4 sigtool --info validates the CVD checksum and digital signature.
 		// Only signed CVD containers are accepted, never local .ndb/.cld substitutes.
-		check, cancel := context.WithTimeout(ctx, 45*time.Second)
-		command := exec.CommandContext(check, c.Supervisor.DockerPath, "run", "--rm", "--pull=never", "--network", "none", "--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "512m", "--memory-swap", "512m", "--cpus", cpu, "--pids-limit", "32", "--mount", "type=bind,src="+c.Supervisor.DefinitionsRoot+",dst=/defs,readonly", "--entrypoint", "/usr/bin/sigtool", c.Supervisor.Image, "--info", "/defs/"+entry.Name())
-		output, e := command.Output()
-		cancel()
-		if e != nil || len(output) > 16384 || !bytes.Contains(output, []byte("Verification OK.")) {
+		if verifyDefinition(ctx, c, entry.Name(), definitionRunner(c)) != nil {
 			return denied
 		}
 	}
@@ -176,27 +167,37 @@ func definitions(ctx context.Context, c configuration) error {
 	return nil
 }
 
-func database(ctx context.Context, c configuration) (*sql.DB, error) {
+func database(ctx context.Context, c configuration) (*sql.DB, *protectedschema.Lease, error) {
 	b, e := privateBytes(c.DatabaseDSNFile, 16384)
 	if e != nil {
-		return nil, denied
+		return nil, nil, denied
 	}
 	pc, e := pgx.ParseConfig(strings.TrimSpace(string(b)))
-	if e != nil || pc.Database != c.DatabaseName || pc.User != c.DatabaseRole || pc.Password == "" || pc.TLSConfig == nil || pc.TLSConfig.InsecureSkipVerify {
-		return nil, denied
+	if e != nil || pc.Database != c.DatabaseName || pc.User != c.DatabaseRole || pc.Password == "" || pc.TLSConfig == nil || pc.TLSConfig.InsecureSkipVerify || pc.TLSConfig.ServerName != pc.Host || len(pc.Fallbacks) != 0 {
+		return nil, nil, denied
 	}
 	pc.RuntimeParams = map[string]string{"application_name": "er-knowledge-production", "search_path": "public"}
-	db := stdlib.OpenDB(*pc)
-	db.SetMaxOpenConns(3)
-	db.SetMaxIdleConns(3)
+	pc.ConnectTimeout = 5 * time.Second
+	db, schema, e := openProcessingDatabase(c, pc)
+	if e != nil {
+		return nil, nil, denied
+	}
 	if e := databaseAuthorization(ctx, db, c); e != nil {
 		db.Close()
-		return nil, denied
+		return nil, nil, denied
 	}
-	return db, nil
+	lease, e := protectedschema.Acquire(ctx, db, schema)
+	if e != nil {
+		db.Close()
+		return nil, nil, denied
+	}
+	return db, lease, nil
 }
 
 func databaseAuthorization(ctx context.Context, db *sql.DB, c configuration) error {
+	if protectedschema.Validate(processingSchemaConfig(c)) != nil {
+		return denied
+	}
 	var name, user string
 	var privileged, member bool
 	e := db.QueryRowContext(ctx, `SELECT current_database(),current_user,r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls,EXISTS(SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid) FROM pg_roles r WHERE r.rolname=current_user`).Scan(&name, &user, &privileged, &member)
@@ -247,48 +248,50 @@ func serve(ctx context.Context, c configuration, once, checkOnly bool) error {
 	if syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 		return denied
 	}
-	supervisor, e := prepareSupervisor(ctx, c, definitions)
-	if e != nil {
-		return denied
-	}
-	db, e := database(ctx, c)
+	db, lease, e := database(ctx, c)
 	if e != nil {
 		return denied
 	}
 	defer db.Close()
-	authorize := ownerAuthorization(db, c)
-	tx, e := db.BeginTx(ctx, nil)
-	if e != nil {
-		return denied
-	}
-	e = authorize(ctx, tx, knowledge.ProcessingJob{TenantID: c.OrganizationID, Metadata: knowledge.UploadMetadata{Audiences: c.Audiences}})
-	tx.Rollback()
-	if e != nil {
-		return denied
-	}
-	if checkOnly {
+	return withSchemaLease(ctx, lease, time.Second, func(ctx context.Context) error {
+		supervisor, e := prepareSupervisor(ctx, c, definitions)
+		if e != nil {
+			return denied
+		}
+		authorize := ownerAuthorization(db, c)
+		tx, e := db.BeginTx(ctx, nil)
+		if e != nil {
+			return denied
+		}
+		e = authorize(ctx, tx, knowledge.ProcessingJob{TenantID: c.OrganizationID, Metadata: knowledge.UploadMetadata{Audiences: c.Audiences}})
+		tx.Rollback()
+		if e != nil {
+			return denied
+		}
+		if checkOnly {
+			return nil
+		}
+		queue := knowledge.NewAuthorizedProcessingQueue(db, c.OrganizationID, authorize)
+		bridge := processing.Bridge{Queue: queue, Processor: supervisor, WorkerID: c.WorkerUserID, ProfileID: c.ProfileID, Image: c.Supervisor.Image, DefinitionsHash: c.Supervisor.DefinitionsHash, Lease: 8 * time.Minute}
+		for ctx.Err() == nil {
+			if checkPaths(c, root) != nil || definitions(ctx, c) != nil {
+				return denied
+			}
+			e = bridge.Once(ctx)
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return denied
+			}
+			if once {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(2 * time.Second):
+			}
+		}
 		return nil
-	}
-	queue := knowledge.NewAuthorizedProcessingQueue(db, c.OrganizationID, authorize)
-	bridge := processing.Bridge{Queue: queue, Processor: supervisor, WorkerID: c.WorkerUserID, ProfileID: c.ProfileID, Image: c.Supervisor.Image, DefinitionsHash: c.Supervisor.DefinitionsHash, Lease: 8 * time.Minute}
-	for ctx.Err() == nil {
-		if checkPaths(c, root) != nil || definitions(ctx, c) != nil {
-			return denied
-		}
-		e = bridge.Once(ctx)
-		if e != nil && !errors.Is(e, sql.ErrNoRows) {
-			return denied
-		}
-		if once {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(2 * time.Second):
-		}
-	}
-	return nil
+	})
 }
 
 func run(args []string) error {

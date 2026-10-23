@@ -18,10 +18,17 @@ import (
 	"github.com/SMSFlow-ZA/whatomate-addons/knowledge"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/shridarpatil/whatomate/internal/protectedschema"
 )
 
 func ownerFixture(t *testing.T) (*sql.DB, *sql.DB, configuration) {
 	t.Helper()
+	// These pins describe synthetic isolated fixtures only, never a production
+	// release. Full schema tests below compute their actual disposable catalog.
+	release, shape := protectedschema.ReleaseIdentity, protectedschema.ExpectedCatalogSHA256
+	t.Cleanup(func() { protectedschema.ReleaseIdentity, protectedschema.ExpectedCatalogSHA256 = release, shape })
+	protectedschema.ReleaseIdentity = strings.Repeat("a", 40) + ":" + strings.Repeat("b", 40)
+	protectedschema.ExpectedCatalogSHA256 = strings.Repeat("c", 64)
 	dsn := os.Getenv("EXTENSION_PROCESSING_TEST_DSN")
 	if dsn == "" {
 		t.Skip("explicit disposable PostgreSQL fixture required")

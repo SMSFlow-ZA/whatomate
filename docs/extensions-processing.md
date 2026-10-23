@@ -131,3 +131,66 @@ and owner-function EXECUTE only. They prove restricted-role startup, claim and
 artifact completion, revocation serialization, rejection after superadmin
 promotion and rejection of column-only transcript grants. These are synthetic
 SQL boundary fixtures, not production scanner or target installation acceptance.
+
+## Compiled schema fence and cancellation
+
+Production `-check`, `-once` and service startup now require the same reviewed
+compiled `protectedschema.ReleaseIdentity` and `ExpectedCatalogSHA256` as the
+installed database. An ordinary unlinked build refuses. Build this separate
+controller with explicit reviewed linker values:
+
+```sh
+go build -mod=readonly -trimpath -buildvcs=false \
+  -ldflags "-buildid= -X github.com/shridarpatil/whatomate/internal/protectedschema.ReleaseIdentity=REVIEWED_RELEASE -X github.com/shridarpatil/whatomate/internal/protectedschema.ExpectedCatalogSHA256=REVIEWED_CATALOG_SHA256" \
+  -o extensions-processing ./cmd/extensions-processing
+```
+
+The values must describe the reviewed installed schema contract; neither JSON nor
+DSN can substitute new pins. The offline SQL emission mode remains separate and
+does not connect to the database or claim runtime acceptance. Existing unlinked
+controller artifacts must be rebuilt and reviewed before normal use.
+
+The private DSN's explicit verified TLS configuration is retained by
+`protectedschema.OpenRuntimeConfig`, including its trusted CA. Production refuses
+insecure TLS, a mismatching verification hostname, or connection fallbacks. Each
+physical connection holds the shared schema advisory fence and checks current
+session/database identity, latest seal, pending attempts and protected marker
+before use. `Acquire` additionally verifies the complete compiled catalog,
+migration checksums and restricted runtime privileges. No schema or ACL is
+created, migrated, repaired or broadened at startup.
+
+Offline provisioning must additionally grant the exact processing LOGIN role
+these read-only metadata columns:
+
+- `whatomate_schema_seal`: `generation, release, catalog_sha256`;
+- `whatomate_schema_attempt`: `release, catalog_sha256`;
+- `whatomate_protection_state`: `id, protected`;
+- `extension_schema`, `extension_security_schema`: `id, checksum`;
+- `addon_cases_schema`: `version`.
+
+The role must also lack database CREATE/TEMP, schema CREATE, ownership,
+memberships, dangerous filesystem-function EXECUTE and policy-table mutation,
+as checked by the shared runtime verifier. These metadata reads do not replace
+the separate audited worker identity/profile, authorization-function EXECUTE,
+queue SELECT/UPDATE, or function-owner provisioning described above. Changes to
+ACLs require a separately reviewed owner reconciliation; a previously accepted
+ACL hash is not permission to add grants while keeping its old receipt.
+
+The dedicated lease is retained through definition verification, claiming,
+processing, completion and synchronous child cleanup. Its physical session is
+checked every second with a five-second check timeout. A failed check cancels the
+work context and causes failure even if a callback later returns nil. The
+supervisor force-removes and checks its own scan container on cancellation.
+Signature probes now also have unique owned names and independent bounded
+force-remove/absence checks, rather than relying on killing the Docker CLI.
+Cleanup uncertainty remains failure; it cannot authorize completion or retry.
+Probe ownership assumes no outside root/Docker owner deliberately replaces its
+fresh random name during cancellation; this is not an adversarial-daemon fence.
+
+Every coordinated schema owner must still stop all registered processing owners
+and verify their children absent before installation. Surviving queue connections
+retain their physical fences after monitor-session loss, but terminating every
+database session destroys database locks before external Docker cleanup can
+finish. This is a cooperative reviewed-owner fence, not protection against an
+uncoordinated superuser, Docker owner or arbitrary credential SQL tampering.
+Signal/lease cancellation does not clear durable unknown jobs or permit replay.

@@ -2,6 +2,7 @@ package protectedschema
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"net"
 	"net/url"
@@ -19,6 +20,28 @@ import (
 
 var guardedPools sync.Map
 
+func copyRuntimeConfig(supplied *pgx.ConnConfig) *pgx.ConnConfig {
+	cfg := supplied.Copy()
+	copyTLS := func(value *tls.Config) *tls.Config {
+		if value == nil {
+			return nil
+		}
+		value = value.Clone()
+		if value.RootCAs != nil {
+			value.RootCAs = value.RootCAs.Clone()
+		}
+		if value.ClientCAs != nil {
+			value.ClientCAs = value.ClientCAs.Clone()
+		}
+		return value
+	}
+	cfg.TLSConfig = copyTLS(cfg.TLSConfig)
+	for _, fallback := range cfg.Fallbacks {
+		fallback.TLSConfig = copyTLS(fallback.TLSConfig)
+	}
+	return cfg
+}
+
 // OpenRuntime is the only external-mode runtime constructor. Each physical
 // connection, including reconnects after network failure, must hold the shared
 // migration fence before the pool can hand it to any query or transaction.
@@ -34,6 +57,17 @@ func OpenRuntime(c *config.Config) (*gorm.DB, error) {
 	if e != nil {
 		return nil, ErrDenied
 	}
+	return OpenRuntimeConfig(c, cfg)
+}
+
+// OpenRuntimeConfig retains explicitly parsed TLS roots and client settings for
+// trusted controllers. It uses the same physical-connection fence as OpenRuntime.
+// The caller's configuration is copied before any connection or callback uses it.
+func OpenRuntimeConfig(c *config.Config, supplied *pgx.ConnConfig) (*gorm.DB, error) {
+	if Validate(c) != nil || supplied == nil || supplied.Host != c.Database.Host || supplied.Port != uint16(c.Database.Port) || supplied.Database != c.Database.Name || supplied.User != c.Database.User || supplied.Password != c.Database.Password || c.Database.Host == "" || c.Database.Password == "" || c.Database.Port < 1 || c.Database.Port > 65535 {
+		return nil, ErrDenied
+	}
+	cfg := copyRuntimeConfig(supplied)
 	// Capture immutable values: later callers cannot alter a live pool's fence by
 	// mutating the configuration struct or a request-scoped setting.
 	release, shape := ReleaseIdentity, ExpectedCatalogSHA256
