@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { api } from '@/services/api'
+import { api, AuthenticationRefreshedError } from '@/services/api'
 
 const status = ref<{enabled:boolean;verified:boolean;generation:number} | null>(null)
 const busy = ref(false)
@@ -16,7 +16,20 @@ async function load() {
 }
 async function run(operation: () => Promise<void>) {
   busy.value = true; error.value = ''; notice.value = ''
-  try { await operation() } catch { error.value = 'Security operation failed. Check your code and permissions, then try again.' }
+  try { await operation() } catch (cause) {
+    error.value = 'Security operation failed. Check your code and permissions, then try again.'
+    if (cause instanceof AuthenticationRefreshedError && cause.canReconcile) {
+      try {
+        // This is a new read under the current session, never a code resubmission.
+        // A verified status describes the session, not success of the lost operation.
+        await load()
+        error.value = ''
+        notice.value = status.value?.verified
+          ? 'Current session is MFA verified.'
+          : 'Session refreshed. Enter a new authenticator code.'
+      } catch { /* Keep the failure visible; do not retry a one-time operation. */ }
+    }
+  }
   finally { busy.value = false; code.value = '' }
 }
 async function begin() {

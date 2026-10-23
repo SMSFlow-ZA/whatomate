@@ -12,10 +12,10 @@ beforeEach(async()=>{
  clearExtensionSession('org:user')
  await refreshExtensionSession(async()=>catalog())
 })
-it('drops a protected response which completes after session invalidation',async()=>{
+it.each(['/extensions/cases','/extensions/security/mfa'])('drops a protected response which completes after session invalidation: %s',async url=>{
  let finish!:()=>void
  api.defaults.adapter=config=>new Promise(resolve=>{finish=()=>resolve({data:{marker:'protected'},status:200,statusText:'OK',headers:{},config})})
- const request=api.get('/extensions/cases')
+ const request=api.get(url)
  await Promise.resolve();await Promise.resolve()
  clearExtensionSession('other:user')
  finish()

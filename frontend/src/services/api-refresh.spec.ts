@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import axios, { AxiosError } from 'axios'
-import { clearExtensionSession } from '@/extensions/session'
 
 let api: typeof import('./api').api
 
 beforeEach(async () => {
-  clearExtensionSession('org:user')
   vi.resetModules()
+  // Load Vue before the intentionally minimal cookie-only document stub.
+  ;(await import('@/extensions/session')).clearExtensionSession('org:user')
   vi.useFakeTimers()
   vi.stubGlobal('window', { __BASE_PATH__: '', dispatchEvent: vi.fn(), location: { href: '' } })
   vi.stubGlobal('document', { cookie: '' })
@@ -84,4 +84,74 @@ it('retains cross-tab serialization and cancels its deadline after a successful 
   expect(refresh.mock.calls[0]?.[2]?.signal?.aborted).toBe(false)
   expect(vi.getTimerCount()).toBe(0)
   expect(window.location.href).toBe('')
+})
+
+it.each(['challenge', 'confirm', 'enroll', 'revoke'])('does not replay an MFA %s after primary authentication refresh', async action => {
+  vi.spyOn(axios, 'post').mockResolvedValue({ data: {} })
+  let submissions = 0
+  api.defaults.adapter = config => {
+    submissions++
+    if (submissions === 1) return Promise.reject(new AxiosError('unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+      status: 401, statusText: 'Unauthorized', headers: {}, data: {}, config,
+    }))
+    // The old implementation reaches this response, consuming a one-time operation,
+    // then discards it because refresh invalidated the request's revision.
+    return Promise.resolve({ data: { data: { verified: true } }, status: 200, statusText: 'OK', headers: {}, config })
+  }
+  const outcome = api.post(`/extensions/security/mfa/${action}`, { code: '123456' }).catch(error => error)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(await outcome).toMatchObject({ name: 'AuthenticationRefreshedError', canReconcile: true })
+  expect(submissions).toBe(1)
+})
+
+it('rejects queued extension requests without replay while ordinary host requests resume', async () => {
+  let finish!: () => void
+  vi.spyOn(axios, 'post').mockImplementation(() => new Promise(resolve => { finish = () => resolve({ data: {} }) }))
+  const attempts = new Map<string, number>()
+  api.defaults.adapter = config => {
+    const key = config.url!
+    const count = (attempts.get(key) || 0) + 1
+    attempts.set(key, count)
+    if (count === 1) return Promise.reject(new AxiosError('unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+      status: 401, statusText: 'Unauthorized', headers: {}, data: {}, config,
+    }))
+    return Promise.resolve({ data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config })
+  }
+  const paths = ['/extensions/security/mfa/challenge', '/extensions/security/mfa', '/me']
+  const outcomes = paths.map((url, index) => (index === 0 ? api.post(url, { code: '123456', recovery: true }) : api.get(url)).catch(error => error))
+  await vi.advanceTimersByTimeAsync(0)
+  finish()
+  await vi.advanceTimersByTimeAsync(0)
+  const results = await Promise.all(outcomes)
+  expect(results[0]).toMatchObject({ name: 'AuthenticationRefreshedError' })
+  expect(results[1]).toMatchObject({ name: 'AuthenticationRefreshedError' })
+  expect(results[2]).toMatchObject({ data: { ok: true } })
+  expect([...attempts.values()]).toEqual([1, 1, 2])
+  // A caller may explicitly reconcile with a new read, carrying the new revision.
+  await expect(api.get('/extensions/security/mfa')).resolves.toMatchObject({ data: { ok: true } })
+})
+
+it.each(['other:user', '', 'org:user'])('does not permit reconciliation after identity/logout/grant invalidation (%s)', async identity => {
+  const { clearExtensionSession: invalidate } = await import('@/extensions/session')
+  vi.spyOn(axios, 'post').mockImplementation(async () => { invalidate(identity); return { data: {} } })
+  const outcome = api.post('/extensions/security/mfa/challenge', {}).catch(error => error)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(await outcome).toMatchObject({ name: 'AuthenticationRefreshedError', canReconcile: false })
+})
+
+it('does not authorize reconciliation when a stale request returns 401 after logout', async () => {
+  const { clearExtensionSession: invalidate } = await import('@/extensions/session')
+  vi.spyOn(axios, 'post').mockResolvedValue({ data: {} })
+  let fail!: () => void
+  api.defaults.adapter = config => new Promise((_resolve, reject) => {
+    fail = () => reject(new AxiosError('unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+      status: 401, statusText: 'Unauthorized', headers: {}, data: {}, config,
+    }))
+  })
+  const outcome = api.post('/extensions/security/mfa/challenge', {}).catch(error => error)
+  await vi.advanceTimersByTimeAsync(0)
+  invalidate('')
+  fail()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(await outcome).toMatchObject({ name: 'AuthenticationRefreshedError', canReconcile: false })
 })

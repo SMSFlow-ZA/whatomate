@@ -71,6 +71,19 @@ api.interceptors.request.use(
 let isRefreshing = false
 let refreshSubscribers: Array<(success: boolean) => void> = []
 
+// A 401 was returned before the protected operation ran. Refresh restores primary
+// authentication only: callers must reconcile with a new read, never replay a
+// one-time code or mutation. The original request's revision remains untouched.
+export class AuthenticationRefreshedError extends Error {
+  readonly name = 'AuthenticationRefreshedError'
+  constructor(private readonly identity: string, private readonly revision: number, private readonly wasCurrent: boolean) {
+    super('Authentication refreshed; the protected request was not retried')
+  }
+  get canReconcile(): boolean {
+    return this.wasCurrent && this.identity === extensionSession.identity && this.revision === extensionSession.revision
+  }
+}
+
 function onRefreshComplete(success: boolean) {
   refreshSubscribers.forEach(cb => cb(success))
   refreshSubscribers = []
@@ -121,9 +134,13 @@ api.interceptors.response.use(
     return response
   },
   async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _extensionRevision?: number }
+    const isExtensionRequest = originalRequest?.url?.startsWith('/extensions/')
+    const wasCurrent = originalRequest?._extensionRevision === extensionSession.revision
 
     if (error.response?.status === 401 || (error.response?.status === 403 && originalRequest?.url?.startsWith('/extensions/'))) clearExtensionSession()
+    const refreshedError = new AuthenticationRefreshedError(extensionSession.identity, extensionSession.revision, wasCurrent)
+    const resume = () => isExtensionRequest ? Promise.reject(refreshedError) : api(originalRequest)
     // Skip token refresh logic for auth endpoints
     const isAuthEndpoint = originalRequest?.url?.startsWith('/auth/')
 
@@ -136,7 +153,7 @@ api.interceptors.response.use(
         return new Promise((resolve, reject) => {
           refreshSubscribers.push((success: boolean) => {
             if (success) {
-              resolve(api(originalRequest))
+              resolve(resume())
             } else {
               reject(error)
             }
@@ -155,8 +172,8 @@ api.interceptors.response.use(
         onRefreshComplete(true)
         isRefreshing = false
 
-        // Retry the original request
-        return api(originalRequest)
+        // Ordinary host requests resume; protected callers must explicitly reconcile.
+        return resume()
       } catch {
         // Refresh failed — notify waiting requests and redirect to login
         onRefreshComplete(false)
