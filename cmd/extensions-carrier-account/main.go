@@ -82,6 +82,7 @@ func run(args []string, out io.Writer) error {
 	attempt := f.String("attempt", "", "create-only root-private attempt path")
 	ca := f.String("ca-file", "", "root-private database CA PEM")
 	apply := f.Bool("apply", false, "commit inactive account, default preview")
+	activation := f.Bool("activate", false, "select exact inactive-to-active owner operation; default preview unless -apply")
 	if f.Parse(args) != nil || f.NArg() != 0 || *conf == "" || *plan == "" || *attempt == "" || *ca == "" {
 		return refused
 	}
@@ -131,7 +132,11 @@ func run(args []string, out io.Writer) error {
 	db.SetMaxOpenConns(2)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	r, e := provision(ctx, db, c, p, "public", *attempt, *apply)
+	operation := provision
+	if *activation {
+		operation = activate
+	}
+	r, e := operation(ctx, db, c, p, "public", *attempt, *apply)
 	if e != nil {
 		return refused
 	}
