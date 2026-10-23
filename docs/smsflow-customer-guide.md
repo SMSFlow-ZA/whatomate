@@ -5,6 +5,25 @@ administrator whether that release is available on your instance. SMSFlow SMS
 uses your own SMSFlow account and balance. Your Whatomate subscription does not
 include SMS credits.
 
+## One-way SMS availability
+
+Your hosting administrator must activate SMS for your workspace before you can
+send. An available channel menu or saved credential does not mean dispatch has
+been enabled. If a host-level sending hold is active, ask support; do not create
+replacement messages to work around it.
+
+The initial managed pilot supports **outgoing SMS and delivery reports**.
+Recipient SMS replies and SMS reply bots remain unavailable until a reply-capable
+route has been verified. Do not ask recipients to reply to a one-way SMS, including
+"reply STOP". Give them a monitored alternative contact method and ensure reported
+opt-outs are recorded before another send. If you cannot reliably maintain those
+opt-outs, do not start a campaign.
+
+An existing WhatsApp bot may send a one-way SMS action or use an explicitly
+configured SMS fallback. This does not enable an inbound SMS bot or an SMS prompt
+that waits for a reply. Keep the connection's **SMS reply bot** set to **No automatic
+replies** for a one-way route.
+
 ## Connect your account
 
 1. Obtain a dedicated Client ID and Client Secret from your SMSFlow account with
@@ -78,6 +97,7 @@ Never promise a customer that fallback can recall an already submitted SMS.
 | Submitted | SMSFlow accepted the submission; this is not handset delivery. |
 | Delivered | A delivery report confirmed delivery. SMS has no read receipt. |
 | Failed | Inspect the recorded reason. Fix the cause before deciding whether a new send is appropriate. |
+| Blocked / action needed | A connection, credit, permission or content check prevented completion. Inspect the reason and contact your administrator. Do not assume a new message is safe merely because this one was blocked. |
 | Unknown | The submission may have reached the provider. Wait for a delivery report and ask support to reconcile it. Do not create a replacement just because the first response was lost. |
 | Low balance | Review or top up your SMSFlow account. The displayed unit is the provider's credits or currency; it is not an estimated Whatomate charge. |
 | Action needed / polling failure | Reports or account checks may be delayed. Already submitted messages are retained. Ask an administrator to check the connection rather than resending. |
