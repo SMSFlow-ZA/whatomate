@@ -9,7 +9,7 @@ watch(url, () => { failed.value = false })
 <template>
   <span class="inline-flex min-w-0 items-center gap-2" :title="branding.current.display_name">
     <span class="inline-flex items-center justify-center rounded-md bg-white/95 p-1">
-      <img :src="failed ? (compact ? defaultBranding.favicon_url : defaultBranding.logo_url) : url"
+      <img :src="failed ? (compact ? (branding.current.default_favicon_url || defaultBranding.favicon_url) : (branding.current.default_logo_url || defaultBranding.logo_url)) : url"
         :alt="branding.current.display_name" :class="compact ? 'h-7 w-7 object-contain' : 'h-7 max-w-[112px] object-contain'" @error="failed = true" />
     </span>
     <span v-if="!compact && branding.current.custom" class="max-w-[140px] truncate text-sm font-semibold text-foreground">{{ branding.current.display_name }}</span>

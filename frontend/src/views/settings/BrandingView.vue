@@ -37,12 +37,12 @@ async function save() {
 }
 async function reset() {
   busy.value = true
-  try { await branding.reset(); reload(); resetOpen.value = false; toast.success('SMSFlow default branding restored.') }
+  try { await branding.reset(); reload(); resetOpen.value = false; toast.success('Default branding restored.') }
   catch { toast.error('Branding could not be reset. Please try again.') } finally { busy.value = false }
 }
 onUnmounted(release)
 onMounted(async () => { await branding.load(); reload(); loading.value = false })
-const defaultLogo = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '') + '/branding/smsflow-logo.png'
+const defaultLogo = computed(() => branding.current.default_logo_url || (((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '') + '/branding/whatomate-logo.svg'))
 </script>
 <template>
   <div class="h-full overflow-y-auto p-4 md:p-6"><div class="mx-auto max-w-5xl space-y-6 pb-12">
@@ -52,12 +52,12 @@ const defaultLogo = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '') + '
       <form class="space-y-5 rounded-xl border border-border bg-card p-5" @submit.prevent="save">
         <div class="space-y-2"><Label for="brand-name">Display name</Label><Input id="brand-name" v-model="name" :disabled="!canWrite || busy" /><p class="text-xs text-muted-foreground">1–80 characters. This does not rename your organization or WhatsApp business profile.</p></div>
         <div class="space-y-2"><Label for="brand-colour">Primary accent colour</Label><div class="flex gap-3"><input id="brand-colour" v-model="accent" type="color" class="h-9 w-12 rounded border border-border" :disabled="!canWrite || busy" /><Input v-model="accent" aria-label="Accent colour hex value" :disabled="!canWrite || busy" class="font-mono" /></div><p class="text-xs text-muted-foreground">Text adjusts for readable contrast. Status colours keep their meaning.</p></div>
-        <div class="space-y-2"><Label for="brand-logo">Logo</Label><input id="brand-logo" type="file" accept="image/png,image/jpeg" :disabled="!canWrite || busy" class="block w-full text-sm text-foreground" @change="selectImage($event, 'logo')" /><p class="text-xs text-muted-foreground">PNG/JPEG, up to 2 MiB and 2048×2048 pixels. Transparent PNG works best.</p><label class="flex items-center gap-2 text-sm text-muted-foreground"><input v-model="removeLogo" type="checkbox" :disabled="!canWrite || busy" />Use the default SMSFlow logo</label></div>
-        <div class="space-y-2"><Label for="brand-favicon">Browser icon (favicon)</Label><input id="brand-favicon" type="file" accept="image/png,image/jpeg" :disabled="!canWrite || busy" class="block w-full text-sm text-foreground" @change="selectImage($event, 'favicon')" /><p class="text-xs text-muted-foreground">PNG/JPEG, up to 512 KiB and 2048×2048 pixels. A square icon works best.</p><label class="flex items-center gap-2 text-sm text-muted-foreground"><input v-model="removeFavicon" type="checkbox" :disabled="!canWrite || busy" />Use the default SMSFlow favicon</label></div>
+        <div class="space-y-2"><Label for="brand-logo">Logo</Label><input id="brand-logo" type="file" accept="image/png,image/jpeg" :disabled="!canWrite || busy" class="block w-full text-sm text-foreground" @change="selectImage($event, 'logo')" /><p class="text-xs text-muted-foreground">PNG/JPEG, up to 2 MiB and 2048×2048 pixels. Transparent PNG works best.</p><label class="flex items-center gap-2 text-sm text-muted-foreground"><input v-model="removeLogo" type="checkbox" :disabled="!canWrite || busy" />Use the default logo</label></div>
+        <div class="space-y-2"><Label for="brand-favicon">Browser icon (favicon)</Label><input id="brand-favicon" type="file" accept="image/png,image/jpeg" :disabled="!canWrite || busy" class="block w-full text-sm text-foreground" @change="selectImage($event, 'favicon')" /><p class="text-xs text-muted-foreground">PNG/JPEG, up to 512 KiB and 2048×2048 pixels. A square icon works best.</p><label class="flex items-center gap-2 text-sm text-muted-foreground"><input v-model="removeFavicon" type="checkbox" :disabled="!canWrite || busy" />Use the default favicon</label></div>
         <p class="text-xs text-muted-foreground">Images use your storage allowance. The purchase portal and invoices stay SMSFlow branded.</p>
         <p v-if="!canWrite" class="text-sm text-muted-foreground">An administrator can change these settings.</p>
-        <div v-else class="flex flex-wrap gap-3"><Button type="submit" :disabled="busy || !valid">{{ busy ? 'Saving…' : 'Save branding' }}</Button><Button type="button" variant="outline" :disabled="busy" @click="resetOpen = !resetOpen">Reset to SMSFlow defaults</Button></div>
-        <div v-if="resetOpen && canWrite" class="rounded-lg border border-border p-3"><p class="mb-3 text-sm text-foreground">Restore the SMSFlow name, colours and images? Current uploaded branding images will be removed.</p><Button type="button" :disabled="busy" @click="reset">Confirm reset</Button><Button type="button" variant="ghost" @click="resetOpen = false">Keep my branding</Button></div>
+        <div v-else class="flex flex-wrap gap-3"><Button type="submit" :disabled="busy || !valid">{{ busy ? 'Saving…' : 'Save branding' }}</Button><Button type="button" variant="outline" :disabled="busy" @click="resetOpen = !resetOpen">Reset to {{ branding.current.default_display_name || 'Whatomate' }} defaults</Button></div>
+        <div v-if="resetOpen && canWrite" class="rounded-lg border border-border p-3"><p class="mb-3 text-sm text-foreground">Restore the default name, colours and images? Current uploaded branding images will be removed.</p><Button type="button" :disabled="busy" @click="reset">Confirm reset</Button><Button type="button" variant="ghost" @click="resetOpen = false">Keep my branding</Button></div>
       </form>
       <section class="space-y-4" aria-label="Branding previews"><h2 class="text-sm font-semibold text-foreground">Preview before saving</h2>
         <div v-for="mode in ['light', 'dark']" :key="mode" class="overflow-hidden rounded-xl border border-border" :style="{ background: mode === 'light' ? '#f0f3f6' : '#0a0a0b', color: mode === 'light' ? '#073756' : '#fafafa' }">

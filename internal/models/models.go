@@ -359,7 +359,9 @@ type Contact struct {
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
 
 	// Marketing opt-out (from Meta user_preferences webhook)
-	MarketingOptOut bool `gorm:"default:false" json:"marketing_opt_out"`
+	MarketingOptOut  bool       `gorm:"default:false" json:"marketing_opt_out"`
+	SMSOptOut        bool       `gorm:"not null;default:false" json:"sms_opt_out"`
+	SMSLastInboundAt *time.Time `json:"sms_last_inbound_at,omitempty"`
 
 	// Business-Scoped User ID (from Meta BSUID rollout)
 	BSUID string `gorm:"size:150;index" json:"bsuid,omitempty"`
@@ -381,27 +383,30 @@ func (Contact) TableName() string {
 // Message represents a WhatsApp message
 type Message struct {
 	BaseModel
-	OrganizationID    uuid.UUID     `gorm:"type:uuid;index;not null" json:"organization_id"`
-	WhatsAppAccount   string        `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	ContactID         uuid.UUID     `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppMessageID string        `gorm:"column:whats_app_message_id;size:255;index" json:"whatsapp_message_id"`
-	ConversationID    string        `gorm:"size:255;index" json:"conversation_id"`
-	Direction         Direction     `gorm:"size:10;not null" json:"direction"`
-	MessageType       MessageType   `gorm:"size:20;not null" json:"message_type"`
-	Content           string        `gorm:"type:text" json:"content"`
-	MediaURL          string        `gorm:"type:text" json:"media_url"`
-	MediaMimeType     string        `gorm:"size:100" json:"media_mime_type"`
-	MediaFilename     string        `gorm:"size:255" json:"media_filename"`
-	TemplateName      string        `gorm:"size:255" json:"template_name"`
-	TemplateParams    JSONB         `gorm:"type:jsonb" json:"template_params"`
-	InteractiveData   JSONB         `gorm:"type:jsonb" json:"interactive_data"`
-	FlowResponse      JSONB         `gorm:"type:jsonb" json:"flow_response"`
-	Status            MessageStatus `gorm:"size:20;default:'pending'" json:"status"`
-	ErrorMessage      string        `gorm:"type:text" json:"error_message"`
-	IsReply           bool          `gorm:"default:false" json:"is_reply"`
-	ReplyToMessageID  *uuid.UUID    `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
-	SentByUserID      *uuid.UUID    `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
-	Metadata          JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Channel             string           `gorm:"size:20;not null;default:whatsapp" json:"channel"`
+	ChannelConnectionID *uuid.UUID       `gorm:"type:uuid;index" json:"channel_connection_id,omitempty"`
+	DeliveryAttempts    []ChannelAttempt `gorm:"foreignKey:MessageID" json:"delivery_attempts,omitempty"`
+	OrganizationID      uuid.UUID        `gorm:"type:uuid;index;not null" json:"organization_id"`
+	WhatsAppAccount     string           `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	ContactID           uuid.UUID        `gorm:"type:uuid;index;not null" json:"contact_id"`
+	WhatsAppMessageID   string           `gorm:"column:whats_app_message_id;size:255;index" json:"whatsapp_message_id"`
+	ConversationID      string           `gorm:"size:255;index" json:"conversation_id"`
+	Direction           Direction        `gorm:"size:10;not null" json:"direction"`
+	MessageType         MessageType      `gorm:"size:20;not null" json:"message_type"`
+	Content             string           `gorm:"type:text" json:"content"`
+	MediaURL            string           `gorm:"type:text" json:"media_url"`
+	MediaMimeType       string           `gorm:"size:100" json:"media_mime_type"`
+	MediaFilename       string           `gorm:"size:255" json:"media_filename"`
+	TemplateName        string           `gorm:"size:255" json:"template_name"`
+	TemplateParams      JSONB            `gorm:"type:jsonb" json:"template_params"`
+	InteractiveData     JSONB            `gorm:"type:jsonb" json:"interactive_data"`
+	FlowResponse        JSONB            `gorm:"type:jsonb" json:"flow_response"`
+	Status              MessageStatus    `gorm:"size:20;default:'pending'" json:"status"`
+	ErrorMessage        string           `gorm:"type:text" json:"error_message"`
+	IsReply             bool             `gorm:"default:false" json:"is_reply"`
+	ReplyToMessageID    *uuid.UUID       `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
+	SentByUserID        *uuid.UUID       `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
+	Metadata            JSONB            `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Relations
 	Organization   *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`

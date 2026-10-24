@@ -62,7 +62,7 @@ func TestBrandingPublicDefaultsAndAdminSaveReset(t *testing.T) {
 	user := createAdminUser(t, a, org.ID)
 	r := testutil.NewGETRequest(t)
 	require.NoError(t, a.GetBranding(r))
-	require.Contains(t, string(testutil.GetResponseBody(r)), "SMSFlow")
+	require.Contains(t, string(testutil.GetResponseBody(r)), "Whatomate")
 	require.NotContains(t, string(testutil.GetResponseBody(r)), "secret")
 	r = brandRequest(t, org.ID, user.ID, map[string]string{"display_name": "Acme <Team>", "accent_color": "#b00020"}, map[string][]byte{"logo": brandImage(t), "favicon": brandImage(t)})
 	require.NoError(t, a.UpdateBranding(r))
@@ -90,7 +90,21 @@ func TestBrandingPublicDefaultsAndAdminSaveReset(t *testing.T) {
 	require.NoError(t, a.GetBranding(r))
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(r), &result))
-	require.Contains(t, string(testutil.GetResponseBody(r)), "SMSFlow")
+	require.Contains(t, string(testutil.GetResponseBody(r)), "Whatomate")
+}
+
+func TestUnmanagedBrandingRetainsWhatomateDefaults(t *testing.T) {
+	a := brandingApp(t)
+	a.Config.Plan.Enabled = false
+	r := testutil.NewGETRequest(t)
+	require.NoError(t, a.GetBranding(r))
+	body := string(testutil.GetResponseBody(r))
+	require.Contains(t, body, `"display_name":"Whatomate"`)
+	require.NotContains(t, body, "smsflow-logo")
+	a.Config.Plan.Enabled = true
+	r = testutil.NewGETRequest(t)
+	require.NoError(t, a.GetBranding(r))
+	require.Contains(t, string(testutil.GetResponseBody(r)), `"display_name":"SMSFlow"`)
 }
 func TestBrandingAuthorizationAndValidation(t *testing.T) {
 	a := brandingApp(t)

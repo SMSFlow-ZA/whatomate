@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import ChannelOptions from '@/components/shared/ChannelOptions.vue'
+import { initialChannelOptions } from '@/lib/channels'
 import type { ChatNode } from '@/services/api'
 import { useTeamsStore } from '@/stores/teams'
 import { Input } from '@/components/ui/input'
@@ -12,6 +14,7 @@ import { Trash2, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
   node: ChatNode
+  smsFlow?: boolean
   currentFlowId?: string
   availableFlows?: { id: string; name: string }[]
 }>()
@@ -672,6 +675,8 @@ const typeLabel: Record<string, string> = {
       </div>
     </template>
 
+    <div v-if="smsFlow && node.type === 'buttons'" class="space-y-2 border-t pt-3"><Label>SMS version with numbered choices</Label><Textarea :model-value="config.sms_text || ''" @update:model-value="v => updateConfig('sms_text', v)" placeholder="Reply 1 for Sales, 2 for Support" /><p class="text-xs text-muted-foreground">Use reply buttons as text choices; URL and phone buttons are unavailable on SMS.</p></div>
+    <ChannelOptions v-if="!smsFlow && ['message','prompt','end','buttons'].includes(node.type)" :model-value="config.delivery_options || initialChannelOptions()" :text="textBodyValue || config.message || ''" :rich="node.type === 'buttons'" @update:model-value="v => updateConfig('delivery_options',v)" />
     <!-- Skip condition. Evaluated by the runner before executing the
          node; truthy → fall through via the default edge without
          sending anything.

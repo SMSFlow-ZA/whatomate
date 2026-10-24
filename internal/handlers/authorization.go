@@ -32,6 +32,15 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			_ = r.SendErrorEnvelope(401, "Unauthorized", nil, "")
 			return nil
 		}
+		if (path == "/api/channels" && method == "GET") || (path == "/api/channels/preview" && method == "POST") {
+			act := models.ActionRead
+			if method == "POST" {
+				act = models.ActionWrite
+			}
+			if a.canConsumeChannel(orgID, userID, act) {
+				return r
+			}
+		}
 		// These routes act only on the authenticated user's session or profile.
 		switch path {
 		case "/api/me", "/api/me/settings", "/api/me/password", "/api/me/availability", "/api/me/organizations", "/api/auth/switch-org", "/api/auth/ws-token", "/api/plan":
@@ -89,6 +98,16 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			}
 		case "branding":
 			resource = models.ResourceSettingsBranding
+		case "channel-connections":
+			resource = models.ResourceSettingsChannels
+			if method == "DELETE" {
+				action = models.ActionWrite
+			}
+		case "channels":
+			resource = models.ResourceChat
+			if path == "/api/channels/providers" || path == "/api/channels/health" {
+				resource = models.ResourceSettingsChannels
+			}
 		case "organizations":
 			resource = models.ResourceOrganizations
 			if strings.HasPrefix(path, "/api/organizations/members") && method != "GET" {

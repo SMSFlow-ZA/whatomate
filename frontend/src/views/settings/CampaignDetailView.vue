@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ChannelOptions from '@/components/shared/ChannelOptions.vue'
+import { channelPayload, initialChannelOptions, campaignParameterNames, type SMSFallbackPolicy } from '@/lib/channels'
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -78,6 +80,11 @@ import {
 } from 'lucide-vue-next'
 
 interface Campaign {
+  channel?: 'whatsapp' | 'sms'
+  channel_connection_id?: string
+  sms_body?: string
+  consent_confirmed?: boolean
+  sms_fallback?: SMSFallbackPolicy
   id: string
   name: string
   whatsapp_account?: string
@@ -147,11 +154,13 @@ const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(ha
 const isDraft = computed(() => isNew.value || campaign.value?.status === 'draft')
 
 const form = ref({
+  sms_body: '',
   name: '',
   whatsapp_account: '',
   template_id: '',
   scheduled_at: '',
 })
+const deliveryOptions = ref(initialChannelOptions())
 
 const breadcrumbs = computed(() => [
   { label: t('nav.campaigns', 'Campaigns'), href: '/campaigns' },
@@ -238,8 +247,7 @@ const templateHeaderParamName = computed<string | null>(() => {
 })
 
 const templateBodyParamNames = computed<string[]>(() => {
-  if (!selectedTemplate.value) return []
-  return extractParamNames(selectedTemplate.value.body_content)
+  return campaignParameterNames(deliveryOptions.value.channel === 'sms' ? form.value.sms_body : selectedTemplate.value?.body_content, deliveryOptions.value.fallback_enabled ? deliveryOptions.value.sms_text : '')
 })
 
 // Concatenated list (header first if present, then body). Used purely to
@@ -376,11 +384,14 @@ async function loadCampaign() {
 function syncForm() {
   if (!campaign.value) return
   form.value = {
+    sms_body: campaign.value.sms_body || '',
     name: campaign.value.name || '',
     whatsapp_account: campaign.value.whatsapp_account || '',
-    template_id: campaign.value.template_id || '',
+    template_id: campaign.value.channel === 'sms' ? '' : campaign.value.template_id || '',
     scheduled_at: campaign.value.scheduled_at ? campaign.value.scheduled_at.slice(0, 16) : '',
   }
+  const policy = campaign.value.sms_fallback
+  deliveryOptions.value = { ...initialChannelOptions(), channel: campaign.value.channel || 'whatsapp', connection_id: campaign.value.channel_connection_id || policy?.connection_id || '', consent_confirmed: campaign.value.consent_confirmed || policy?.consent_confirmed || false, fallback_enabled: policy?.enabled || false, sms_text: policy?.text || '', timeout_enabled: policy?.timeout_enabled || false, timeout_minutes: policy?.timeout_minutes || 10 }
 }
 
 // Track form changes
@@ -421,6 +432,10 @@ async function save() {
   isSaving.value = true
   try {
     const payload: Record<string, any> = {
+      ...channelPayload(deliveryOptions.value, deliveryOptions.value.channel !== 'sms'),
+      channel: deliveryOptions.value.channel,
+      sms_body: form.value.sms_body,
+      sms_fallback: channelPayload(deliveryOptions.value, deliveryOptions.value.channel !== 'sms').sms_fallback || { enabled: false },
       name: form.value.name,
       whatsapp_account: form.value.whatsapp_account || undefined,
       template_id: form.value.template_id || undefined,
@@ -583,7 +598,7 @@ async function openAddRecipientsDialog() {
   addRecipientsTab.value = 'manual'
 
   // Fetch template details if needed
-  if (campaign.value?.template_id && !selectedTemplate.value) {
+  if (campaign.value?.channel !== 'sms' && campaign.value?.template_id && !selectedTemplate.value) {
     try {
       const response = await templatesService.get(campaign.value.template_id)
       selectedTemplate.value = (response.data as any).data || response.data
@@ -1039,13 +1054,15 @@ onUnmounted(() => {
         <CardTitle class="text-sm font-medium">{{ $t('campaigns.details', 'Details') }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-4">
+        <ChannelOptions v-model="deliveryOptions" :text="form.sms_body" :rich="deliveryOptions.channel !== 'sms'" :allow-direct-sms="true" :disabled="!isDraft" />
+        <label v-if="deliveryOptions.channel === 'sms'" class="block text-sm">SMS text<textarea v-model="form.sms_body" :disabled="!isDraft" rows="4" class="mt-1 block w-full rounded border bg-background p-2" required /></label>
         <div class="space-y-1.5">
           <Label class="text-xs">{{ $t('campaigns.name', 'Name') }} *</Label>
           <Input v-model="form.name" :disabled="!isDraft" :placeholder="$t('campaigns.namePlaceholder', 'Enter campaign name')" />
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">{{ $t('campaigns.whatsappAccount', 'WhatsApp Account') }}</Label>
-          <Select v-model="form.whatsapp_account" :disabled="!isDraft">
+          <Label v-if="deliveryOptions.channel !== 'sms'" class="text-xs">{{ $t('campaigns.whatsappAccount', 'WhatsApp Account') }}</Label>
+          <Select v-if="deliveryOptions.channel !== 'sms'" v-model="form.whatsapp_account" :disabled="!isDraft">
             <SelectTrigger>
               <SelectValue :placeholder="$t('campaigns.selectAccount', 'Select account')" />
             </SelectTrigger>
@@ -1057,8 +1074,8 @@ onUnmounted(() => {
           </Select>
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">{{ $t('campaigns.template', 'Template') }}</Label>
-          <Select v-model="form.template_id" :disabled="!isDraft || !form.whatsapp_account">
+          <Label v-if="deliveryOptions.channel !== 'sms'" class="text-xs">{{ $t('campaigns.template', 'Template') }}</Label>
+          <Select v-if="deliveryOptions.channel !== 'sms'" v-model="form.template_id" :disabled="!isDraft || !form.whatsapp_account">
             <SelectTrigger>
               <SelectValue :placeholder="form.whatsapp_account ? $t('campaigns.selectTemplate', 'Select template') : $t('campaigns.selectAccountFirst', 'Select an account first')" />
             </SelectTrigger>

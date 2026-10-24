@@ -460,10 +460,9 @@ func (a *App) SwitchOrg(r *fastglue.Request) error {
 		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, req.OrganizationID).First(&userOrg).Error; err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You are not a member of this organization", nil, "")
 		}
-		// Use the role from the user_organizations table for the target org
-		if userOrg.RoleID != nil {
-			user.RoleID = userOrg.RoleID
-		}
+		// The target org's membership row is the only source of the role there;
+		// keeping the home-org role would carry its permissions across tenants.
+		user.RoleID = userOrg.RoleID
 	}
 
 	// Set the target org on the user for token generation
@@ -579,8 +578,10 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 	if !ok {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
-	orgID, ok := r.RequestCtx.UserValue("organization_id").(uuid.UUID)
-	if !ok {
+	// The hub registers the client under this org and BroadcastToOrg fans out by
+	// it, so resolve the active org rather than trusting the JWT's default.
+	orgID, err := a.getOrgID(r)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 

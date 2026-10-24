@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -24,15 +25,25 @@ import (
 
 // CampaignRequest represents campaign create/update request
 type CampaignRequest struct {
-	Name            string     `json:"name" validate:"required"`
-	WhatsAppAccount string     `json:"whatsapp_account" validate:"required"`
-	TemplateID      string     `json:"template_id" validate:"required"`
-	HeaderMediaID   string     `json:"header_media_id"`
-	ScheduledAt     *time.Time `json:"scheduled_at"`
+	Channel             string              `json:"channel"`
+	ChannelConnectionID uuid.UUID           `json:"channel_connection_id"`
+	SMSBody             string              `json:"sms_body"`
+	ConsentConfirmed    bool                `json:"consent_confirmed"`
+	SMSFallback         *SMSFallbackOptions `json:"sms_fallback"`
+	Name                string              `json:"name" validate:"required"`
+	WhatsAppAccount     string              `json:"whatsapp_account"`
+	TemplateID          string              `json:"template_id"`
+	HeaderMediaID       string              `json:"header_media_id"`
+	ScheduledAt         *time.Time          `json:"scheduled_at"`
 }
 
 // CampaignResponse represents campaign in API responses
 type CampaignResponse struct {
+	Channel             string                `json:"channel"`
+	ChannelConnectionID *uuid.UUID            `json:"channel_connection_id,omitempty"`
+	SMSBody             string                `json:"sms_body"`
+	ConsentConfirmed    bool                  `json:"consent_confirmed"`
+	SMSFallback         models.JSONB          `json:"sms_fallback,omitempty"`
 	ID                  uuid.UUID             `json:"id"`
 	Name                string                `json:"name"`
 	WhatsAppAccount     string                `json:"whatsapp_account"`
@@ -117,6 +128,7 @@ func (a *App) ListCampaigns(r *fastglue.Request) error {
 	response := make([]CampaignResponse, len(campaigns))
 	for i, c := range campaigns {
 		response[i] = CampaignResponse{
+			Channel: c.Channel, ChannelConnectionID: c.ChannelConnectionID, SMSBody: c.SMSBody, ConsentConfirmed: c.SMSConsentConfirmed, SMSFallback: c.SMSFallback,
 			ID:                  c.ID,
 			Name:                c.Name,
 			WhatsAppAccount:     c.WhatsAppAccount,
@@ -157,6 +169,12 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 	}
 
 	// Validate template exists
+	if req.Channel == "sms" {
+		return a.createSMSCampaign(r, orgID, userID, req)
+	}
+	if req.Channel != "" && req.Channel != "whatsapp" {
+		return r.SendErrorEnvelope(400, "Unsupported campaign channel", nil, "")
+	}
 	templateID, err := uuid.Parse(req.TemplateID)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid template ID", nil, "")
@@ -183,6 +201,15 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 		CreatedBy:       userID,
 		UpdatedByID:     &userID,
 	}
+	if req.SMSFallback != nil && req.SMSFallback.Enabled {
+		if err := a.validateCampaignSMS(orgID, req.SMSFallback.ConnectionID, req.SMSFallback.Text, req.SMSFallback.ConsentConfirmed); err != nil {
+			return r.SendErrorEnvelope(422, "A valid authored SMS fallback and consent are required", nil, "")
+		}
+		data, _ := json.Marshal(req.SMSFallback)
+		if err := json.Unmarshal(data, &campaign.SMSFallback); err != nil {
+			return r.SendErrorEnvelope(400, "Invalid fallback policy", nil, "")
+		}
+	}
 
 	if err := a.DB.Create(&campaign).Error; err != nil {
 		a.Log.Error("Failed to create campaign", "error", err)
@@ -195,6 +222,7 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 	a.Log.Info("Campaign created", "campaign_id", campaign.ID, "name", campaign.Name)
 
 	return r.SendEnvelope(CampaignResponse{
+		Channel: campaign.Channel, ChannelConnectionID: campaign.ChannelConnectionID, SMSBody: campaign.SMSBody, ConsentConfirmed: campaign.SMSConsentConfirmed, SMSFallback: campaign.SMSFallback,
 		ID:                  campaign.ID,
 		Name:                campaign.Name,
 		WhatsAppAccount:     campaign.WhatsAppAccount,
@@ -237,6 +265,7 @@ func (a *App) GetCampaign(r *fastglue.Request) error {
 	}
 
 	response := CampaignResponse{
+		Channel: campaign.Channel, ChannelConnectionID: campaign.ChannelConnectionID, SMSBody: campaign.SMSBody, ConsentConfirmed: campaign.SMSConsentConfirmed, SMSFallback: campaign.SMSFallback,
 		ID:                  campaign.ID,
 		Name:                campaign.Name,
 		WhatsAppAccount:     campaign.WhatsAppAccount,
@@ -299,6 +328,12 @@ func (a *App) UpdateCampaign(r *fastglue.Request) error {
 	}
 
 	// Update fields
+	if campaign.Channel == "sms" {
+		return a.updateSMSCampaign(r, orgID, userID, campaign, req)
+	}
+	if req.Channel == "sms" {
+		return r.SendErrorEnvelope(400, "Create a new campaign to change delivery channels", nil, "")
+	}
 	updates := map[string]any{
 		"name":          req.Name,
 		"scheduled_at":  req.ScheduledAt,
@@ -316,6 +351,19 @@ func (a *App) UpdateCampaign(r *fastglue.Request) error {
 	if req.WhatsAppAccount != "" {
 		updates["whats_app_account"] = req.WhatsAppAccount
 	}
+	if req.SMSFallback != nil {
+		if req.SMSFallback.Enabled {
+			if err := a.validateCampaignSMS(orgID, req.SMSFallback.ConnectionID, req.SMSFallback.Text, req.SMSFallback.ConsentConfirmed); err != nil {
+				return r.SendErrorEnvelope(422, "Invalid SMS fallback text, connection or consent", nil, "")
+			}
+		}
+		data, _ := json.Marshal(req.SMSFallback)
+		var policy models.JSONB
+		if err := json.Unmarshal(data, &policy); err != nil {
+			return r.SendErrorEnvelope(400, "Invalid fallback policy", nil, "")
+		}
+		updates["sms_fallback"] = policy
+	}
 
 	if err := a.DB.Model(campaign).Updates(updates).Error; err != nil {
 		a.Log.Error("Failed to update campaign", "error", err)
@@ -329,6 +377,7 @@ func (a *App) UpdateCampaign(r *fastglue.Request) error {
 		"campaign", campaign.ID, models.AuditActionUpdated, &oldCampaign, campaign)
 
 	response := CampaignResponse{
+		Channel: campaign.Channel, ChannelConnectionID: campaign.ChannelConnectionID, SMSBody: campaign.SMSBody, ConsentConfirmed: campaign.SMSConsentConfirmed, SMSFallback: campaign.SMSFallback,
 		ID:                  campaign.ID,
 		Name:                campaign.Name,
 		WhatsAppAccount:     campaign.WhatsAppAccount,
@@ -432,7 +481,13 @@ func (a *App) StartCampaign(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load recipients", nil, "")
 	}
 
-	if len(recipients) == 0 {
+	var durableQueued int64
+	if campaign.Channel == "sms" && campaign.Status == models.CampaignStatusPaused {
+		if err := a.DB.Model(&models.BulkMessageRecipient{}).Where("campaign_id = ? AND status = 'queued'", id).Count(&durableQueued).Error; err != nil {
+			return r.SendErrorEnvelope(503, "Unable to resume campaign", nil, "")
+		}
+	}
+	if len(recipients) == 0 && durableQueued == 0 {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Campaign has no pending recipients", nil, "")
 	}
 
@@ -472,11 +527,13 @@ func (a *App) StartCampaign(r *fastglue.Request) error {
 		}
 	}
 
-	if err := a.Queue.EnqueueRecipients(r.RequestCtx, jobs); err != nil {
-		a.Log.Error("Failed to enqueue recipients", "error", err)
-		// Revert status on failure
-		a.DB.Model(campaign).Update("status", models.CampaignStatusDraft)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to queue recipients", nil, "")
+	if len(jobs) > 0 {
+		if err := a.Queue.EnqueueRecipients(r.RequestCtx, jobs); err != nil {
+			a.Log.Error("Failed to enqueue recipients", "error", err)
+			// Revert status on failure
+			a.DB.Model(campaign).Update("status", models.CampaignStatusDraft)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to queue recipients", nil, "")
+		}
 	}
 
 	a.Log.Info("Recipients enqueued for processing", "campaign_id", id, "count", len(jobs))

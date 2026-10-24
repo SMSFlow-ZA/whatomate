@@ -30,6 +30,13 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Plan         PlanConfig         `koanf:"plan"`
+	Channels     ChannelsConfig     `koanf:"channels"`
+}
+
+type ChannelsConfig struct {
+	StopDispatch       bool   `koanf:"stop_dispatch"`
+	SMSFlowEndpoint    string `koanf:"smsflow_endpoint"`     // trusted host setting; HTTPS origin only
+	SMSFlowReplyRoutes string `koanf:"smsflow_reply_routes"` // comma-separated deployment-verified two-way routes
 }
 
 type TTSConfig struct {
@@ -89,6 +96,7 @@ type CallingConfig struct {
 	HoldMusicFile       string            `koanf:"hold_music_file"`
 	TransferTimeoutSecs int               `koanf:"transfer_timeout_secs"`
 	PerAgentTimeoutSecs int               `koanf:"per_agent_timeout_secs"`
+	StickyRingSecs      int               `koanf:"sticky_ring_secs"`
 	RingbackFile        string            `koanf:"ringback_file"`
 	UDPPortMin          uint16            `koanf:"udp_port_min"` // WebRTC UDP port range start (default: 10000)
 	UDPPortMax          uint16            `koanf:"udp_port_max"` // WebRTC UDP port range end (default: 10100)

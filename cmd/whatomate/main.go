@@ -224,6 +224,10 @@ func runServer(args []string) {
 	}
 
 	// Initialize S3 client for call recordings (optional)
+	if err := app.InitializeChannels(); err != nil {
+		lo.Fatal("Channel registration failed", "error", err)
+	}
+	channelCancel := app.StartChannelWorker()
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
 		var err error
@@ -332,6 +336,7 @@ func runServer(args []string) {
 	<-quit
 
 	lo.Info("Shutting down...")
+	channelCancel()
 
 	// Stop campaign stats subscriber
 	lo.Info("Stopping campaign stats subscriber...")
@@ -493,6 +498,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding/assets/{asset}", app.BrandingAsset)
 	g.PUT("/api/branding", app.UpdateBranding)
 	g.DELETE("/api/branding", app.ResetBranding)
+	g.GET("/api/channel-connections", app.ListChannelConnections)
+	g.POST("/api/channel-connections", app.CreateChannelConnection)
+	g.PUT("/api/channel-connections/{id}", app.UpdateChannelConnection)
+	g.DELETE("/api/channel-connections/{id}", app.DeleteChannelConnection)
+	g.GET("/api/channels", app.AvailableChannels)
+	g.GET("/api/channels/providers", app.ChannelProviders)
+	g.GET("/api/channels/health", app.ChannelHealth)
+	g.POST("/api/channels/preview", app.PreviewSMS)
 
 	g.GET("/api/embedded-signup/config", app.GetEmbeddedSignupConfig)
 

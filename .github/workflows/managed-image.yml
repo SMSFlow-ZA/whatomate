@@ -2,7 +2,7 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening]
+    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019]
   workflow_dispatch:
 
 permissions:

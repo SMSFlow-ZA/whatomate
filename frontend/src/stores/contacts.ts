@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import type { ChannelSendFields, DeliveryAttempt } from '@/lib/channels'
+import { newSMSClientMessageID } from '@/lib/channels'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -48,6 +50,9 @@ export interface Reaction {
 }
 
 export interface Message {
+	channel?: 'whatsapp' | 'sms'
+	channel_connection_id?: string
+	delivery_attempts?: DeliveryAttempt[]
   id: string
   contact_id: string
   direction: 'incoming' | 'outgoing'
@@ -81,6 +86,8 @@ export interface Message {
   created_at: string
   updated_at: string
 }
+
+const CONTACTS_REFRESH_DELAY_MS = 3000
 
 export const useContactsStore = defineStore('contacts', () => {
   const contacts = ref<Contact[]>([])
@@ -118,10 +125,14 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoading.value = true
     try {
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
+      // Keep the active search, so a background refresh doesn't clobber
+      // the list the agent is searching.
+      const search = normalizeContactSearch(searchQuery.value) || undefined
       const response = await contactsService.list({
         page: 1,
         limit: contactsLimit.value,
         tags: tagsParam,
+        search,
         ...params
       })
       // API returns { status: "success", data: { contacts: [...], total: number } }
@@ -224,22 +235,36 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // Keep uncertain inbox requests on their original logical SMS identifier.
+  // A changed draft/connection or a confirmed success starts a new operation.
+  const pendingSMSSends = new Map<string, { fingerprint: string; id: string }>()
   async function sendMessage(
     contactId: string,
     type: string,
     content: any,
     replyToMessageId?: string,
     whatsappAccount?: string,
-    extra?: { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
+    extra?: ChannelSendFields & { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
   ) {
+    let smsOperation: { fingerprint: string; id: string } | undefined
+    if (extra?.channel === 'sms' && !extra.client_message_id) {
+      const fingerprint = JSON.stringify([type, content, replyToMessageId, whatsappAccount, extra])
+      smsOperation = pendingSMSSends.get(contactId)
+      if (smsOperation?.fingerprint !== fingerprint) {
+        smsOperation = { fingerprint, id: newSMSClientMessageID() }
+        pendingSMSSends.set(contactId, smsOperation)
+      }
+      extra = { ...extra, client_message_id: smsOperation.id }
+    }
     try {
       const response = await messagesService.send(contactId, {
         type,
         content,
         reply_to_message_id: replyToMessageId,
         whatsapp_account: whatsappAccount,
-        ...(extra?.interactive ? { interactive: extra.interactive } : {}),
+        ...extra,
       })
+      if (smsOperation && pendingSMSSends.get(contactId)?.id === smsOperation.id) pendingSMSSends.delete(contactId)
       // API returns { status: "success", data: { ... } }
       const newMessage = response.data.data || response.data
       // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
@@ -259,10 +284,12 @@ export const useContactsStore = defineStore('contacts', () => {
     accountName?: string,
     headerFile?: File,
     buttonParams?: Record<string, string>,
-    headerParams?: Record<string, string>
+    headerParams?: Record<string, string>,
+    channel?: ChannelSendFields
   ) {
     try {
       const response = await messagesService.sendTemplate(contactId, {
+        ...channel,
         template_name: templateName,
         template_params: templateParams,
         header_params: headerParams,
@@ -287,19 +314,47 @@ export const useContactsStore = defineStore('contacts', () => {
     replyingTo.value = null
   }
 
-  function addMessage(message: Message) {
-    // Update contact metadata regardless of account filter
+  // Reflect a new message on its sidebar row. Returns false when the contact
+  // isn't in the loaded list (a new conversation, or beyond the loaded pages).
+  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'channel'>): boolean {
     const contact = contacts.value.find(c => c.id === message.contact_id)
-    if (contact) {
-      contact.last_message_at = message.created_at
-      if (message.direction === 'incoming') {
-        contact.unread_count++
+    if (!contact) return false
+    contact.last_message_at = message.created_at
+    if (message.direction === 'incoming') {
+      // Mirrors the server's unread count, which excludes already-read
+      // messages (e.g. ones the chatbot handled).
+      if (message.status !== 'read') contact.unread_count++
+      if (message.channel !== 'sms') {
         contact.last_inbound_at = message.created_at
         contact.service_window_open = true
       }
     }
+    return true
+  }
+
+  function markContactRead(contactId: string) {
+    const contact = contacts.value.find(c => c.id === contactId)
+    if (contact) contact.unread_count = 0
+  }
+
+  // Coalesce refetches triggered by live events, so a busy inbox doesn't turn
+  // every message into a GET /contacts from every connected agent.
+  let refreshHandle: ReturnType<typeof setTimeout> | null = null
+  function scheduleContactsRefresh() {
+    if (refreshHandle) return
+    refreshHandle = setTimeout(() => {
+      refreshHandle = null
+      fetchContacts()
+    }, CONTACTS_REFRESH_DELAY_MS)
+  }
+
+  function addMessage(message: Message) {
+    const existing = messages.value.findIndex(m => m.id === message.id)
+    if (existing !== -1) { messages.value[existing] = { ...messages.value[existing], ...message }; return }
+    // Update contact metadata regardless of account filter
+    updateContactFromMessage(message)
     // Also update currentContact if it matches
-    if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming') {
+    if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming' && message.channel !== 'sms') {
       currentContact.value.last_inbound_at = message.created_at
       currentContact.value.service_window_open = true
     }
@@ -316,12 +371,13 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
+  function updateMessageStatus(messageId: string, status: string, errorMessage?: string, deliveryAttempts?: DeliveryAttempt[]) {
     const index = messages.value.findIndex(m => m.id === messageId)
     if (index !== -1) {
       messages.value[index] = {
         ...messages.value[index],
         status,
+        ...(deliveryAttempts ? { delivery_attempts: deliveryAttempts } : {}),
         ...(errorMessage ? { error_message: errorMessage } : {})
       }
     }
@@ -393,6 +449,9 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoadingMoreContacts,
     fetchContacts,
     loadMoreContacts,
+    updateContactFromMessage,
+    markContactRead,
+    scheduleContactsRefresh,
     // Other
     fetchContact,
     fetchMessages,
