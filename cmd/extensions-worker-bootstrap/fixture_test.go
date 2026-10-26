@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SMSFlow-ZA/whatomate-addons/api"
+	"github.com/SMSFlow-ZA/whatomate-addons/knowledge"
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/handlers"
@@ -91,6 +92,9 @@ func prepareFixture(t *testing.T, db *sql.DB) Plan {
 		t.Fatal(e)
 	}
 	if e := (api.AccessStore{DB: db}).Migrate(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if e := knowledge.MigrateHTTP(ctx, db); e != nil {
 		t.Fatal(e)
 	}
 	if e := processingauth.Migrate(ctx, db); e != nil {

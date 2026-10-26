@@ -89,7 +89,7 @@ func TestExpectedACLRejectsUnrelatedChange(t *testing.T) {
 }
 
 func aclFixture(p Plan) Observation {
-	_, owner, worker, _ := p.names()
+	database, owner, worker, _ := p.names()
 	o := Observation{Version: 1}
 	seen := map[string]bool{}
 	add := func(r ACLRecord) {
@@ -99,6 +99,7 @@ func aclFixture(p Plan) Observation {
 			o.Records = append(o.Records, r)
 		}
 	}
+	add(ACLRecord{Kind: "database", Object: database, Owner: owner, Explicit: true, Grants: []ACLGrant{{owner, owner, "CONNECT", false}}})
 	add(ACLRecord{Kind: "namespace", Object: "public", Owner: owner, Explicit: true, Grants: []ACLGrant{{owner, owner, "CREATE", false}, {owner, owner, "USAGE", false}}})
 	add(ACLRecord{Kind: "relation", Object: "public.er_processing_authorization_bindings", Owner: owner, Explicit: true})
 	add(ACLRecord{Kind: "relation", Object: "public.unrelated", Owner: "unchanged"})
@@ -110,6 +111,9 @@ func aclFixture(p Plan) Observation {
 				add(ACLRecord{Kind: "column", Object: "public." + g.Table + "." + c, Owner: owner})
 			}
 		}
+	}
+	for _, c := range append(append([]string{}, runtimeJobSelect...), runtimeJobUpdate...) {
+		add(ACLRecord{Kind: "column", Object: "public.addon_knowledge_jobs." + c, Owner: owner})
 	}
 	normalize(&o)
 	return o

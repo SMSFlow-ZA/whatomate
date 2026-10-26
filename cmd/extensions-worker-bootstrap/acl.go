@@ -123,6 +123,14 @@ type columnGrant struct {
 var metadata = []columnGrant{{"whatomate_schema_seal", []string{"generation", "release", "catalog_sha256"}, ""}, {"whatomate_schema_attempt", []string{"release", "catalog_sha256"}, ""}, {"whatomate_protection_state", []string{"id", "protected"}, ""}, {"extension_schema", []string{"id", "checksum"}, ""}, {"extension_security_schema", []string{"id", "checksum"}, ""}, {"addon_cases_schema", []string{"version"}, ""}}
 var ownerColumns = []columnGrant{{"whatomate_protection_state", []string{"id", "protected"}, "id"}, {"organizations", []string{"id", "deleted_at"}, "id"}, {"users", []string{"id", "organization_id", "role_id", "is_active", "is_super_admin", "deleted_at"}, "id"}, {"custom_roles", []string{"id", "organization_id", "deleted_at", "is_system", "is_default"}, "id"}, {"role_permissions", []string{"custom_role_id", "permission_id"}, "custom_role_id"}, {"permissions", []string{"id", "resource", "action", "deleted_at"}, "id"}, {"addon_api_access_versions", []string{"organization_id", "user_id", "version"}, "organization_id"}, {"addon_api_access_audit", []string{"organization_id", "user_id", "new_version", "action", "metadata"}, ""}, {"addon_api_grants", []string{"organization_id", "user_id", "permission", "unit_id", "audience"}, "organization_id"}}
 
+var runtimeJobSelect = []string{"id", "tenant", "actor", "input", "input_hash", "metadata", "metadata_hash", "status", "created_at", "version", "lease_until", "lease_token"}
+var runtimeJobUpdate = []string{"status", "version", "failure", "updated_at", "worker", "lease_token", "lease_until", "document", "evidence", "receipt"}
+
+func runtimeSQL(p Plan) []string {
+	database, _, worker, _ := p.names()
+	return []string{"GRANT CONNECT ON DATABASE " + database + " TO " + worker, "GRANT SELECT(" + strings.Join(runtimeJobSelect, ",") + ") ON public.addon_knowledge_jobs TO " + worker, "GRANT UPDATE(" + strings.Join(runtimeJobUpdate, ",") + ") ON public.addon_knowledge_jobs TO " + worker}
+}
+
 const signature = "public.er_processing_authorize_v1(uuid,uuid,text,text[])"
 
 func metadataSQL(p Plan) []string {
@@ -143,7 +151,8 @@ func provisioningSQL(p Plan) []string {
 			out = append(out, "GRANT UPDATE("+g.Update+") ON public."+g.Table+" TO "+owner)
 		}
 	}
-	return append(out, "GRANT SELECT ON public.er_processing_authorization_bindings TO "+owner, "ALTER FUNCTION "+signature+" OWNER TO "+owner, "REVOKE CREATE ON SCHEMA public FROM "+owner, "REVOKE ALL ON FUNCTION "+signature+" FROM PUBLIC", "GRANT EXECUTE ON FUNCTION "+signature+" TO "+worker)
+	out = append(out, "GRANT SELECT ON public.er_processing_authorization_bindings TO "+owner, "ALTER FUNCTION "+signature+" OWNER TO "+owner, "REVOKE CREATE ON SCHEMA public FROM "+owner, "REVOKE ALL ON FUNCTION "+signature+" FROM PUBLIC", "GRANT EXECUTE ON FUNCTION "+signature+" TO "+worker)
+	return append(out, runtimeSQL(p)...)
 }
 
 func expectedACL(before Observation, p Plan) (Observation, error) {
@@ -153,7 +162,7 @@ func expectedACL(before Observation, p Plan) (Observation, error) {
 	raw, _ := json.Marshal(before)
 	var after Observation
 	_ = json.Unmarshal(raw, &after)
-	_, dbowner, worker, owner := p.names()
+	database, dbowner, worker, owner := p.names()
 	index := map[string]*ACLRecord{}
 	for i := range after.Records {
 		r := &after.Records[i]
@@ -242,6 +251,28 @@ func expectedACL(before Observation, p Plan) (Observation, error) {
 	fn.Owner = owner
 	fn.Grants = []ACLGrant{{owner, owner, "EXECUTE", false}, {owner, worker, "EXECUTE", false}}
 	fn.Explicit = true
+	// GRANT materializes the built-in database ACL when datacl was NULL.
+	// Observation retains explicit nullness, so reproduce those default entries.
+	databaseACL := index["database\x00"+database]
+	if databaseACL == nil {
+		return Observation{}, denied
+	}
+	if !databaseACL.Explicit {
+		databaseACL.Grants = []ACLGrant{{dbowner, dbowner, "CREATE", false}, {dbowner, dbowner, "CONNECT", false}, {dbowner, dbowner, "TEMPORARY", false}, {dbowner, "PUBLIC", "CONNECT", false}, {dbowner, "PUBLIC", "TEMPORARY", false}}
+	}
+	if add("database", database, worker, "CONNECT") != nil {
+		return Observation{}, denied
+	}
+	for _, c := range runtimeJobSelect {
+		if column("addon_knowledge_jobs", c, worker, "SELECT") != nil {
+			return Observation{}, denied
+		}
+	}
+	for _, c := range runtimeJobUpdate {
+		if column("addon_knowledge_jobs", c, worker, "UPDATE") != nil {
+			return Observation{}, denied
+		}
+	}
 	detail := `{"bypassrls":false,"config":null,"connlimit":-1,"createdb":false,"createrole":false,"inherit":true,"login":false,"replication":false,"super":false,"validuntil":null}`
 	after.Records = append(after.Records, ACLRecord{Kind: "role", Object: owner, Grants: []ACLGrant{}, Detail: detail})
 	normalize(&after)
