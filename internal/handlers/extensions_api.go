@@ -92,6 +92,8 @@ func (a *App) ExtensionCatalog(r *fastglue.Request) error {
 	permissions := append([]string{}, trusted.Permissions...)
 	grants := append([]addonapi.Grant{}, trusted.Grants...)
 	catalog := map[string]any{"modules": a.ExtensionRegistry.Manifest(), "permissions": permissions, "grants": grants, "mfa_verified": actor.MFA, "primary_session_authorized": actor.PrimarySessionAuthorized, "authentication_policy": extensionAuthenticationPolicy(actor)}
+	orgID, _, orgErr := a.getOrgAndUserID(r)
+	catalog["generic_host_access"] = orgErr == nil && a.GenericOrganizationAllowed(opctx, orgID)
 	if disclosure, present := a.extensionCatalogAIProcessing(trusted); present {
 		catalog["ai_processing"] = disclosure
 	}

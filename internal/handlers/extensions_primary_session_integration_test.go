@@ -74,6 +74,7 @@ func TestPrimarySessionDemoTrustedBridgeAndTruthfulStatus(t *testing.T) {
 	require.Equal(t, false, response.Data["mfa_verified"])
 	require.Equal(t, true, response.Data["primary_session_authorized"])
 	require.Equal(t, "primary-session-demo", response.Data["authentication_policy"])
+	require.Equal(t, a.GenericOrganizationAllowed(ctx, claims.OrganizationID), response.Data["generic_host_access"])
 	status := extensionRequest(t, a.Config.JWT.Secret, access, nil)
 	require.NoError(t, a.ExtensionMFAStatus(status))
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(status), &response))

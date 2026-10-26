@@ -24,6 +24,7 @@ import { navigationSections, type NavSection } from './navigation'
 import BrandLogo from '@/components/shared/BrandLogo.vue'
 import { useExtensions } from '@/extensions/useExtensions'
 import { canEnterExtensionRoute } from '@/extensions/router'
+import { extensionSession } from '@/extensions/session'
 
 useI18n() // Enable $t() in template
 
@@ -32,6 +33,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 const { navigation: extensionNavigation } = useExtensions()
 const extensionViewAllowed = computed(() => canEnterExtensionRoute(route, authStore))
+// This is navigation presentation only. Every API retains its server-side gate.
+const genericHostAvailable = computed(() => extensionSession.genericHostAccess !== false)
 const isCollapsed = ref(false)
 const isMobileMenuOpen = ref(false)
 
@@ -88,6 +91,7 @@ function filterItems(items: NavSection['items']) {
 
 // Filter navigation sections based on user permissions
 const navSections = computed(() => {
+  if (!genericHostAvailable.value) return []
   return navigationSections
     .map(section => ({
       ...section,
@@ -172,7 +176,7 @@ const handleLogout = async () => {
       <div class="h-12 md:hidden" />
 
       <!-- Organization Switcher (Super Admin only) -->
-      <OrganizationSwitcher :collapsed="isCollapsed" />
+      <OrganizationSwitcher v-if="genericHostAvailable" :collapsed="isCollapsed" />
 
       <!-- Navigation -->
       <ScrollArea class="flex-1 py-2">

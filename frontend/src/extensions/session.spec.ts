@@ -2,6 +2,19 @@ import { beforeEach, expect, it } from 'vitest'
 import { clearExtensionSession, extensionSession, extensionPermission, extensionScopes, refreshExtensionSession } from './session'
 const catalog = () => ({mfa_verified:true,modules:[{id:'cases',api_version:1}],permissions:['cases:read'],grants:[{permission:'cases:read',unit_id:'east'}]})
 beforeEach(()=>clearExtensionSession('org:user'))
+it('uses the current server generic-host policy and clears it with the session',async()=>{
+ expect(extensionSession.genericHostAccess).toBe(null)
+ await refreshExtensionSession(async()=>({...catalog(),generic_host_access:false}))
+ expect(extensionSession.genericHostAccess).toBe(false)
+ await refreshExtensionSession(async()=>({...catalog(),generic_host_access:true}))
+ expect(extensionSession.genericHostAccess).toBe(true)
+ clearExtensionSession('other:user')
+ expect(extensionSession.genericHostAccess).toBe(null)
+ expect(await refreshExtensionSession(async()=>({...catalog(),generic_host_access:'false'}))).toBe(false)
+ expect(extensionSession.genericHostAccess).toBe(null)
+ await refreshExtensionSession(async()=>catalog())
+ expect(extensionSession.genericHostAccess).toBe(null)
+})
 it('requires a current MFA catalog and exact module permission; never wildcard or admin inference',async()=>{
  expect(extensionPermission('cases:read')).toBe(false)
  expect(await refreshExtensionSession(async()=>catalog())).toBe(true)
