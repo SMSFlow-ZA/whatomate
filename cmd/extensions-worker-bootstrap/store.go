@@ -52,6 +52,10 @@ func (s *Session) failedResult(p Plan, e error) Result {
 	r := s.result(p)
 	r.Outcome = "refused"
 	r.Code = "precondition_or_transaction_refused"
+	var stage *stageRefusal
+	if errors.As(e, &stage) {
+		r.Code = stage.code
+	}
 	if errors.Is(e, errCommitUnknown) {
 		r.Outcome = "unknown-held"
 		r.Code = "commit_unknown"
@@ -65,29 +69,29 @@ func (s *Session) guard(ctx context.Context, q queryer) error {
  AND EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted AND mode='ExclusiveLock' AND classid=($4::bigint>>32)::oid AND objid=($4::bigint&4294967295)::oid AND objsubid=1)
  AND NOT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND backend_type='client backend')`, s.PID, s.Owner, s.Database, protectedschema.LockID).Scan(&ok)
 	if e != nil || !ok {
-		return denied
+		return refuseStage("session_pid_lease_owner_or_clients_refused")
 	}
 	return nil
 }
 func (s *Session) schema(ctx context.Context, p Plan) error {
-	if s.guard(ctx, s.DB) != nil {
-		return denied
+	if e := s.guard(ctx, s.DB); e != nil {
+		return e
 	}
 	var generation int64
 	var release, shape string
 	var protected, pending bool
 	if s.DB.QueryRowContext(ctx, `SELECT generation,release,catalog_sha256 FROM public.whatomate_schema_seal ORDER BY generation DESC LIMIT 1`).Scan(&generation, &release, &shape) != nil || generation != p.Generation || release != p.Release || shape != p.CatalogSHA256 {
-		return denied
+		return refuseStage("latest_seal_refused")
 	}
 	if s.DB.QueryRowContext(ctx, `SELECT protected FROM public.whatomate_protection_state WHERE id=1`).Scan(&protected) != nil || !protected {
-		return denied
+		return refuseStage("protected_state_refused")
 	}
 	if s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM public.whatomate_schema_attempt a WHERE NOT EXISTS(SELECT 1 FROM public.whatomate_schema_seal s WHERE s.release=a.release AND s.catalog_sha256=a.catalog_sha256))`).Scan(&pending) != nil || pending {
-		return denied
+		return refuseStage("pending_installation_refused")
 	}
 	m, e := protectedschema.Catalog(ctx, s.DB, "public")
 	if e != nil || m.SHA256 != p.CatalogSHA256 {
-		return denied
+		return refuseStage("actual_catalog_refused")
 	}
 	return s.guard(ctx, s.DB)
 }
@@ -297,17 +301,26 @@ func writeHost(ctx context.Context, tx *sql.Tx, p Plan) error {
 }
 func (s *Session) Execute(ctx context.Context, p Plan, mode string) Result {
 	fail := func(e error) Result { r := s.failedResult(p, e); r.Mode = mode; return r }
-	if p.Validate() != nil || s.DB == nil || s.schema(ctx, p) != nil || workerRole(ctx, s.DB, p) != nil {
-		return fail(denied)
+	if p.Validate() != nil || s.DB == nil {
+		return fail(refuseStage("plan_or_session_refused"))
+	}
+	if e := s.schema(ctx, p); e != nil {
+		return fail(e)
+	}
+	if e := workerRole(ctx, s.DB, p); e != nil {
+		return fail(refuseStage("processing_role_refused"))
 	}
 	actual, e := captureACL(ctx, s.DB)
 	if e != nil {
-		return fail(e)
+		return fail(refuseStage("acl_observation_refused"))
 	}
 	if mode == "inspect" {
 		var definition string
-		if s.DB.QueryRowContext(ctx, `SELECT pg_get_functiondef(to_regprocedure($1))`, signature).Scan(&definition) != nil || s.guard(ctx, s.DB) != nil {
-			return fail(denied)
+		if s.DB.QueryRowContext(ctx, `SELECT pg_get_functiondef(to_regprocedure($1))`, signature).Scan(&definition) != nil {
+			return fail(refuseStage("fixed_function_observation_refused"))
+		}
+		if e := s.guard(ctx, s.DB); e != nil {
+			return fail(e)
 		}
 		r := s.result(p)
 		r.Mode = mode

@@ -31,24 +31,24 @@ type Connection struct {
 func openOwner(ctx context.Context, c Connection, p Plan) (*Session, error) {
 	database, owner, _, _ := p.names()
 	if c.Version != 1 || !exactText(c.Host, 253) || c.Port < 1 || c.Port > 65535 || c.Database != database || c.User != owner || c.SSLMode != "verify-full" || c.TimeoutSeconds < 1 || c.TimeoutSeconds > 120 {
-		return nil, denied
+		return nil, refuseStage("owner_connection_fields_refused")
 	}
 	for _, key := range []string{"PGSERVICE", "PGSERVICEFILE", "PGPASSFILE", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGTARGETSESSIONATTRS"} {
 		if _, ok := os.LookupEnv(key); ok {
-			return nil, denied
+			return nil, refuseStage("owner_ambient_pg_refused")
 		}
 	}
 	ca, e := privateBytes(c.CAFile, 1024*1024)
 	if e != nil {
-		return nil, denied
+		return nil, refuseStage("owner_ca_custody_refused")
 	}
 	password, e := privateBytes(c.PasswordFile, 4096)
 	if e != nil || len(password) == 0 {
-		return nil, denied
+		return nil, refuseStage("owner_password_custody_refused")
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(ca) {
-		return nil, denied
+		return nil, refuseStage("owner_ca_parse_refused")
 	}
 	// All security-relevant fields override PG* defaults. No service/passfile or
 	// fallback TLS mode is accepted, and no password enters argv or diagnostics.
@@ -56,7 +56,7 @@ func openOwner(ctx context.Context, c Connection, p Plan) (*Session, error) {
 	u.RawQuery = "sslmode=verify-full&connect_timeout=10"
 	cfg, e := pgx.ParseConfig(u.String())
 	if e != nil {
-		return nil, denied
+		return nil, refuseStage("owner_dsn_parse_refused")
 	}
 	cfg.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: c.Host}
 	cfg.Fallbacks = nil
@@ -75,18 +75,19 @@ func openOwner(ctx context.Context, c Connection, p Plan) (*Session, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
-	fail := func() (*Session, error) { db.Close(); return nil, denied }
+	fail := func(code string) (*Session, error) { db.Close(); return nil, refuseStage(code) }
 	var pid int
 	var held, ssl bool
 	if db.QueryRowContext(ctx, `SELECT pg_backend_pid(),pg_try_advisory_lock($1)`, protectedschema.LockID).Scan(&pid, &held) != nil || !held {
-		return fail()
+		return fail("owner_connection_or_exclusive_lease_refused")
 	}
 	if db.QueryRowContext(ctx, `SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()`).Scan(&ssl) != nil || !ssl {
-		return fail()
+		return fail("owner_ssl_observation_refused")
 	}
 	s := &Session{DB: db, PID: pid, Owner: owner, Database: database}
-	if s.guard(ctx, db) != nil {
-		return fail()
+	if e := s.guard(ctx, db); e != nil {
+		db.Close()
+		return nil, e
 	}
 	return s, nil
 }
