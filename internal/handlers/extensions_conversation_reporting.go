@@ -126,11 +126,7 @@ func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 			retriever.Vectors = vectors
 		}
 		result := (ai.Service{Catalog: retriever, Provider: provider, Authorizer: auth, Now: time.Now}).Answer(ctx, principal, c.ConversationEmployeeAudience, question)
-		answer := conversation.Answer{Text: result.Text, Handoff: result.Handoff}
-		for _, source := range result.Citations {
-			answer.Citations = append(answer.Citations, source.Reference)
-		}
-		return answer, nil
+		return extensionConversationAnswer(result), nil
 	}
 	service := &conversation.Service{DB: db, Config: cfg}
 	a.ExtensionConversation = service
