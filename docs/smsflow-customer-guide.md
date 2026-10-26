@@ -12,6 +12,12 @@ send. An available channel menu or saved credential does not mean dispatch has
 been enabled. If a host-level sending hold is active, ask support; do not create
 replacement messages to work around it.
 
+**Settings → Channels** shows the host's sending status. While paused, you can
+save connection settings or stop pending dispatch, but **Enable dispatch** is
+unavailable. If status cannot be checked, enablement stays unavailable until
+**Refresh status** succeeds. A saved connection can still be enabled internally
+while the host hold prevents sending; the host status takes precedence.
+
 The initial managed pilot supports **outgoing SMS and delivery reports**.
 Recipient SMS replies and SMS reply bots remain unavailable until a reply-capable
 route has been verified. Do not ask recipients to reply to a one-way SMS, including
@@ -21,8 +27,8 @@ opt-outs, do not start a campaign.
 
 An existing WhatsApp bot may send a one-way SMS action or use an explicitly
 configured SMS fallback. This does not enable an inbound SMS bot or an SMS prompt
-that waits for a reply. Keep the connection's **SMS reply bot** set to **No automatic
-replies** for a one-way route.
+that waits for a reply. The **SMS reply bot** control is only shown for a confirmed
+inbound route. Saving a one-way connection removes any stale reply-bot binding.
 
 ## Connect your account
 
@@ -42,7 +48,7 @@ replies** for a one-way route.
    administrator to replace that connection with the correct one. After a
    disabled connection validates successfully, deliberately choose **Enable
    dispatch** when you are ready to send.
-5. Check whether it says **Replies enabled** or **No inbound route**. One-way
+5. Check whether it says **Reply-capable route** or **One-way SMS · No inbound route**. One-way
    accounts can send messages. Replies and reply bots require a verified
    reply-capable SMSFlow route; entering a credential alone cannot enable them.
 
