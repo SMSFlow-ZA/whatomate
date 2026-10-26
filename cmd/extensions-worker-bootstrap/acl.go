@@ -164,7 +164,16 @@ func expectedACL(before Observation, p Plan) (Observation, error) {
 	}
 	add := func(kind, obj, grantee, priv string) error {
 		r := index[kind+"\x00"+obj]
-		if r == nil || r.Owner != dbowner {
+		if r == nil {
+			return denied
+		}
+		grantor := dbowner
+		if kind == "namespace" && obj == "public" {
+			if r.Owner != dbowner && r.Owner != "pg_database_owner" {
+				return denied
+			}
+			grantor = r.Owner
+		} else if r.Owner != dbowner {
 			return denied
 		}
 		for _, g := range r.Grants {
@@ -172,7 +181,7 @@ func expectedACL(before Observation, p Plan) (Observation, error) {
 				return denied
 			}
 		}
-		r.Grants = append(r.Grants, ACLGrant{dbowner, grantee, priv, false})
+		r.Grants = append(r.Grants, ACLGrant{grantor, grantee, priv, false})
 		r.Explicit = true
 		return nil
 	}
