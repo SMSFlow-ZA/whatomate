@@ -4,10 +4,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // SHA-1 is mandated by the coturn TURN REST API (RFC draft)
 	"encoding/base64"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
@@ -65,6 +67,9 @@ type ExtensionsConfig struct {
 	Required        string `koanf:"required"`
 	RequiredInbound string `koanf:"required_inbound"`
 	ProtectedMode   bool   `koanf:"protected_mode"`
+	// Temporary policy for one dedicated demo organization. Empty keeps MFA
+	// mandatory; this grants no permissions and never represents factor proof.
+	PrimarySessionDemoOrganizationID string `koanf:"primary_session_demo_organization_id"`
 	// SecurityKey is a base64-encoded 32-byte secret supplied by the operator.
 	SecurityKey                string `koanf:"security_key"`
 	MFAFreshnessSeconds        int    `koanf:"mfa_freshness_seconds"`
@@ -98,6 +103,17 @@ type ExtensionsConfig struct {
 	EscalationWorkerIDs                 string   `koanf:"escalation_worker_ids"`
 	RoutingPrimaryIDs                   string   `koanf:"routing_primary_ids"`
 	RoutingBackupIDs                    string   `koanf:"routing_backup_ids"`
+}
+
+func (c ExtensionsConfig) ValidatePrimarySessionDemo() error {
+	if c.PrimarySessionDemoOrganizationID == "" {
+		return nil
+	}
+	id, err := uuid.Parse(c.PrimarySessionDemoOrganizationID)
+	if err != nil || id == uuid.Nil || id.String() != c.PrimarySessionDemoOrganizationID {
+		return fmt.Errorf("primary session demo requires one canonical nonzero organization UUID")
+	}
+	return nil
 }
 
 type ChannelsConfig struct {
@@ -311,6 +327,9 @@ func Load(configPath string) (*Config, error) {
 
 	// Set defaults
 	setDefaults(&cfg)
+	if err := cfg.Extensions.ValidatePrimarySessionDemo(); err != nil {
+		return nil, err
+	}
 	if err := ValidatePlan(&cfg); err != nil {
 		return nil, err
 	}

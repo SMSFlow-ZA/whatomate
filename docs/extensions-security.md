@@ -1,5 +1,27 @@
 # Extension MFA and emergency access
 
+## Explicit demo primary-session policy
+
+MFA remains the default for protected extensions. A dedicated synthetic demo can
+temporarily opt out with trusted server configuration
+`extensions.primary_session_demo_organization_id` set to one canonical, nonzero
+organization UUID. An empty setting retains the default; malformed values stop
+startup. This exception is unsuitable as evidence of production MFA enforcement.
+
+The configured organization still requires a signed, current access or WebSocket
+session, active identity, organization membership and explicit current grants.
+API keys and request-supplied policy flags cannot authorize it. All module scope,
+session revocation and protected-surface checks remain active. Refresh does not
+manufacture MFA proof. Actual MFA state stays separate from primary-session
+authorization, and factor replacement/revocation and emergency access still
+require their original verified-factor permissions.
+
+The authenticated catalog reports `authentication_policy` (`mfa` or
+`primary-session-demo`), `primary_session_authorized` and actual `mfa_verified`.
+The browser displays the demo exception and invalidates pending protected data
+when its policy changes. Clear the setting and restart to restore MFA enforcement;
+existing authenticator enrollment and recovery codes are retained.
+
 `pkg/extensions/security` provides opt-in PostgreSQL-backed application TOTP MFA and separately approved, time-bound emergency access. The host integration now provides authenticated enrollment, challenge, recovery and revocation APIs, a profile-linked MFA screen, signed session proof and emergency routes. Protected deployment remains blocked until the complete host/module acceptance gates pass.
 
 ## TOTP and enrollment

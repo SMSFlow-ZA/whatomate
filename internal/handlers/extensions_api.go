@@ -39,7 +39,7 @@ func (a *App) ExtensionDomainHandler(r *fastglue.Request) error {
 	if e != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Verified extension session required", nil, "extension_denied")
 	}
-	trusted, e := a.ExtensionAccess.Load(opctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, Permissions: actor.Permissions})
+	trusted, e := a.ExtensionAccess.Load(opctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, PrimarySessionAuthorized: actor.PrimarySessionAuthorized, Permissions: actor.Permissions})
 	if e != nil {
 		return r.SendErrorEnvelope(503, "Extension authorization unavailable", nil, "")
 	}
@@ -85,13 +85,13 @@ func (a *App) ExtensionCatalog(r *fastglue.Request) error {
 	if a.ExtensionRegistry == nil || a.ExtensionAccess == nil {
 		return r.SendErrorEnvelope(503, "Module catalog unavailable", nil, "")
 	}
-	trusted, e := a.ExtensionAccess.Load(opctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, Permissions: actor.Permissions})
+	trusted, e := a.ExtensionAccess.Load(opctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, PrimarySessionAuthorized: actor.PrimarySessionAuthorized, Permissions: actor.Permissions})
 	if e != nil {
 		return r.SendErrorEnvelope(503, "Scoped permissions unavailable", nil, "")
 	}
 	permissions := append([]string{}, trusted.Permissions...)
 	grants := append([]addonapi.Grant{}, trusted.Grants...)
-	catalog := map[string]any{"modules": a.ExtensionRegistry.Manifest(), "permissions": permissions, "grants": grants, "mfa_verified": true}
+	catalog := map[string]any{"modules": a.ExtensionRegistry.Manifest(), "permissions": permissions, "grants": grants, "mfa_verified": actor.MFA, "primary_session_authorized": actor.PrimarySessionAuthorized, "authentication_policy": extensionAuthenticationPolicy(actor)}
 	if disclosure, present := a.extensionCatalogAIProcessing(trusted); present {
 		catalog["ai_processing"] = disclosure
 	}

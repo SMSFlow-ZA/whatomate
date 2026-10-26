@@ -15,7 +15,11 @@ type Actor struct {
 	SessionID      string
 	MFA            bool
 	MFAGeneration  uint64
+	// Trusted host policy only; this is not MFA proof or a token claim.
+	PrimarySessionAuthorized bool
 }
+
+func (a Actor) HasProtectedAuthentication() bool { return a.MFA || a.PrimarySessionAuthorized }
 
 func (a Actor) Has(permission string) bool {
 	for _, p := range a.Permissions {

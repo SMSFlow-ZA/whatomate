@@ -17,6 +17,7 @@ import { authService } from '@/services/api'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ManagedPlanStatus from './ManagedPlanStatus.vue'
+import AuthenticationPolicyNotice from './AuthenticationPolicyNotice.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection } from './navigation'
@@ -300,6 +301,7 @@ const handleLogout = async () => {
     <!-- Main content -->
     <main id="main-content" class="flex flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
       <ManagedPlanStatus />
+      <AuthenticationPolicyNotice />
       <div class="flex-1 min-h-0">
       <RouterView :key="route.meta.extensionModule ? authStore.extensionRevision : 'host'" v-if="extensionViewAllowed" v-slot="{ Component, route: viewRoute }">
         <Transition name="page" mode="out-in">

@@ -18,6 +18,9 @@ func validateExtensionConversationConfig(c config.ExtensionsConfig) error {
 // Provider validation and persistent database protection are separate mandatory
 // steps; passing this configuration check alone never activates protected mode.
 func validateProtectedExtensionSettings(c config.ExtensionsConfig) error {
+	if err := c.ValidatePrimarySessionDemo(); err != nil {
+		return err
+	}
 	if !c.ProtectedMode || c.SyntheticDevelopment || c.AIProvider != "https" || c.MFAFreshnessSeconds <= 0 || c.MFAFreshnessSeconds > 3600 || c.ReportsMinGroup < 2 {
 		return fmt.Errorf("protected ER release requires production AI, fresh MFA and disclosure policy")
 	}

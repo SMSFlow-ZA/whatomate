@@ -643,6 +643,7 @@ func TestApp_SwitchOrg_Success(t *testing.T) {
 		"organization_id": org2.ID.String(),
 	})
 	testutil.SetPathParam(req, "user_id", user.ID)
+	attachSignedAccessSession(t, app, req, user)
 
 	err := app.SwitchOrg(req)
 	require.NoError(t, err)
@@ -677,6 +678,7 @@ func TestApp_SwitchOrg_SuperAdmin(t *testing.T) {
 		"organization_id": org2.ID.String(),
 	})
 	testutil.SetPathParam(req, "user_id", superAdmin.ID)
+	attachSignedAccessSession(t, app, req, superAdmin)
 
 	err := app.SwitchOrg(req)
 	require.NoError(t, err)

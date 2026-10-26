@@ -40,3 +40,15 @@ it('does not restamp a retried request after the account generation changes',asy
  const request={_extensionRevision:previous} as Parameters<typeof api.get>[1]
  await expect(api.get('/extensions/cases',request)).rejects.toThrow('Extension session changed')
 })
+
+it('discards a pending protected response after a policy change with unchanged grants',async()=>{
+ let finish!:()=>void
+ api.defaults.adapter=config=>new Promise(resolve=>{finish=()=>resolve({data:{marker:'old-policy'},status:200,statusText:'OK',headers:{},config})})
+ const request=api.get('/extensions/cases')
+ await Promise.resolve();await Promise.resolve()
+ await refreshExtensionSession(async()=>({...catalog(),mfa_verified:false,authentication_policy:'primary-session-demo',primary_session_authorized:true}))
+ finish()
+ await expect(request).rejects.toThrow('Extension session changed')
+ expect(extensionSession.authenticationPolicy).toBe('primary-session-demo')
+ expect(extensionSession.mfaVerified).toBe(false)
+})

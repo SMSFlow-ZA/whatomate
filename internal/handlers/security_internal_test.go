@@ -30,6 +30,9 @@ func TestSecurityTokens_PurposeStateAndSessionRevocation(t *testing.T) {
 	}
 	wsreq := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(wsreq, org.ID, user.ID)
+	accessClaims, err := middleware.ParseToken(app.Config.JWT.Secret, access, "access")
+	require.NoError(t, err)
+	wsreq.RequestCtx.SetUserValue(middleware.ContextKeyClaims, accessClaims)
 	require.NoError(t, app.GetWSToken(wsreq))
 	var response struct {
 		Data map[string]string `json:"data"`

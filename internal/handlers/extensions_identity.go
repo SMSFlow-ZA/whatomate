@@ -49,7 +49,7 @@ func (a *App) refreshExtensionActor(ctx context.Context, original addonapi.Actor
 	if e != nil || current.OrganizationID != original.OrganizationID || current.UserID != original.UserID || current.SessionID != original.SessionID {
 		return addonapi.Actor{}, addonapi.ErrDenied
 	}
-	return a.ExtensionAccess.Load(ctx, addonapi.Actor{OrganizationID: current.OrganizationID, UserID: current.UserID, SessionID: current.SessionID, MFA: current.MFA, Permissions: current.Permissions})
+	return a.ExtensionAccess.Load(ctx, addonapi.Actor{OrganizationID: current.OrganizationID, UserID: current.UserID, SessionID: current.SessionID, MFA: current.MFA, PrimarySessionAuthorized: current.PrimarySessionAuthorized, Permissions: current.Permissions})
 }
 
 func (a *App) authorizeExtensionKnowledge(ctx context.Context, org, user, permission, audience string) bool {

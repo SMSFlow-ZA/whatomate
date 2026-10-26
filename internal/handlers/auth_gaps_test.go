@@ -8,13 +8,31 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
 )
+
+// Mint-boundary fixtures use a verified signed access token and its live Redis
+// session/family. SetAuthContext alone deliberately remains API-key equivalent.
+func attachSignedAccessSession(t *testing.T, app *handlers.App, req *fastglue.Request, user *models.User) {
+	t.Helper()
+	refresh := generateRefreshTokenWithJTI(t, app.Config.JWT.Secret, user, uuid.NewString(), time.Hour)
+	claims, err := middleware.ParseToken(app.Config.JWT.Secret, refresh, "refresh")
+	require.NoError(t, err)
+	claims.Subject = "access"
+	claims.Audience = jwt.ClaimStrings{"whatomate:access"}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(app.Config.JWT.Secret))
+	require.NoError(t, err)
+	verified, err := middleware.ParseToken(app.Config.JWT.Secret, signed, "access")
+	require.NoError(t, err)
+	req.RequestCtx.SetUserValue(middleware.ContextKeyClaims, verified)
+}
 
 // generateRefreshTokenWithJTI creates a refresh JWT whose claims.ID matches the
 // provided JTI, so production's single-use Redis check actually fires.
@@ -67,6 +85,7 @@ func TestApp_SwitchOrg_AccessTokenCarriesUserOrgRole(t *testing.T) {
 		"organization_id": targetOrg.ID.String(),
 	})
 	testutil.SetPathParam(req, "user_id", user.ID)
+	attachSignedAccessSession(t, app, req, user)
 
 	require.NoError(t, app.SwitchOrg(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
@@ -189,6 +208,7 @@ func TestApp_GetWSToken_Success(t *testing.T) {
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
+	attachSignedAccessSession(t, app, req, user)
 
 	require.NoError(t, app.GetWSToken(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))

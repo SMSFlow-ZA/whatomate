@@ -17,6 +17,9 @@ import (
 // Only trusted compiled factories may contribute a domain API. Configuration
 // selects existing modules, never an executable URL, binary or arbitrary handler.
 func (a *App) initializeCompiledModules() error {
+	if err := a.Config.Extensions.ValidatePrimarySessionDemo(); err != nil {
+		return err
+	}
 	if a.ExtensionSecurity != nil {
 		found := false
 		for _, d := range a.ExtensionRegistry.Manifest() {
@@ -85,10 +88,10 @@ func (a *App) initializeCompiledModules() error {
 				return e
 			}
 			if e = a.ExtensionGuard.Register("cases", func(ctx context.Context, actor ext.Actor, p ext.Protection, action string) error {
-				if !actor.MFA || action != "read" {
+				if !actor.HasProtectedAuthentication() || action != "read" {
 					return ext.ErrDenied
 				}
-				scoped, err := access.Load(ctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, Permissions: actor.Permissions})
+				scoped, err := access.Load(ctx, addonapi.Actor{OrganizationID: actor.OrganizationID, UserID: actor.UserID, SessionID: actor.SessionID, MFA: actor.MFA, PrimarySessionAuthorized: actor.PrimarySessionAuthorized, Permissions: actor.Permissions})
 				if err != nil {
 					return ext.ErrDenied
 				}

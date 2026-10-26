@@ -21,8 +21,8 @@ func (a *App) extensionFreshness() time.Duration {
 	return 12 * time.Hour
 }
 
-// ExtensionActor is the trusted protected-data bridge. API keys and primary-only
-// password/SSO sessions cannot construct a protected actor.
+// ExtensionActor is the trusted protected-data bridge. API keys never construct
+// a protected actor; primary sessions require the exact trusted demo policy.
 func (a *App) ExtensionActor(r *fastglue.Request) (extensions.Actor, error) {
 	claims, _ := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
 	return a.ExtensionActorFromClaims(context.WithoutCancel(r.RequestCtx), claims)
@@ -33,16 +33,37 @@ func (a *App) ExtensionActor(r *fastglue.Request) (extensions.Actor, error) {
 // this on every delivery, never cache an Actor or extend its MFA timestamp.
 func (a *App) ExtensionActorFromClaims(ctx context.Context, claims *middleware.JWTClaims) (extensions.Actor, error) {
 	actor, err := a.extensionPrimaryActor(ctx, claims)
-	if err != nil || !actor.MFA {
+	if err != nil || !actor.HasProtectedAuthentication() {
 		return extensions.Actor{}, extensions.ErrDenied
 	}
 	return actor, nil
+}
+
+func (a *App) extensionPrimarySessionDemoAllowed(org uuid.UUID) bool {
+	return org != uuid.Nil && a.Config != nil && a.Config.Extensions.ValidatePrimarySessionDemo() == nil && a.Config.Extensions.PrimarySessionDemoOrganizationID == org.String()
+}
+
+func extensionAuthenticationPolicy(actor extensions.Actor) string {
+	if actor.PrimarySessionAuthorized {
+		return "primary-session-demo"
+	}
+	return "mfa"
+}
+
+// Refresh already validates the signed refresh session and subsequently checks
+// CurrentIdentity. This changes only the configured demo's factor requirement;
+// it does not authorize an actor or manufacture/renew MFA proof in the token.
+func (a *App) extensionRefreshRequiresMFA(claims *middleware.JWTClaims) bool {
+	return claims != nil && claims.MFAAt != nil && !a.extensionPrimarySessionDemoAllowed(claims.OrganizationID)
 }
 
 func (a *App) extensionPrimaryActor(ctx context.Context, claims *middleware.JWTClaims) (extensions.Actor, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if a.ExtensionSecurity == nil || claims == nil || (claims.Subject != "access" && claims.Subject != "ws") || claims.UserID == uuid.Nil || claims.OrganizationID == uuid.Nil {
+		return extensions.Actor{}, extensions.ErrDenied
+	}
+	if a.Config != nil && a.Config.Extensions.ValidatePrimarySessionDemo() != nil {
 		return extensions.Actor{}, extensions.ErrDenied
 	}
 	if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
@@ -53,6 +74,16 @@ func (a *App) extensionPrimaryActor(ctx context.Context, claims *middleware.JWTC
 		return extensions.Actor{}, err
 	}
 	actor := extensions.Actor{OrganizationID: claims.OrganizationID.String(), UserID: user.ID.String(), SessionID: claims.SessionID}
+	demo := a.extensionPrimarySessionDemoAllowed(claims.OrganizationID)
+	if demo && user.OrganizationID != claims.OrganizationID {
+		// CurrentIdentity's ordinary host superadmin organization shortcut is not
+		// authority for protected data under the demo policy.
+		var membership models.UserOrganization
+		if err := a.DB.WithContext(ctx).Where("user_id = ? AND organization_id = ?", user.ID, claims.OrganizationID).First(&membership).Error; err != nil {
+			return extensions.Actor{}, extensions.ErrDenied
+		}
+		user.RoleID = membership.RoleID
+	}
 	// Read durable explicit grants. HasPermission has administrator shortcuts and
 	// cached grants, neither of which is appropriate for protected extensions.
 	if user.RoleID != nil {
@@ -64,12 +95,15 @@ func (a *App) extensionPrimaryActor(ctx context.Context, claims *middleware.JWTC
 			actor.Permissions = append(actor.Permissions, p.Resource+":"+p.Action)
 		}
 	}
+	// This policy bit is assigned only after durable session, identity,
+	// membership and explicit role permissions have all been rechecked.
+	actor.PrimarySessionAuthorized = demo
 	if claims.MFAFresh(time.Now(), a.extensionFreshness()) {
 		status, err := a.ExtensionSecurity.Generation(ctx, actor.OrganizationID, actor.UserID)
-		if err != nil {
+		if err != nil && !actor.PrimarySessionAuthorized {
 			return extensions.Actor{}, err
 		}
-		actor.MFA = status.Enabled() && status.Generation() == claims.MFAGeneration
+		actor.MFA = err == nil && status.Enabled() && status.Generation() == claims.MFAGeneration
 		if actor.MFA {
 			actor.MFAGeneration = claims.MFAGeneration
 		}
@@ -97,7 +131,7 @@ func (a *App) ExtensionMFAStatus(r *fastglue.Request) error {
 		return extensionSecurityError(r, err)
 	}
 	r.RequestCtx.Response.Header.Set("Cache-Control", "no-store")
-	return r.SendEnvelope(map[string]any{"enabled": status.Enabled(), "generation": status.Generation(), "verified": actor.MFA})
+	return r.SendEnvelope(map[string]any{"enabled": status.Enabled(), "generation": status.Generation(), "verified": actor.MFA, "required": !actor.PrimarySessionAuthorized, "authentication_policy": extensionAuthenticationPolicy(actor)})
 }
 func (a *App) ExtensionMFABegin(r *fastglue.Request) error {
 	actor, _, err := a.extensionPrimary(r)
@@ -168,6 +202,9 @@ func (a *App) ExtensionMFARevoke(r *fastglue.Request) error {
 	actor, err := a.ExtensionActor(r)
 	if err != nil {
 		return extensionSecurityError(r, err)
+	}
+	if !actor.MFA {
+		return extensionSecurityError(r, extensions.ErrDenied)
 	}
 	var body struct {
 		Generation uint64 `json:"generation"`

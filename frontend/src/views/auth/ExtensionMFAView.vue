@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { api, AuthenticationRefreshedError } from '@/services/api'
 
-const status = ref<{enabled:boolean;verified:boolean;generation:number} | null>(null)
+const status = ref<{enabled:boolean;verified:boolean;generation:number;required?:boolean;authentication_policy?:string} | null>(null)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -26,7 +26,9 @@ async function run(operation: () => Promise<void>) {
         error.value = ''
         notice.value = status.value?.verified
           ? 'Current session is MFA verified.'
-          : 'Session refreshed. Enter a new authenticator code.'
+          : status.value?.required === false
+            ? 'Session refreshed. MFA is optional for demo access.'
+            : 'Session refreshed. Enter a new authenticator code.'
       } catch { /* Keep the failure visible; do not retry a one-time operation. */ }
     }
   }
@@ -64,11 +66,12 @@ onBeforeUnmount(() => { enrollment.value = null; code.value = ''; recoveryCodes.
 <template>
   <main class="max-w-2xl mx-auto p-6 space-y-6">
     <h1 class="text-2xl font-semibold">Multi-factor authentication</h1>
-    <p>Protected extensions require your password or SSO session and a current authenticator or recovery code. Permissions are checked by the server.</p>
+    <p v-if="status?.required === false">MFA is optional for demo access. You can still verify an authenticator or recovery code. Permissions are checked by the server.</p>
+    <p v-else>Protected extensions require your password or SSO session and a current authenticator or recovery code. Permissions are checked by the server.</p>
     <p v-if="error" role="alert" class="text-destructive">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <section v-if="status" class="space-y-4">
-      <p>Authenticator: {{ status.enabled ? 'Enabled' : 'Not enabled' }}. This session: {{ status.verified ? 'MFA verified' : 'MFA required for protected access' }}.</p>
+      <p>Authenticator: {{ status.enabled ? 'Enabled' : 'Not enabled' }}. This session: {{ status.verified ? 'MFA verified' : status.required === false ? 'MFA not verified; optional for demo access' : 'MFA required for protected access' }}.</p>
       <button v-if="!status.enabled || status.verified" data-action="enroll" class="border rounded px-4 py-2" :disabled="busy" @click="begin">{{ status.enabled ? 'Replace authenticator' : 'Set up authenticator' }}</button>
       <section v-if="enrollment" class="space-y-3">
         <h2 class="font-semibold">Add an authenticator account</h2>

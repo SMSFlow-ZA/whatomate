@@ -300,7 +300,7 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 	if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Refresh token has been revoked", nil, "")
 	}
-	if claims.MFAAt != nil {
+	if a.extensionRefreshRequiresMFA(claims) {
 		if err := a.extensionValidateMFA(ctx, claims); err != nil {
 			return extensionSecurityError(r, err)
 		}
@@ -504,14 +504,19 @@ func (a *App) SwitchOrg(r *fastglue.Request) error {
 	}
 
 	// Generate new tokens with the target org
-	var expectedVersions []string
-	if claims, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims); ok {
-		if claims.AuthStamp != user.AuthStamp {
-			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
-		}
-		expectedVersions = append(expectedVersions, claims.SessionVersion, claims.SessionFamily)
+	claims, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
+	if !ok || claims == nil || claims.Subject != "access" || claims.UserID != user.ID {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Signed access session required", nil, "")
 	}
-	accessToken, err := a.generateAccessToken(&user, expectedVersions...)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.RequestCtx), 5*time.Second)
+	defer cancel()
+	if middleware.ValidateSession(ctx, a.Redis, claims) != nil || claims.AuthStamp != user.AuthStamp {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+	}
+	if _, err := middleware.CurrentIdentity(a.DB.WithContext(ctx), claims); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account unavailable", nil, "")
+	}
+	accessToken, err := a.generateAccessToken(&user, claims.SessionVersion, claims.SessionFamily)
 	if err != nil {
 		if errors.Is(err, middleware.ErrSessionRevoked) {
 			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
@@ -604,26 +609,22 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 	}
 	user.OrganizationID = orgID
 	session, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
-	if !ok {
-		access, err := a.generateAccessToken(user)
-		if err != nil {
-			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
-		}
-		session, err = middleware.ParseToken(a.Config.JWT.Secret, access, "access")
-		if err != nil {
-			return err
-		}
+	if !ok || session == nil || session.Subject != "access" || session.UserID != user.ID {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Signed access session required", nil, "")
 	}
-	if session.AuthStamp != user.AuthStamp {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.RequestCtx), 5*time.Second)
+	defer cancel()
+	if middleware.ValidateSession(ctx, a.Redis, session) != nil || session.AuthStamp != user.AuthStamp {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Session has been revoked", nil, "")
+	}
+	if _, err := middleware.CurrentIdentity(a.DB.WithContext(ctx), session); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account unavailable", nil, "")
 	}
 	jti := uuid.NewString()
 	signed, err := a.signPurposeToken(user, "ws", session.SessionID, session.SessionVersion, jti, 30*time.Second, session.SessionFamily)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	signed, err = a.preserveMFA(signed, session, "ws")
 	if err != nil {
 		return extensionSecurityError(r, err)
