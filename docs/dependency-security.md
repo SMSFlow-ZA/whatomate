@@ -6,9 +6,15 @@ unrelated upstream application upgrade.
 
 ## Go dependencies
 
-The module requires Go 1.26. The managed Dockerfile pins Go 1.26.9 by image digest;
+The module requires Go 1.26. The managed Dockerfile pins Go 1.26.10 by image digest;
 use that patched compiler for release builds, rather than only the minimum module
 version. See the [Go release history](https://go.dev/doc/devel/release).
+
+The 26 October release check identified [GO-2026-6809 / CVE-2026-111943](https://pkg.go.dev/vuln/GO-2026-6809)
+in the former 1.26.9 compiler. The [official 1.26.10 security release](https://go.dev/doc/devel/release#go1.26.10)
+distrusts affected CA intermediate certificates in `crypto/x509`. The managed
+builder and CI toolchain use that patch without changing the application baseline
+or module graph. The pre-patch candidate must not be promoted as the patched image.
 
 The 15 October 2026 review updated `golang.org/x/crypto` to 0.57.0 and
 `golang.org/x/net` to 0.60.0, with their required transitive versions. The official
