@@ -80,15 +80,15 @@ type queryer interface {
 // code and contains no passwords. Explicit ACL nullness is retained; privileges
 // are normalized instead of accepting a caller's opaque expected-after hash.
 const ACLObservationSQL = `WITH objects AS (
- SELECT 'namespace' kind,nspname object,pg_get_userbyid(nspowner) owner,nspacl acl,'' detail FROM pg_namespace WHERE nspname='public'
- UNION ALL SELECT 'database',datname,pg_get_userbyid(datdba),datacl,'' FROM pg_database WHERE datname=current_database()
+ SELECT 'namespace' kind,nspname::text object,pg_get_userbyid(nspowner) owner,nspacl acl,'' detail FROM pg_namespace WHERE nspname='public'
+ UNION ALL SELECT 'database',datname::text,pg_get_userbyid(datdba),datacl,'' FROM pg_database WHERE datname=current_database()
  UNION ALL SELECT 'relation',n.nspname||'.'||c.relname,pg_get_userbyid(c.relowner),c.relacl,'' FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
  UNION ALL SELECT 'column',n.nspname||'.'||c.relname||'.'||a.attname,pg_get_userbyid(c.relowner),a.attacl,'' FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND a.attnum>0 AND NOT a.attisdropped
  UNION ALL SELECT 'routine',n.nspname||'.'||p.proname||'('||replace(oidvectortypes(p.proargtypes),', ', ',')||')',pg_get_userbyid(p.proowner),p.proacl,'' FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' OR (n.nspname='pg_catalog' AND p.proacl IS NOT NULL)
  UNION ALL SELECT 'default',d.defaclrole::text||':'||d.defaclnamespace::text||':'||d.defaclobjtype::text,pg_get_userbyid(d.defaclrole),d.defaclacl,'' FROM pg_default_acl d
 )
 SELECT * FROM (SELECT kind,object,owner,acl IS NOT NULL,COALESCE((SELECT json_agg(json_build_object('grantor',pg_get_userbyid(x.grantor),'grantee',CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,'privilege',x.privilege_type,'grantable',x.is_grantable)) FROM aclexplode(acl) x),'[]'::json)::text,detail FROM objects
-UNION ALL SELECT 'role',rolname,'',false,'[]',json_build_object('super',rolsuper,'inherit',rolinherit,'createrole',rolcreaterole,'createdb',rolcreatedb,'login',rolcanlogin,'replication',rolreplication,'bypassrls',rolbypassrls,'connlimit',rolconnlimit,'validuntil',rolvaliduntil::text,'config',rolconfig)::text FROM pg_roles
+UNION ALL SELECT 'role',rolname::text,'',false,'[]',json_build_object('super',rolsuper,'inherit',rolinherit,'createrole',rolcreaterole,'createdb',rolcreatedb,'login',rolcanlogin,'replication',rolreplication,'bypassrls',rolbypassrls,'connlimit',rolconnlimit,'validuntil',rolvaliduntil::text,'config',rolconfig)::text FROM pg_roles
 UNION ALL SELECT 'membership',roleid::text||':'||member::text||':'||grantor::text,'',false,'[]',json_build_object('role',pg_get_userbyid(roleid),'member',pg_get_userbyid(member),'grantor',pg_get_userbyid(grantor),'admin',admin_option,'inherit',inherit_option,'set',set_option)::text FROM pg_auth_members
 UNION ALL SELECT 'setting',setdatabase::text||':'||setrole::text,'',false,'[]',to_json(setconfig)::text FROM pg_db_role_setting) observed ORDER BY kind COLLATE "C",object COLLATE "C"`
 
