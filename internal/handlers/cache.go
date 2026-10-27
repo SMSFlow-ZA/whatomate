@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"gorm.io/gorm"
@@ -264,17 +265,51 @@ func (a *App) InvalidateWhatsAppAccountCache(phoneID string) {
 	a.Redis.Del(ctx, cacheKey)
 }
 
-// getWebhooksCached retrieves active webhooks for an organization from cache or database
+// webhookCache is server-only: the public Webhook JSON intentionally omits Secret.
+// Encrypt the whole envelope, including any private custom HTTP headers.
+type webhookCache struct {
+	Version        int                 `json:"version"`
+	OrganizationID uuid.UUID           `json:"organization_id"`
+	Webhooks       []webhookCacheEntry `json:"webhooks"`
+}
+
+type webhookCacheEntry struct {
+	models.Webhook
+	SigningSecret string `json:"signing_secret"`
+}
+
+// getWebhooksCached retrieves active webhooks without losing their signing secrets.
 func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("%s%s", webhooksCachePrefix, orgID.String())
+	key := ""
+	if a.Config != nil {
+		key = a.Config.App.EncryptionKey
+	}
 
-	// Try cache first
-	cached, err := a.Redis.Get(ctx, cacheKey).Result()
-	if err == nil && cached != "" {
-		var webhooks []models.Webhook
-		if err := json.Unmarshal([]byte(cached), &webhooks); err == nil {
-			return webhooks, nil
+	// Without a key, Encrypt is a no-op. Bypass Redis rather than store secrets
+	// in plaintext or trust legacy entries that omitted the signing secret.
+	if key != "" && a.Redis != nil {
+		cached, err := a.Redis.Get(ctx, cacheKey).Result()
+		if err == nil && crypto.IsEncrypted(cached) {
+			if plaintext, err := crypto.Decrypt(cached, key); err == nil {
+				var envelope webhookCache
+				if json.Unmarshal([]byte(plaintext), &envelope) == nil && envelope.Version == 1 && envelope.OrganizationID == orgID {
+					webhooks := make([]models.Webhook, 0, len(envelope.Webhooks))
+					valid := true
+					for _, entry := range envelope.Webhooks {
+						if entry.OrganizationID != orgID || !entry.IsActive {
+							valid = false
+							break
+						}
+						entry.Secret = entry.SigningSecret
+						webhooks = append(webhooks, entry.Webhook)
+					}
+					if valid {
+						return webhooks, nil
+					}
+				}
+			}
 		}
 	}
 
@@ -284,9 +319,16 @@ func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 		return nil, err
 	}
 
-	// Cache the result
-	if data, err := json.Marshal(webhooks); err == nil {
-		a.Redis.Set(ctx, cacheKey, data, webhooksCacheTTL)
+	if key != "" && a.Redis != nil {
+		envelope := webhookCache{Version: 1, OrganizationID: orgID, Webhooks: make([]webhookCacheEntry, 0, len(webhooks))}
+		for _, hook := range webhooks {
+			envelope.Webhooks = append(envelope.Webhooks, webhookCacheEntry{Webhook: hook, SigningSecret: hook.Secret})
+		}
+		if data, err := json.Marshal(envelope); err == nil {
+			if encrypted, err := crypto.Encrypt(string(data), key); err == nil {
+				a.Redis.Set(ctx, cacheKey, encrypted, webhooksCacheTTL)
+			}
+		}
 	}
 
 	return webhooks, nil

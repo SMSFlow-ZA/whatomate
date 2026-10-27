@@ -10,6 +10,7 @@ on:
       - codex/channels-smsflow-20261019
   pull_request:
     branches:
+      - codex/channels-smsflow-20261019
       - main
       - codex/managed-baseline
       - codex/production-hardening

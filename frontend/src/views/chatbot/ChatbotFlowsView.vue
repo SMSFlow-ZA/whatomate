@@ -11,10 +11,14 @@ import { chatbotService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { PageHeader, DataTable, DeleteConfirmDialog, SearchInput, IconButton, ErrorState, type Column } from '@/components/shared'
 import { getErrorMessage } from '@/lib/api-utils'
-import { Plus, Pencil, Trash2, Workflow } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Workflow, Copy } from 'lucide-vue-next'
 import { useDebounceFn } from '@vueuse/core'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const auth = useAuthStore()
+const canDuplicate = computed(() => auth.hasPermission('flows.chatbot', 'read') && auth.hasPermission('flows.chatbot', 'write'))
+const duplicating = ref(new Set<string>())
 
 interface ChatbotFlow {
   id: string
@@ -96,6 +100,20 @@ function createFlow() {
 
 function editFlow(flow: ChatbotFlow) {
   router.push(`/chatbot/flows/${flow.id}/edit`)
+}
+
+async function duplicateFlow(flow: ChatbotFlow) {
+  if (!canDuplicate.value || duplicating.value.has(flow.id)) return
+  duplicating.value.add(flow.id)
+  try {
+    await chatbotService.duplicateFlow(flow.id)
+    toast.success(t('flows.flowDuplicated'))
+    await fetchFlows()
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('flows.duplicateFailed')))
+  } finally {
+    duplicating.value.delete(flow.id)
+  }
 }
 
 async function toggleFlow(flow: ChatbotFlow) {
@@ -214,6 +232,7 @@ async function confirmDeleteFlow() {
                 </template>
                 <template #cell-actions="{ item: flow }">
                   <div class="flex items-center justify-end gap-1">
+                    <IconButton v-if="canDuplicate" :icon="Copy" :label="$t('flows.duplicateTooltip')" class="h-8 w-8" :disabled="duplicating.has(flow.id)" :loading="duplicating.has(flow.id)" @click="duplicateFlow(flow)" />
                     <IconButton :icon="Pencil" :label="$t('chatbotFlows.editFlowLabel')" class="h-8 w-8" @click="editFlow(flow)" />
                     <IconButton :icon="Trash2" :label="$t('chatbotFlows.deleteFlowLabel')" class="h-8 w-8 text-destructive" @click="openDeleteDialog(flow)" />
                   </div>

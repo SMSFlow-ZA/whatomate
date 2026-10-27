@@ -2,7 +2,7 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019]
+    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027]
   workflow_dispatch:
 
 permissions:

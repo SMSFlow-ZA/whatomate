@@ -1,13 +1,20 @@
 package handlers
 
 import (
+	"net/url"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // graphNodes pulls out the nodes slice from the JSONB output.
@@ -236,7 +243,7 @@ func TestStepsToGraph_CanvasPositionsApplied(t *testing.T) {
 // + canvas_layout backing them) get migrated; already-v2 rows are
 // untouched; second run is a no-op.
 func TestBackfillChatbotFlowGraph_FillsNullGraphsAndLeavesOthersAlone(t *testing.T) {
-	app := newProcessorTestApp(t)
+	app := legacyGraphMigrationApp(t)
 	org, account := createProcessorTestOrg(t, app)
 
 	// AutoMigrate no longer creates the legacy canvas_layout column or
@@ -302,4 +309,41 @@ func TestBackfillChatbotFlowGraph_FillsNullGraphsAndLeavesOthersAlone(t *testing
 	require.NoError(t, BackfillChatbotFlowGraph(app.DB, app.Log))
 }
 
-var _ = testutil.NopLogger // silence unused-import warning when read in isolation
+// Keep legacy DDL out of shared runtime tables: pgx's cached SELECT * plans
+// otherwise fail once with SQLSTATE 0A000 in an unrelated subsequent flow test.
+func legacyGraphMigrationApp(t *testing.T) *App {
+	t.Helper()
+	admin := testutil.SetupTestDB(t)
+	schema := "legacy_graph_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	require.NoError(t, admin.Exec("CREATE SCHEMA "+schema).Error)
+	t.Cleanup(func() { require.NoError(t, admin.Exec("DROP SCHEMA "+schema+" CASCADE").Error) })
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if parsed, err := url.Parse(dsn); err == nil && parsed.Scheme != "" {
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		dsn = parsed.String()
+	} else {
+		dsn += " search_path=" + schema
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	pool, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pool.Close()) })
+	require.NoError(t, database.AutoMigrate(db))
+	return &App{DB: db, Log: testutil.NopLogger()}
+}
+
+func TestBackfillChatbotFlowGraph_DoesNotInvalidateRuntimeQueries(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, _ := createProcessorTestOrg(t, app)
+	_, err := app.getChatbotFlowsCached(org.ID)
+	require.NoError(t, err, "prime the runtime query plan before legacy DDL")
+	hadLegacyColumn := app.DB.Migrator().HasColumn(&models.ChatbotFlow{}, "canvas_layout")
+	t.Run("legacy migration", TestBackfillChatbotFlowGraph_FillsNullGraphsAndLeavesOthersAlone)
+	assert.Equal(t, hadLegacyColumn, app.DB.Migrator().HasColumn(&models.ChatbotFlow{}, "canvas_layout"), "legacy fixture must not alter the runtime schema")
+	other, _ := createProcessorTestOrg(t, app)
+	_, err = app.getChatbotFlowsCached(other.ID)
+	require.NoError(t, err, "the next runtime query must keep working without a retry")
+}
