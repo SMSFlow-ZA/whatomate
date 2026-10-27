@@ -69,3 +69,22 @@ func TestExtensionAIInternationalProcessingRequiresExplicitApprovalAndDisclosure
 		t.Fatal(err)
 	}
 }
+
+func TestExtensionAIRetrievalFallbackRequiresExplicitSupportedMode(t *testing.T) {
+	for _, mode := range []string{"", "embeddings", "ranked_lexical"} {
+		c := validProductionAIHostConfig()
+		c.AIRetrievalFallback = mode
+		providerConfig := extensionAIProviderConfigFromHost(c)
+		if providerConfig.RetrievalFallback != mode {
+			t.Fatal("host fallback mode lost")
+		}
+		if _, err := newExtensionAIProvider(providerConfig); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := validProductionAIHostConfig()
+	c.AIRetrievalFallback = "all_pages"
+	if _, err := newExtensionAIProvider(extensionAIProviderConfigFromHost(c)); err == nil {
+		t.Fatal("unsupported retrieval mode accepted")
+	}
+}

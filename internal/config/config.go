@@ -82,6 +82,7 @@ type ExtensionsConfig struct {
 	// Production AI is an explicit operator-owned HTTPS deployment. Country and
 	// attestation identify reviewed evidence; enabling a module invents neither.
 	AIProvider                          string   `koanf:"ai_provider"`
+	AIRetrievalFallback                 string   `koanf:"ai_retrieval_fallback"`
 	AIEndpoint                          string   `koanf:"ai_endpoint"`
 	AIEmbeddingEndpoint                 string   `koanf:"ai_embedding_endpoint"`
 	AIAllowedEndpoints                  []string `koanf:"ai_allowed_endpoints"`

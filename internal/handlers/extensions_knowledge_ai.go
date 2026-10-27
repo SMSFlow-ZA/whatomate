@@ -63,7 +63,7 @@ func (a *App) initializeAI(ctx context.Context, db *sql.DB) error {
 		if e != nil {
 			return ai.Service{}, e
 		}
-		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}
+		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider, Fallback: ai.FallbackMode(c.AIRetrievalFallback)}
 		// A typed nil *VectorRepository is nonnil when assigned to an interface.
 		if vectors != nil {
 			retriever.Vectors = vectors

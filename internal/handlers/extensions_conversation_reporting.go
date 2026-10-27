@@ -117,7 +117,7 @@ func (a *App) initializeConversation(ctx context.Context, db *sql.DB) error {
 		if e != nil {
 			return conversation.Answer{}, e
 		}
-		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider}
+		retriever := ai.HybridRetriever{Catalog: repo, Candidates: repo, Embeddings: provider, Fallback: ai.FallbackMode(c.AIRetrievalFallback)}
 		vectors, e := a.extensionVectors(ctx, db, employee.OrganizationID)
 		if e != nil {
 			return conversation.Answer{}, e
