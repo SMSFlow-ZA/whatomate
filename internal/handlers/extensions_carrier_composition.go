@@ -80,7 +80,10 @@ func (a *App) initializeProtectedCarrier(ctx context.Context, db *sql.DB) error 
 		return e
 	}
 	if c.CarrierDispatchEnabled {
-		service.SendObserved = (protectedcarrier.MetaSender{Resolve: a.protectedCarrierCredentials}).Send
+		service.SendObserved = (protectedcarrier.MetaSender{
+			Resolve:           a.protectedCarrierCredentials,
+			ObserveDiagnostic: a.observeProtectedCarrierDiagnostic,
+		}).Send
 	}
 	return a.ExtensionGuard.RegisterInbound("directory", func(ctx context.Context, in ext.Inbound) error {
 		allowed := false
@@ -122,6 +125,19 @@ func (a *App) initializeProtectedCarrier(ctx context.Context, db *sql.DB) error 
 		}
 		return nil
 	})
+}
+
+// Only bounded transport facts enter logs. Successful acceptance remains quiet;
+// recipient, tenant, account, content and provider error text are never included.
+func (a *App) observeProtectedCarrierDiagnostic(d protectedcarrier.Diagnostic) {
+	switch d.Stage {
+	case protectedcarrier.DiagnosticMessage, protectedcarrier.DiagnosticCredentials,
+		protectedcarrier.DiagnosticRequest, protectedcarrier.DiagnosticTransport,
+		protectedcarrier.DiagnosticResponse:
+		a.Log.Warn("Protected carrier submission outcome unconfirmed",
+			"stage", string(d.Stage), "http_status", d.HTTPStatus,
+			"provider_code", d.ErrorCode, "provider_subcode", d.ErrorSubcode)
+	}
 }
 
 // Current account, authorization, roster and signed service window are checked

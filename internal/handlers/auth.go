@@ -544,7 +544,7 @@ type LogoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// Logout invalidates the user's refresh token
+// Logout invalidates the user's session family and clears authentication cookies.
 func (a *App) Logout(r *fastglue.Request) error {
 	// Read refresh token from cookie first, fall back to body.
 	refreshTokenStr := string(r.RequestCtx.Request.Header.Cookie(cookieRefreshName))
@@ -554,17 +554,30 @@ func (a *App) Logout(r *fastglue.Request) error {
 		refreshTokenStr = req.RefreshToken
 	}
 
+	var revokeKeys []string
 	if refreshTokenStr != "" {
 		claims, err := middleware.ParseToken(a.Config.JWT.Secret, refreshTokenStr, "refresh")
 		if err == nil && claims.ID != "" {
-			if a.Redis == nil {
-				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)).Err(); err != nil {
-				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke session", nil, "")
-			}
+			revokeKeys = []string{refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)}
+		}
+	}
+	if len(revokeKeys) == 0 {
+		// Browsers do not send the narrowly scoped refresh cookie to the legacy
+		// /api/auth/logout route. Only verified access claims may identify the
+		// family to revoke; never trust request-supplied session or family IDs.
+		accessToken := string(r.RequestCtx.Request.Header.Cookie(cookieAccessName))
+		if claims, err := middleware.ParseToken(a.Config.JWT.Secret, accessToken, "access"); err == nil && claims.SessionID != "" {
+			revokeKeys = []string{middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)}
+		}
+	}
+	if len(revokeKeys) > 0 {
+		if a.Redis == nil {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.Redis.Del(ctx, revokeKeys...).Err(); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke session", nil, "")
 		}
 	}
 
