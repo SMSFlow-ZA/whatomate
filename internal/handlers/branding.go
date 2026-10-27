@@ -76,6 +76,14 @@ func brandingRow(db *gorm.DB) (models.InstanceBranding, error) {
 	return row, err
 }
 func (a *App) GetBranding(r *fastglue.Request) error {
+	// Externally managed protected hosts do not grant the runtime access to
+	// legacy branding storage. Explicit operator defaults are presentation-only
+	// and must not depend on that table or media-publication recovery. Ordinary
+	// hosts still resolve stored customer overrides through the existing lock.
+	if a.Config.Extensions.ProtectedMode && a.Config.Database.SchemaManagedExternally && a.Config.Branding.DisplayName != "" {
+		r.RequestCtx.Response.Header.Set("Cache-Control", "no-store")
+		return r.SendEnvelope(a.brandingDisplay(models.InstanceBranding{}))
+	}
 	var row models.InstanceBranding
 	err := plan.ReadWithStorageLock(a.DB, []string{a.getMediaStoragePath(), a.getAudioDir()}, func(db *gorm.DB) error { var err error; row, err = brandingRow(db); return err })
 	if err != nil {
