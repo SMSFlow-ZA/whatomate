@@ -115,6 +115,15 @@ func TestWebhookSigningNoKeyBypassesSensitiveCache(t *testing.T) {
 	assert.Equal(t, int64(0), app.Redis.Exists(context.Background(), fmt.Sprintf("%s%s", webhooksCachePrefix, hook.OrganizationID)).Val())
 }
 
+func TestWebhookSigningMissingConfigUsesDatabase(t *testing.T) {
+	app, hook := signedCacheFixture(t)
+	app.Config = nil
+	got, err := app.getWebhooksCached(hook.OrganizationID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, hook.Secret, got[0].Secret)
+}
+
 func TestWebhookSigningCacheCannotCrossOrganizations(t *testing.T) {
 	app, hook := signedCacheFixture(t)
 	_, err := app.getWebhooksCached(hook.OrganizationID)

@@ -282,7 +282,10 @@ type webhookCacheEntry struct {
 func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("%s%s", webhooksCachePrefix, orgID.String())
-	key := a.Config.App.EncryptionKey
+	key := ""
+	if a.Config != nil {
+		key = a.Config.App.EncryptionKey
+	}
 
 	// Without a key, Encrypt is a no-op. Bypass Redis rather than store secrets
 	// in plaintext or trust legacy entries that omitted the signing secret.

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,9 @@ import (
 
 func TestSecurityRouter_ChatbotDuplicateRequiresSessionCSRFAndPermissions(t *testing.T) {
 	app, g := securityRouter(t)
+	// runServer installs the global CSRF guard before setupRoutes; the shared
+	// unit router helper only installs routes. Include the server guard here.
+	g.Before(middleware.CSRFProtection())
 	org := testutil.CreateTestOrganization(t, app.DB)
 	role := testutil.CreateAdminRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID), testutil.WithPassword("security-password-123"))
