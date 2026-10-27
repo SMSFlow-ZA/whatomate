@@ -1,5 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { clearExtensionSession, extensionSession } from '@/extensions/session'
+import { beginExtensionRevalidation, clearExtensionSession, extensionSession, isExtensionRevalidating, refreshExtensionSession } from '@/extensions/session'
 import type { ChannelSendFields } from '@/lib/channels'
 
 // Get base path from server-injected config or fallback
@@ -43,6 +43,7 @@ export function getRequestHeaders(opts?: { csrf?: boolean }): Record<string, str
 // Request interceptor to add CSRF token and organization header
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (!('_extensionIdentity' in config)) Object.assign(config, { _extensionIdentity: extensionSession.identity })
     if (config.url?.startsWith('/extensions/') && !('_extensionRevision' in config)) Object.assign(config, { _extensionRevision: extensionSession.revision })
     // Add CSRF token on mutating requests (cookie-based auth sends cookies automatically)
     const method = (config.method || '').toUpperCase()
@@ -134,13 +135,30 @@ api.interceptors.response.use(
     return response
   },
   async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _extensionRevision?: number }
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _extensionRevision?: number; _extensionIdentity?: string }
     const isExtensionRequest = originalRequest?.url?.startsWith('/extensions/')
     const wasCurrent = originalRequest?._extensionRevision === extensionSession.revision
 
+    const identity = extensionSession.identity
+    const hostRead = error.response?.status === 401 && !isExtensionRequest &&
+      (originalRequest?.method || '').toUpperCase() === 'GET' &&
+      (!originalRequest?.url?.startsWith('/auth/') || originalRequest.url === '/auth/ws-token') &&
+      originalRequest?._extensionIdentity === identity && !!identity &&
+      (extensionSession.ready || isExtensionRevalidating(identity))
+    const finishRevalidation = hostRead ? beginExtensionRevalidation(identity) : undefined
+    let primaryRefreshFailed = false
+
     if (error.response?.status === 401 || (error.response?.status === 403 && originalRequest?.url?.startsWith('/extensions/'))) clearExtensionSession()
+    const invalidatedEpoch = extensionSession.revision
+    try {
     const refreshedError = new AuthenticationRefreshedError(extensionSession.identity, extensionSession.revision, wasCurrent)
-    const resume = () => isExtensionRequest ? Promise.reject(refreshedError) : api(originalRequest)
+    const resume = () => {
+      const pending = isExtensionRequest ? Promise.reject(refreshedError) : api(originalRequest)
+      // A host read can settle while the finally block awaits its fresh catalog.
+      // Keep that intermediate rejection handled; the caller still receives it.
+      void pending.catch(() => {})
+      return pending
+    }
     // Skip token refresh logic for auth endpoints
     const isAuthEndpoint = originalRequest?.url?.startsWith('/auth/')
 
@@ -150,11 +168,12 @@ api.interceptors.response.use(
 
       // If a refresh is already in flight, queue this request to wait for it
       if (isRefreshing) {
-        return new Promise((resolve, reject) => {
+        return await new Promise((resolve, reject) => {
           refreshSubscribers.push((success: boolean) => {
             if (success) {
               resolve(resume())
             } else {
+              primaryRefreshFailed = true
               reject(error)
             }
           })
@@ -175,6 +194,7 @@ api.interceptors.response.use(
         // Ordinary host requests resume; protected callers must explicitly reconcile.
         return resume()
       } catch {
+        primaryRefreshFailed = true
         // Refresh failed — notify waiting requests and redirect to login
         onRefreshComplete(false)
         isRefreshing = false
@@ -186,7 +206,32 @@ api.interceptors.response.use(
       }
     }
 
-    return Promise.reject(error)
+    throw error
+    } finally {
+      if (finishRevalidation) {
+        try {
+          // A logout, different identity or newer invalidation owns the result.
+          // The failed host read is not authority for any subsequent session.
+          if (!primaryRefreshFailed && extensionSession.identity === identity && extensionSession.revision === invalidatedEpoch) {
+            let catalogAuthenticationRefreshed = false
+            const load = async () => {
+              try { return (await api.get('/extensions/catalog')).data.data }
+              catch (cause) {
+                catalogAuthenticationRefreshed = cause instanceof AuthenticationRefreshedError && cause.canReconcile
+                throw cause
+              }
+            }
+            const ready = await refreshExtensionSession(load)
+            // The catalog itself may have refreshed an expired access cookie.
+            // Reconcile exactly once; protected operations are never replayed.
+            if (!ready && catalogAuthenticationRefreshed && extensionSession.identity === identity &&
+                extensionSession.revision !== invalidatedEpoch && !extensionSession.ready) {
+              await refreshExtensionSession(load)
+            }
+          }
+        } finally { finishRevalidation() }
+      }
+    }
   }
 )
 

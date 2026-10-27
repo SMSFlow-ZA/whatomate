@@ -16,6 +16,26 @@ Runtime theme tokens, shared brand components and cache-busted asset URLs cover
 login, desktop/mobile headers, browser title/favicon and interactive highlights.
 Status colours, organization/Meta identities, source notices and billing are separate.
 
+## Operator-owned defaults
+
+An isolated protected instance can set display defaults without opening its
+generic settings API. These optional values are validated when configuration is
+loaded; the normal public defaults apply when omitted:
+
+```toml
+[branding]
+display_name = "Example Employee Relations — demonstration"
+accent_color = "#b00020"
+```
+
+Equivalent environment names are `WHATOMATE_BRANDING__DISPLAY_NAME` and
+`WHATOMATE_BRANDING__ACCENT_COLOR`. Names must contain at most 80 Unicode
+characters, with no control characters or surrounding whitespace. Colours must
+be six-digit hex values. A stored customer branding row still overrides these
+defaults; resetting that row restores the configured defaults. Existing logos
+and favicons remain unchanged. Header text, browser title and palette consume
+the existing public branding response; no customer identity belongs in source.
+
 ## Managed release
 
 Based on managed release `597ce32`, without unrelated upstream upgrades.

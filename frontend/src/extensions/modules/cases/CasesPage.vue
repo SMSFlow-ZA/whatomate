@@ -46,7 +46,7 @@ onMounted(() => run(refresh))
 </script>
 <template>
  <main class="cases-page">
-  <header><div><h1>Protected cases</h1><p>Review your current inbox and record case decisions.</p></div><button :disabled="busy" @click="run(refresh)">Refresh cases</button></header>
+  <header><div><h1>Employee Relations cases</h1><p>Review your current inbox and record case decisions.</p></div><button :disabled="busy" @click="run(refresh)">Refresh cases</button></header>
   <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="notice" role="status" class="notice">{{ notice }}</p><p v-if="busy" role="status">Loading or saving cases…</p>
   <div class="workspace">
    <section class="panel inbox" aria-label="Case inbox"><h2>Inbox</h2><form @submit.prevent="run(refresh)"><label>Find by reference, status or category<input v-model="query" type="search" /></label><button :disabled="busy">Search</button></form><p v-if="!records.length && !busy">No cases are available with your current access.</p><ul><li v-for="c in records" :key="c.id"><button :disabled="busy" :aria-pressed="selected?.id === c.id" @click="run(() => select(c.id))"><strong>{{ c.category || 'Case' }}</strong><span>{{ c.state }} · v{{ c.version }}</span><small>{{ c.id }}</small></button></li></ul></section>

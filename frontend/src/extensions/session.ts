@@ -7,9 +7,21 @@ export type ExtensionAuthenticationPolicy = 'mfa' | 'primary-session-demo'
 interface Catalog { modules: {id:string;api_version:number}[]; permissions:string[]; grants:ExtensionGrant[]; mfa_verified:boolean; authentication_policy?:ExtensionAuthenticationPolicy; primary_session_authorized?:boolean; generic_host_access?:boolean; ai_processing?:unknown }
 const state = reactive({ identity:'', ready:false, revision:0, modules:[] as string[], permissions:[] as string[], grants:[] as ExtensionGrant[], authenticationPolicy:null as ExtensionAuthenticationPolicy|null, mfaVerified:false, genericHostAccess:null as boolean|null, aiProcessing:null as AIProcessingDisclosure|null, aiProcessingUnavailable:false })
 export const extensionSession = readonly(state)
+// Navigation may wait for a current primary-session read to revalidate. This
+// never keeps grants or protected content alive while authority is cleared.
+const revalidations = reactive(new Map<symbol, string>())
+export function isExtensionRevalidating(identity: string): boolean {
+  return !!identity && state.identity === identity && [...revalidations.values()].includes(identity)
+}
+export function beginExtensionRevalidation(identity: string): () => void {
+  const token = Symbol()
+  if (identity && state.identity === identity) revalidations.set(token, identity)
+  return () => { revalidations.delete(token) }
+}
 let flight: Promise<boolean> | undefined
 let flightEpoch = -1
 export function clearExtensionSession(identity = state.identity) {
+  if (identity !== state.identity) revalidations.clear()
   state.identity = identity; state.ready = false; state.modules = []; state.permissions = []; state.grants = []; state.revision++
   state.aiProcessing=null; state.aiProcessingUnavailable=false
   state.authenticationPolicy=null; state.mfaVerified=false

@@ -45,6 +45,12 @@ func (a *App) brandingDisplay(row models.InstanceBranding) brandDisplay {
 	if !a.Config.Plan.Enabled {
 		display = brandDisplay{DisplayName: "Whatomate", AccentColor: "#25D366", LogoURL: base + "/branding/whatomate-logo.svg", FaviconURL: base + "/favicon.svg"}
 	}
+	if a.Config.Branding.DisplayName != "" {
+		display.DisplayName = a.Config.Branding.DisplayName
+	}
+	if a.Config.Branding.AccentColor != "" {
+		display.AccentColor = a.Config.Branding.AccentColor
+	}
 	display.DefaultDisplayName = display.DisplayName
 	display.DefaultLogoURL = display.LogoURL
 	display.DefaultFaviconURL = display.FaviconURL

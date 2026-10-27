@@ -114,13 +114,13 @@ const handleLogout = async () => {
 </script>
 
 <template>
-  <div class="flex h-screen bg-[#0a0a0b] light:bg-gray-50">
+  <div class="flex h-dvh bg-[#0a0a0b] light:bg-gray-50">
     <!-- Skip link for accessibility -->
     <a href="#main-content" class="skip-link">{{ $t('nav.skipToMain') }}</a>
 
     <!-- Mobile header -->
     <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden">
-      <RouterLink to="/" class="flex items-center gap-2">
+      <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-2">
         <BrandLogo />
       </RouterLink>
       <Button
@@ -157,7 +157,7 @@ const handleLogout = async () => {
     >
       <!-- Logo (hidden on mobile, shown in header instead) -->
       <div class="hidden md:flex h-12 items-center justify-between px-3 border-b border-white/[0.08] light:border-gray-200">
-        <RouterLink to="/" class="flex items-center gap-2">
+        <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-2">
           <BrandLogo :compact="isCollapsed" />
         </RouterLink>
         <Button
@@ -303,10 +303,12 @@ const handleLogout = async () => {
     </aside>
 
     <!-- Main content -->
-    <main id="main-content" class="flex flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
+    <main id="main-content" class="flex min-w-0 flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
       <ManagedPlanStatus />
       <AuthenticationPolicyNotice />
-      <div class="flex-1 min-h-0">
+      <!-- Extension pages are document flows; the bounded outlet owns their
+           scrolling. Host views such as chat retain their own scroll regions. -->
+      <div id="route-content" class="flex-1 min-h-0 min-w-0" :class="route.meta.extensionModule ? 'overflow-auto overscroll-contain extension-content' : ''">
       <RouterView :key="route.meta.extensionModule ? authStore.extensionRevision : 'host'" v-if="extensionViewAllowed" v-slot="{ Component, route: viewRoute }">
         <Transition name="page" mode="out-in">
           <component :is="Component" :key="viewRoute.meta.extensionModule ? `${viewRoute.path}:${authStore.extensionRevision}` : viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
@@ -314,7 +316,14 @@ const handleLogout = async () => {
       </RouterView>
       </div>
       <ActiveCallPanel />
-      <ScrollToTop />
+      <ScrollToTop v-if="route.meta.extensionModule" target="#route-content" />
+      <ScrollToTop v-else />
     </main>
   </div>
 </template>
+
+<style scoped>
+.extension-content { overflow-wrap: anywhere; }
+.extension-content :deep(main) { min-width: 0; }
+.extension-content :deep(input), .extension-content :deep(select) { max-width: 100%; }
+</style>

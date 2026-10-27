@@ -1,5 +1,22 @@
 # Compiled frontend extension registry
 
+## Viewport and scrolling
+
+The application shell bounds extension document pages to the dynamic viewport.
+Its `#route-content` outlet owns their scrolling below status notices, with
+minimum flex dimensions so long content cannot force the outlet beyond the
+screen. Native host views retain their existing scroll regions. The extension
+scroll-to-top control targets the same outlet. Shared dialogs and confirmation
+dialogs have a viewport maximum height and scroll internally.
+
+Run `npx playwright test --config e2e/layout.config.ts` from `frontend` for the
+local layout regression. It mounts the real layout and all seven module pages
+with synthetic intercepted API responses at desktop, phone and short landscape
+sizes. It checks page bottoms, long references, scroll-to-top and tall dialog
+actions. This fixture is layout evidence only, not authentication or backend
+acceptance. `SCROLL_TEST_URL` may select an already running local Vite server;
+`SCROLL_TEST_CHROMIUM` may select an installed test-browser executable.
+
 `frontend/src/extensions/compiledCatalog.ts` provides a statically imported
 workspace catalog for directory, cases, knowledge, AI, synthetic conversation and
 reports. Trusted build variable `VITE_EXTENSION_MODULES` is a comma-separated

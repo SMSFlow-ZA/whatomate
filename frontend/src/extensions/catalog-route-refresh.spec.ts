@@ -5,6 +5,7 @@ import { defineComponent } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('@/services/api', () => ({ api: { get, post: vi.fn() } }))
+vi.mock('@/services/websocket', () => ({ wsService: { disconnect: vi.fn() } }))
 import { useAuthStore, type User } from '@/stores/auth'
 import { clearExtensionSession, extensionSession } from './session'
 import { bindExtensionRouter, canEnterExtensionRoute } from './router'
@@ -71,5 +72,68 @@ describe('active extension route during catalog access-cookie refresh', () => {
       expect(router.currentRoute.value.path).toBe(outcome === 'logout' ? '/login' : '/profile')
       expect(extensionSession.ready).toBe(outcome === 'revoked')
     } finally { finish?.(catalog(false)); await refresh; binding.stop() }
+  })
+
+  it.each([false, true])('retains the route through identity recheck (storage invalidation=%s)', async invalidate => {
+    const { auth, router, binding } = await activeRoute()
+    let finish!: (value: ReturnType<typeof catalog>) => void
+    get.mockImplementationOnce(async () => {
+      // An expired /me cookie or a same-identity storage event invalidates
+      // authority before the subsequent catalog request starts.
+      clearExtensionSession()
+      return { data: { data: operator } }
+    }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const refresh = auth.refreshUserData(invalidate)
+    try {
+      await settle()
+      expect(extensionSession.ready).toBe(false)
+      expect(router.currentRoute.value.path).toBe('/extensions/reports/operational')
+      finish(catalog()); expect(await refresh).toBe(true); await settle()
+      expect(canEnterExtensionRoute(router.currentRoute.value, auth)).toBe(true)
+      expect(router.currentRoute.value.path).toBe('/extensions/reports/operational')
+    } finally { finish?.(catalog()); await refresh; binding.stop() }
+  })
+
+  it('cannot resurrect a signed-out identity from a late /me response', async () => {
+    const { auth, router, binding } = await activeRoute()
+    let finish!: (value: unknown) => void
+    get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const refresh = auth.refreshUserData(true)
+    auth.clearAuth(); finish({ data: { data: operator } })
+    expect(await refresh).toBe(false); await settle()
+    expect(auth.user).toBe(null)
+    expect(extensionSession.ready).toBe(false)
+    expect(router.currentRoute.value.path).toBe('/login')
+    binding.stop()
+  })
+
+  it.each(['revoked', 'failed', 'other identity'] as const)('denies access after %s identity recheck', async outcome => {
+    const { auth, router, binding } = await activeRoute()
+    get.mockImplementationOnce(async () => {
+      if (outcome === 'failed') throw new Error('Session verification failed')
+      return { data: { data: outcome === 'other identity' ? { ...operator, id: 'other' } : operator } }
+    }).mockResolvedValueOnce(catalog(false))
+    await auth.refreshUserData(true); await settle()
+    expect(router.currentRoute.value.path).toBe('/profile')
+    expect(auth.hasExtensionPermission('reports:operational')).toBe(false)
+    expect(auth.user?.id).toBe('operator')
+    binding.stop()
+  })
+
+  it('revalidates a protected-only session without the forbidden generic /me endpoint', async () => {
+    const { auth, router, binding } = await activeRoute()
+    const protectedCatalog = catalog()
+    Object.assign(protectedCatalog.data.data, { generic_host_access: false })
+    get.mockResolvedValueOnce(protectedCatalog); await auth.refreshExtensionAccess()
+    get.mockClear()
+    get.mockImplementation(async (path: string) => {
+      if (path === '/me') throw new Error('403: generic host access denied')
+      return protectedCatalog
+    })
+    expect(await auth.refreshUserData(true)).toBe(true); await settle()
+    expect(get.mock.calls.map(args => args[0])).toEqual(['/extensions/catalog'])
+    expect(router.currentRoute.value.path).toBe('/extensions/reports/operational')
+    expect(canEnterExtensionRoute(router.currentRoute.value, auth)).toBe(true)
+    binding.stop()
   })
 })

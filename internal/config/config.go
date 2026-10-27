@@ -34,6 +34,7 @@ type Config struct {
 	Plan         PlanConfig         `koanf:"plan"`
 	Channels     ChannelsConfig     `koanf:"channels"`
 	Extensions   ExtensionsConfig   `koanf:"extensions"`
+	Branding     BrandingConfig     `koanf:"branding"`
 }
 
 // ExtensionsConfig is trusted host configuration, never writable through APIs.
@@ -328,6 +329,9 @@ func Load(configPath string) (*Config, error) {
 
 	// Set defaults
 	setDefaults(&cfg)
+	if err := cfg.Branding.Validate(); err != nil {
+		return nil, err
+	}
 	if err := cfg.Extensions.ValidatePrimarySessionDemo(); err != nil {
 		return nil, err
 	}

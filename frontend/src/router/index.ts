@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { clearExtensionSession } from '@/extensions/session'
 import { extensionRegistry, bindExtensionRouter, canEnterExtensionRoute, isExtensionLocation } from '@/extensions'
 
 // Permission-based route meta type
@@ -490,8 +489,7 @@ const onStorage = (event:StorageEvent) => {
     try { identity = event.newValue ? JSON.parse(event.newValue) : null } catch { /* Invalid storage is not authority. */ }
     if (!identity || identity.id !== auth.user?.id || identity.organization_id !== auth.organizationId) auth.clearAuth()
     else {
-      clearExtensionSession()
-      void auth.refreshUserData().then(recheckExtensions)
+      void auth.refreshUserData(true)
     }
   } else if (event.key === 'selected_organization_id' && event.newValue && event.newValue !== auth.organizationId) auth.clearAuth()
 }

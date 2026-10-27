@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/services/api'
 import { parseExtensionPermission } from '@/extensions/permissions'
-import { extensionSession, extensionIdentity, clearExtensionSession, extensionPermission, refreshExtensionSession } from '@/extensions/session'
+import { extensionSession, extensionIdentity, clearExtensionSession, extensionPermission, refreshExtensionSession, isExtensionRevalidating } from '@/extensions/session'
 
 export interface UserSettings {
   email_notifications?: boolean
@@ -50,7 +50,9 @@ export const useAuthStore = defineStore('auth', () => {
   const breakStartedAt = ref<string | null>(null)
   // This tracks navigation revalidation only; it never preserves authority or data.
   const extensionAccessChecks = ref(new Map<symbol, string>())
-  const extensionAccessRefreshing = computed(() => !!user.value && [...extensionAccessChecks.value.values()].includes(`${user.value.organization_id}:${user.value.id}`))
+  const extensionAccessRefreshing = computed(() => !!user.value && (
+    [...extensionAccessChecks.value.values()].includes(`${user.value.organization_id}:${user.value.id}`) ||
+    isExtensionRevalidating(`${user.value.organization_id}:${user.value.id}`)))
 
   const isAuthenticated = computed(() => !!user.value)
   const userRole = computed(() => user.value?.role?.name || 'agent')
@@ -122,17 +124,36 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // Fetch fresh user data from API (including updated permissions)
-  async function refreshUserData(): Promise<boolean> {
+  async function refreshUserData(invalidateAccess = false): Promise<boolean> {
+    if (!user.value) return false
+    const identity = `${user.value.organization_id}:${user.value.id}`
+    const check = Symbol()
+    extensionAccessChecks.value.set(check, identity)
+    const epoch = extensionSession.revision
+    const protectedOnly = extensionSession.genericHostAccess === false
     try {
+      // A same-identity update in another tab is not permission proof. Hide
+      // protected data immediately, but retain the URL during fresh validation.
+      if (invalidateAccess) clearExtensionSession()
+      // Protected organizations deliberately deny the generic /me API. Their
+      // current grants must come from the authenticated extension catalog.
+      if (protectedOnly) return await refreshExtensionAccess()
       const response = await api.get('/me')
       const freshUser = response.data.data
+      if (!user.value || `${user.value.organization_id}:${user.value.id}` !== identity ||
+          `${freshUser?.organization_id}:${freshUser?.id}` !== identity) return false
       extensionIdentity(`${freshUser.organization_id}:${freshUser.id}`)
       user.value = freshUser
       localStorage.setItem('user', JSON.stringify(freshUser))
+      // /me may have refreshed an expired primary cookie and cleared the
+      // catalog. Complete the current authority check before ending the hold.
+      if (invalidateAccess || extensionSession.revision !== epoch) return await refreshExtensionAccess()
       return true
     } catch {
       // If unauthorized, clear auth
       return false
+    } finally {
+      extensionAccessChecks.value.delete(check)
     }
   }
 
