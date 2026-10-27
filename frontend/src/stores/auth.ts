@@ -48,6 +48,9 @@ export interface AuthState {
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const breakStartedAt = ref<string | null>(null)
+  // This tracks navigation revalidation only; it never preserves authority or data.
+  const extensionAccessChecks = ref(new Map<symbol, string>())
+  const extensionAccessRefreshing = computed(() => !!user.value && [...extensionAccessChecks.value.values()].includes(`${user.value.organization_id}:${user.value.id}`))
 
   const isAuthenticated = computed(() => !!user.value)
   const userRole = computed(() => user.value?.role?.name || 'agent')
@@ -197,17 +200,22 @@ export const useAuthStore = defineStore('auth', () => {
   async function refreshExtensionAccess(): Promise<boolean> {
     if (!user.value) { clearExtensionSession(''); return false }
     const identity = `${user.value.organization_id}:${user.value.id}`
-    extensionIdentity(identity)
-    const epoch = extensionSession.revision
-    const load = async () => (await api.get('/extensions/catalog')).data.data
-    const ready = await refreshExtensionSession(load)
-    // An access-cookie 401 clears protected data before the API interceptor
-    // refreshes and retries. Its retried catalog belongs to the old epoch and
-    // must be discarded. Obtain one new current response, never reuse it.
-    if (!ready && user.value && `${user.value.organization_id}:${user.value.id}` === identity && extensionSession.revision !== epoch) {
-      return refreshExtensionSession(load)
+    const check = Symbol()
+    extensionAccessChecks.value.set(check, identity)
+    try {
+      extensionIdentity(identity)
+      const epoch = extensionSession.revision
+      const load = async () => (await api.get('/extensions/catalog')).data.data
+      const ready = await refreshExtensionSession(load)
+      // An access-cookie 401 clears protected data before the API interceptor
+      // refreshes. Obtain one new current catalog, never reuse stale authority.
+      if (!ready && user.value && `${user.value.organization_id}:${user.value.id}` === identity && extensionSession.revision !== epoch) {
+        return await refreshExtensionSession(load)
+      }
+      return ready
+    } finally {
+      extensionAccessChecks.value.delete(check)
     }
-    return ready
   }
 
   function hasPermission(resource: string, action: string = 'read'): boolean {
@@ -245,6 +253,7 @@ export const useAuthStore = defineStore('auth', () => {
     hasPermission,
     hasExtensionPermission,
     extensionRevision: computed(() => extensionSession.revision),
+    extensionAccessRefreshing,
     refreshExtensionAccess
   }
 })

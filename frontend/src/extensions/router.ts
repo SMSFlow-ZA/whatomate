@@ -7,6 +7,7 @@ export interface ExtensionAuth {
   readonly isAuthenticated: boolean;
   readonly user: unknown;
   readonly extensionRevision?: number;
+  readonly extensionAccessRefreshing?: boolean;
   hasExtensionPermission(descriptor: string): boolean;
 }
 
@@ -88,9 +89,13 @@ export function bindExtensionRouter(
         installed.set(name, { route, remove: router.addRoute(parentName, route) });
     }
     const current = router.currentRoute.value;
+    // A catalog 401 clears authority immediately. The layout hides its view,
+    // but a still-running current-identity recheck should not discard its URL.
+    // Definitive denial, failed revalidation and logout still leave the route.
     if (
       isExtensionLocation(current) &&
-      !canEnterExtensionRoute(current, auth)
+      !canEnterExtensionRoute(current, auth) &&
+      (!auth.isAuthenticated || !auth.extensionAccessRefreshing)
     ) {
       const target = auth.isAuthenticated ? "/profile" : "/login";
       // A fallback guard can itself refresh a failed catalog. Repeated authority
@@ -108,7 +113,7 @@ export function bindExtensionRouter(
   // Validate before creating a watcher so initial collisions leave no subscription.
   synchronize();
   const stopWatch = watch(
-    () => [auth.isAuthenticated, auth.user, auth.extensionRevision],
+    () => [auth.isAuthenticated, auth.user, auth.extensionRevision, auth.extensionAccessRefreshing],
     synchronize,
     { deep: true, flush: "sync" },
   );
