@@ -302,7 +302,7 @@ func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 							valid = false
 							break
 						}
-						entry.Webhook.Secret = entry.SigningSecret
+						entry.Secret = entry.SigningSecret
 						webhooks = append(webhooks, entry.Webhook)
 					}
 					if valid {
