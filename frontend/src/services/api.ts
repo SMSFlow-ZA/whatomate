@@ -392,6 +392,7 @@ export const chatbotService = {
     api.get<{ flows: any[]; total?: number }>('/chatbot/flows', { params }),
   getFlow: (id: string) => api.get(`/chatbot/flows/${id}`),
   createFlow: (data: any) => api.post('/chatbot/flows', data),
+  duplicateFlow: (id: string) => api.post(`/chatbot/flows/${id}/duplicate`),
   updateFlow: (id: string, data: any) => api.put(`/chatbot/flows/${id}`, data),
   deleteFlow: (id: string) => api.delete(`/chatbot/flows/${id}`),
 
