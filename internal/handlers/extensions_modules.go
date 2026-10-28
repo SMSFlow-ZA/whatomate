@@ -59,6 +59,10 @@ func (a *App) initializeCompiledModules() error {
 			return fmt.Errorf("duplicate compiled module")
 		}
 		switch id {
+		case "notifications":
+			if e = a.initializeNotificationModule(ctx, db); e != nil {
+				return e
+			}
 		case "governance":
 			if e = a.initializeGovernance(ctx, db); e != nil {
 				return e

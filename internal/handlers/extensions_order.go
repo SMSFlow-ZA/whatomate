@@ -4,7 +4,7 @@ import "fmt"
 
 // Dependencies determine migrations; CSV order is not a migration contract.
 func orderedExtensionModules(ids []string) ([]string, error) {
-	deps := map[string][]string{"directory": {}, "cases": {"directory"}, "knowledge": {}, "ai": {"cases", "knowledge"}, "conversation": {"directory", "cases", "knowledge", "ai"}, "reports": {"cases", "conversation"}, "governance": {"directory", "cases", "knowledge", "ai", "conversation", "reports"}}
+	deps := map[string][]string{"directory": {}, "cases": {"directory"}, "knowledge": {}, "ai": {"cases", "knowledge"}, "conversation": {"directory", "cases", "knowledge", "ai"}, "notifications": {"cases", "conversation"}, "reports": {"cases", "conversation"}, "governance": {"directory", "cases", "knowledge", "ai", "conversation", "reports"}}
 	enabled := map[string]bool{}
 	for _, id := range ids {
 		if _, ok := deps[id]; !ok {
@@ -14,6 +14,9 @@ func orderedExtensionModules(ids []string) ([]string, error) {
 			return nil, fmt.Errorf("duplicate compiled module")
 		}
 		enabled[id] = true
+	}
+	if enabled["notifications"] {
+		deps["governance"] = append(deps["governance"], "notifications")
 	}
 	var result []string
 	visited := map[string]bool{}

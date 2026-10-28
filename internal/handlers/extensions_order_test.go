@@ -22,3 +22,24 @@ func TestModuleMigrationsFollowDependenciesAndValidateBeforeDDL(t *testing.T) {
 		}
 	}
 }
+
+func TestNotificationModuleRequiresConversationAndPrecedesGovernance(t *testing.T) {
+	ids := []string{"governance", "notifications", "reports", "conversation", "ai", "knowledge", "cases", "directory"}
+	order, err := orderedExtensionModules(ids)
+	if err != nil {
+		t.Fatalf("compiled notification composition rejected: %v", err)
+	}
+	positions := map[string]int{}
+	for i, id := range order {
+		positions[id] = i
+	}
+	if positions["conversation"] >= positions["notifications"] || positions["notifications"] >= positions["governance"] {
+		t.Fatalf("notification owner migration order is unsafe: %v", order)
+	}
+	if _, err := orderedExtensionModules([]string{"notifications"}); err == nil {
+		t.Fatal("notification module accepted without protected dependencies")
+	}
+	if _, err := orderedExtensionModules([]string{"directory", "cases", "knowledge", "ai", "conversation", "reports", "governance"}); err != nil {
+		t.Fatalf("omitting notifications must preserve existing composition: %v", err)
+	}
+}

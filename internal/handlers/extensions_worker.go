@@ -40,6 +40,13 @@ func (a *App) StartExtensionWorker() context.CancelFunc {
 		run(75*time.Second, func(tick context.Context) { _ = a.extensionVectorTick(tick) })
 	}
 	if a.ExtensionCarrier != nil {
+		if a.Config.Extensions.CarrierDispatchEnabled && len(a.ExtensionNotifications) > 0 {
+			run(15*time.Second, func(tick context.Context) {
+				for _, service := range a.ExtensionNotifications {
+					_, _ = service.Project(tick)
+				}
+			})
+		}
 		// Inference may take longer than a transport attempt. Escalation has its own
 		// loop so a slow provider cannot stop unrelated due-case routing.
 		run(2*time.Minute, func(tick context.Context) { _ = a.ExtensionCarrier.TickIngress(tick) })

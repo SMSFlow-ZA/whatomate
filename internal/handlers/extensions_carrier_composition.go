@@ -21,7 +21,11 @@ func (a *App) initializeProtectedCarrier(ctx context.Context, db *sql.DB) error 
 		return errCarrierComposition
 	}
 	a.ExtensionCarrier = nil
+	a.ExtensionNotifications = nil
 	c := a.Config.Extensions
+	if (!a.handlerNotificationsEnabled() && len(c.HandlerNotificationUnits) > 0) || (a.handlerNotificationsEnabled() && !c.CarrierEnabled) {
+		return errCarrierComposition
+	}
 	if !c.CarrierEnabled {
 		if c.CarrierDispatchEnabled || len(c.CarrierBindings) > 0 || len(c.CarrierSMSBindings) > 0 {
 			return errCarrierComposition
@@ -76,6 +80,9 @@ func (a *App) initializeProtectedCarrier(ctx context.Context, db *sql.DB) error 
 	}
 	service := &carrier.Service{DB: db, Bindings: bindings, Conversation: a.ExtensionConversation, Clock: time.Now}
 	a.ExtensionCarrier = service
+	if e := a.initializeHandlerNotifications(ctx, db); e != nil {
+		return e
+	}
 	if e := a.initializeProtectedSMS(ctx); e != nil {
 		return e
 	}
@@ -149,7 +156,7 @@ func (a *App) protectedCarrierCredentials(ctx context.Context, m delivery.Messag
 	if !extensionCarrierRecipientAllowed(a.Config.Extensions, m.Sender) {
 		return protectedcarrier.Credentials{}, errCarrierComposition
 	}
-	if e := a.ExtensionConversation.AuthorizeDelivery(ctx, m); e != nil {
+	if e := a.authorizeProtectedDelivery(ctx, m); e != nil {
 		return protectedcarrier.Credentials{}, errCarrierComposition
 	}
 	if e := a.ExtensionCarrier.AuthorizeWindow(ctx, m); e != nil {

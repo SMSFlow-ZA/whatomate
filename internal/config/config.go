@@ -64,6 +64,8 @@ type ExtensionsConfig struct {
 	CarrierSMSBindings     []ExtensionCarrierSMSBinding `koanf:"carrier_sms_bindings"`
 	// Synthetic profiles require an explicit canonical recipient allowlist.
 	CarrierAllowedRecipients []string `koanf:"carrier_allowed_recipients"`
+	// Explicit unit scope for the opt-in, compiled handler-notification module.
+	HandlerNotificationUnits []string `koanf:"handler_notification_units"`
 
 	Required        string `koanf:"required"`
 	RequiredInbound string `koanf:"required_inbound"`

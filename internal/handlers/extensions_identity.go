@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"gorm.io/gorm"
 	"sort"
 
 	addonapi "github.com/SMSFlow-ZA/whatomate-addons/api"
@@ -26,13 +28,19 @@ func (a *App) extensionMember(ctx context.Context, organizationID, userID string
 	}
 	var user models.User
 	if e = a.DB.WithContext(ctx).Where("id = ? AND organization_id = ? AND is_active = ?", id, org, true).First(&user).Error; e != nil {
-		return addonapi.Actor{}, addonapi.ErrDenied
+		if errors.Is(e, gorm.ErrRecordNotFound) {
+			return addonapi.Actor{}, addonapi.ErrDenied
+		}
+		return addonapi.Actor{}, e
 	}
 	actor := addonapi.Actor{OrganizationID: org.String(), UserID: id.String()}
 	if user.RoleID != nil {
 		var role models.CustomRole
 		if e = a.DB.WithContext(ctx).Preload("Permissions").Where("id = ? AND organization_id = ?", *user.RoleID, org).First(&role).Error; e != nil {
-			return addonapi.Actor{}, addonapi.ErrDenied
+			if errors.Is(e, gorm.ErrRecordNotFound) {
+				return addonapi.Actor{}, addonapi.ErrDenied
+			}
+			return addonapi.Actor{}, e
 		}
 		for _, p := range role.Permissions {
 			actor.Permissions = append(actor.Permissions, p.Resource+":"+p.Action)

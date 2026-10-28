@@ -18,6 +18,7 @@ import (
 	"github.com/SMSFlow-ZA/whatomate-addons/directory"
 	"github.com/SMSFlow-ZA/whatomate-addons/governance"
 	"github.com/SMSFlow-ZA/whatomate-addons/knowledge"
+	"github.com/SMSFlow-ZA/whatomate-addons/notifications"
 	"github.com/SMSFlow-ZA/whatomate-addons/reports"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
@@ -253,6 +254,7 @@ func Migrate(ctx context.Context, db *gorm.DB, c *config.Config) error {
 		func() error { return (ai.SQLStore{DB: pool}).Migrate(ctx) }, func() error { return conversation.Migrate(ctx, pool) },
 		func() error { return (&cases.SQLRepository{DB: pool}).MigrateOutboxDelivery(ctx) }, func() error { return (reports.Store{DB: pool}).Migrate(ctx) },
 		func() error { return carrier.Migrate(ctx, pool) }, func() error { return governance.MigrateHTTP(ctx, pool) },
+		func() error { return notifications.Migrate(ctx, pool) },
 	}
 	for _, migrate := range migrations {
 		if e = migrate(); e != nil {

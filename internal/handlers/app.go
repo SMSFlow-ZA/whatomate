@@ -9,6 +9,7 @@ import (
 	addonapi "github.com/SMSFlow-ZA/whatomate-addons/api"
 	"github.com/SMSFlow-ZA/whatomate-addons/carrier"
 	"github.com/SMSFlow-ZA/whatomate-addons/conversation"
+	"github.com/SMSFlow-ZA/whatomate-addons/notifications"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/assignment"
@@ -31,24 +32,25 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
-	ExtensionRegistry     *extensions.Registry
-	ExtensionGuard        *extensions.Guard
-	ExtensionSecurity     *extsecurity.Service
-	ExtensionMFAFreshness time.Duration
-	ExtensionAPI          map[string]http.Handler
-	ExtensionConversation *conversation.Service
-	ExtensionCarrier      *carrier.Service
-	ExtensionAccess       *addonapi.AccessStore
-	BuildSourceURL        string
-	Config                *config.Config
-	DB                    *gorm.DB
-	Redis                 *redis.Client
-	Log                   logf.Logger
-	WhatsApp              *whatsapp.Client
-	WSHub                 *websocket.Hub
-	Queue                 queue.Queue
-	Channels              *channelapp.Service
-	CampaignSubCancel     context.CancelFunc
+	ExtensionRegistry      *extensions.Registry
+	ExtensionGuard         *extensions.Guard
+	ExtensionSecurity      *extsecurity.Service
+	ExtensionMFAFreshness  time.Duration
+	ExtensionAPI           map[string]http.Handler
+	ExtensionConversation  *conversation.Service
+	ExtensionCarrier       *carrier.Service
+	ExtensionNotifications map[string]*notifications.Service
+	ExtensionAccess        *addonapi.AccessStore
+	BuildSourceURL         string
+	Config                 *config.Config
+	DB                     *gorm.DB
+	Redis                  *redis.Client
+	Log                    logf.Logger
+	WhatsApp               *whatsapp.Client
+	WSHub                  *websocket.Hub
+	Queue                  queue.Queue
+	Channels               *channelapp.Service
+	CampaignSubCancel      context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)
