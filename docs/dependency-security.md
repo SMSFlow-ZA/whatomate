@@ -1,5 +1,39 @@
 # Dependency and runtime security
 
+## Automated publication gate (28 October 2026)
+
+The managed workflow builds once, saves the candidate and copies its binary from
+an unstarted container. Trivy 0.76.1 is checked against the official Linux release
+SHA-256 `c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0`.
+Official govulncheck v1.9.0 checks the extracted binary at package level. JSON mode
+does not fail on findings, so `scripts/release_security.py` evaluates the results
+explicitly. Imported affected packages block even without an identified call.
+
+The gate rejects secrets, critical findings, high findings with fixes, new high
+findings, unreviewed module/unknown findings, expired reviews and missing/stale or
+substituted evidence. A source-controlled, exact package/version/advisory review
+expires on 27 November 2026. It carries forward 47 unfixed high native entries
+described below; it does not declare the image free of vulnerabilities.
+
+The refreshed accepted-image scan also retains Debian's unclassified
+[CVE-2026-82560](https://security-tracker.debian.org/tracker/CVE-2026-82560),
+Perl POD-formatting resource exhaustion: the server does not format POD documents.
+The official Go database additionally lists GO-2026-6860 and GO-2026-6866 for
+`golang.org/x/net/html` in x/net v0.60.0. The accepted binary's package scan finds
+neither affected package in its imports; exact module-only exceptions are retained,
+alongside GO-2026-5932's unused OpenPGP package. Any affected imported package still
+blocks, irrespective of these module exceptions. This review does not certify
+native media parsers or copied Piper libraries safe.
+
+The workflow hashes the archive, binary and reports in a security receipt, verifies
+them and the local image identity immediately before pushing, and checks the
+published manifest's config digest. It never rebuilds after scanning. The loaded
+single-platform image deliberately omits BuildKit attestations; the retained
+source/config/archive/binary hashes and scanner evidence provide the release record.
+Scan reports are retained for 30 days, runtime archives for seven days. Reports
+can contain detected secret matches: do not paste them into public issues or logs.
+Existing application, browser and lint checks remain prerequisites to publication.
+
 The managed image retains upstream `v0.1.1-beta-0.17` application behavior with
 the fork's documented changes. Security dependency updates do not require an
 unrelated upstream application upgrade.
