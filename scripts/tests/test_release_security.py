@@ -92,7 +92,8 @@ class SecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             folder=Path(directory)
             config=json.dumps({'architecture':'amd64','os':'linux','config':{'Labels':{
-                'org.opencontainers.image.revision':'a'*40}}}).encode()
+                'org.opencontainers.image.revision':'a'*40}},
+                'rootfs':{'type':'layers','diff_ids':['sha256:'+'3'*64]}}).encode()
             with tarfile.open(folder/'whatomate-image.tar','w') as archive:
                 for name,value in [('config.json',config),('manifest.json',b'[{"Config":"config.json"}]')]:
                     info=tarfile.TarInfo(name);info.size=len(value);archive.addfile(info,io.BytesIO(value))
@@ -102,6 +103,9 @@ class SecurityTests(unittest.TestCase):
             (folder/'govulncheck.json').write_text('\n'.join(json.dumps(v) for v in self.go))
             (folder/'trivy-db.json').write_text(json.dumps({'UpdatedAt':self.now.isoformat()}))
             (folder/'trivy-version.json').write_text('{"Version":"0.76.1"}')
+            local={'Id':self.image,'Architecture':'amd64','Os':'linux','Config':json.loads(config)['config'],
+                   'RootFS':{'Type':'layers','Layers':['sha256:'+'3'*64]}}
+            (folder/'local-image.json').write_text(json.dumps(local))
             args=['tool','approve','--evidence',directory,'--source','a'*40,'--local-id',self.image]
             with patch('sys.argv',args):security.main()
             args[1]='verify'
@@ -112,5 +116,17 @@ class SecurityTests(unittest.TestCase):
                 path.write_bytes(old)
             args[-1]='sha256:'+'2'*64
             with patch('sys.argv',args),self.assertRaisesRegex(ValueError,'changed'):security.main()
+
+    def test_candidate_evidence_is_bound_before_approval(self):
+        config={'architecture':'amd64','os':'linux','config':{'Env':['PUBLIC=one']},
+                'rootfs':{'type':'layers','diff_ids':['sha256:'+'3'*64]}}
+        local={'Id':self.image,'Architecture':'amd64','Os':'linux','Config':{'Env':['PUBLIC=one']},
+               'RootFS':{'Type':'layers','Layers':['sha256:'+'3'*64]}}
+        security.bind_candidate(config,local,self.image)
+        for field,value in [('Id','sha256:'+'2'*64),('Architecture','arm64'),
+                            ('Config',{'Env':['PUBLIC=different']}),('RootFS',{'Type':'layers','Layers':[]})]:
+            changed={**local,field:value}
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                security.bind_candidate(config,changed,self.image)
 
 if __name__=='__main__':unittest.main()

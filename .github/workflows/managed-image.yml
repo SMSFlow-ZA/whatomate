@@ -45,6 +45,7 @@ jobs:
           mkdir evidence
           candidate=$(docker image inspect --format '{{.Id}}' "$IMAGE")
           printf 'CANDIDATE_ID=%s\n' "$candidate" >> "$GITHUB_ENV"
+          docker image inspect "$candidate" --format '{{json .}}' > evidence/local-image.json
           docker save --output evidence/whatomate-image.tar "$IMAGE"
           container=$(docker create --network none --entrypoint /not-executed "$candidate")
           trap 'docker rm "$container" >/dev/null' EXIT

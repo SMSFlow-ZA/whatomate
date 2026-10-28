@@ -97,6 +97,19 @@ def safe_report(report):
                        for result in report.get('Results') or []]}
 
 
+def bind_candidate(config,local,identity):
+    # Docker's containerd store can identify an image by its manifest/index,
+    # rather than the config digest. Bind immutable rootfs and runtime settings
+    # from inspection of that exact local ID to the saved archive before push.
+    def present(values):return {k:v for k,v in values.items() if v is not None}
+    if (local.get('Id')!=identity or local.get('Architecture')!=config.get('architecture')
+            or local.get('Os')!=config.get('os')
+            or present(local['Config'])!=present(config['config'])
+            or local['RootFS']['Type']!=config['rootfs']['type']
+            or local['RootFS']['Layers']!=config['rootfs']['diff_ids']):
+        raise ValueError('Saved scan candidate differs from local publish image')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=['approve','verify','redact'])
@@ -109,7 +122,7 @@ def main():
         return
     if not re.fullmatch('[a-f0-9]{40}',args.source) or not re.fullmatch('sha256:[a-f0-9]{64}',args.local_id):
         raise ValueError('Invalid candidate identity')
-    names=['whatomate-image.tar','whatomate-binary','trivy.json','govulncheck.json','trivy-db.json','trivy-version.json']
+    names=['whatomate-image.tar','whatomate-binary','trivy.json','govulncheck.json','trivy-db.json','trivy-version.json','local-image.json']
     hashes={name:sha(folder/name) for name in names}
     now=dt.datetime.now(dt.timezone.utc)
     if args.mode=='verify':
@@ -119,6 +132,7 @@ def main():
             raise ValueError('Candidate changed after security approval')
         print('Scanned candidate unchanged');return
     image,config=archive_config(folder/'whatomate-image.tar')
+    bind_candidate(config,json.loads((folder/'local-image.json').read_text()),args.local_id)
     if config.get('architecture')!='amd64' or config.get('os')!='linux' or config['config']['Labels'].get('org.opencontainers.image.revision')!=args.source:
         raise ValueError('Wrong candidate platform/source')
     version=json.loads((folder/'trivy-version.json').read_text())
