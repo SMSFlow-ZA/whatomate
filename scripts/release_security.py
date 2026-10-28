@@ -39,6 +39,8 @@ def evaluate(report,go,policy,image,now):
         raise ValueError('Wrong Go scanner/version/level')
     fresh(config['db_last_modified'],now,72)
     unused={tuple(v) for v in policy['reviewed_unused_go']}
+    aliases={v['osv']['id']:v['osv'].get('aliases',[]) for v in go if isinstance(v.get('osv'),dict)}
+    resolved_unused=set()
     for entry in go:
         if 'finding' not in entry:continue
         finding=entry['finding'];trace=finding['trace']
@@ -46,6 +48,11 @@ def evaluate(report,go,policy,image,now):
             raise ValueError('Affected Go package or symbol')
         if any((finding['osv'],frame['module'],frame['version']) not in unused for frame in trace):
             raise ValueError('Unreviewed Go module advisory')
+        for frame in trace:
+            resolved_unused.add((finding['osv'],frame['module'],frame['version']))
+            if config.get('db')=='https://vuln.go.dev':
+                resolved_unused.update((alias,frame['module'],frame['version'])
+                                       for alias in aliases.get(finding['osv'],[]))
     reviewed={tuple(v) for v in policy['reviewed_high']}
     residual=0
     for result in results:
@@ -60,7 +67,7 @@ def evaluate(report,go,policy,image,now):
                     raise ValueError('Fixable or unreviewed high image vulnerability')
                 residual+=1
             elif severity=='UNKNOWN':
-                if ((result['Type']!='gobinary' or (vuln['VulnerabilityID'],vuln['PkgName'],vuln['InstalledVersion']) not in unused)
+                if ((result['Type']!='gobinary' or (vuln['VulnerabilityID'],vuln['PkgName'],vuln['InstalledVersion']) not in resolved_unused)
                         and identity not in {tuple(v) for v in policy.get('reviewed_unknown',[])}):
                     raise ValueError('Unreviewed unknown-severity vulnerability')
     return {'reviewed_unfixed_high_entries':residual,'affected_go_packages':0,'embedded_secrets':0}

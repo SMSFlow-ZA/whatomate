@@ -25,6 +25,12 @@ alongside GO-2026-5932's unused OpenPGP package. Any affected imported package s
 blocks, irrespective of these module exceptions. This review does not certify
 native media parsers or copied Piper libraries safe.
 
+Trivy can name GO-2026-6860 and GO-2026-6866 as CVE-2026-78661 and
+CVE-2026-97045. Alias resolution uses only the official Go scan's OSV metadata
+and an exact reviewed module/version finding with no affected package. An alias
+alone, a changed version, a missing matching Go finding or an affected imported
+package cannot use the exception. OS-package exceptions remain exact identities.
+
 The workflow hashes the archive, binary and reports in a security receipt, verifies
 them and the local image identity immediately before pushing, and checks the
 published manifest's config digest. It never rebuilds after scanning. The loaded

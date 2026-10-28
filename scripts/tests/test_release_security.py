@@ -21,7 +21,7 @@ class SecurityTests(unittest.TestCase):
             'Results':[{'Target':'debian','Class':'os-pkgs','Type':'debian','Vulnerabilities':[]},
                        {'Target':'app/whatomate','Class':'lang-pkgs','Type':'gobinary','Vulnerabilities':[]}]}
         self.go=[{'config':{'scanner_name':'govulncheck','scanner_version':'v1.9.0',
-                          'scan_level':'package','db_last_modified':self.now.isoformat()}},
+                          'scan_level':'package','db':'https://vuln.go.dev','db_last_modified':self.now.isoformat()}},
                  {'SBOM':{'go_version':'go1.26.10','modules':[{'path':'stdlib','version':'v1.26.10'}]}}]
         self.policy={'expires_utc':(self.now+dt.timedelta(days=1)).isoformat(),'reviewed_high':[],
                      'reviewed_unused_go':[]}
@@ -86,6 +86,27 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.check()
             self.go=old
         self.go[0]['config']['scan_level']='module'
+        with self.assertRaises(ValueError):self.check()
+
+    def test_reviewed_unused_go_cve_alias_needs_matching_official_finding(self):
+        self.go.extend([{'osv':{'id':'GO-test','aliases':['CVE-test']}},
+                        {'finding':{'osv':'GO-test','trace':[{'module':'example.test/unused','version':'v1'}]}}])
+        self.policy['reviewed_unused_go']=[['GO-test','example.test/unused','v1']]
+        self.report['Results'][1]['Vulnerabilities']=[{'VulnerabilityID':'CVE-test',
+            'PkgName':'example.test/unused','InstalledVersion':'v1','FixedVersion':'v2','Severity':'UNKNOWN'}]
+        self.check()
+        self.go[0]['config']['db']='https://untrusted.example.invalid'
+        with self.assertRaises(ValueError):self.check()
+        self.go[0]['config']['db']='https://vuln.go.dev'
+        self.report['Results'][1]['Vulnerabilities'][0]['InstalledVersion']='v2'
+        with self.assertRaises(ValueError):self.check()
+        self.report['Results'][1]['Vulnerabilities'][0]['InstalledVersion']='v1'
+        self.go[-1]['finding']['trace'][0]['package']='example.test/unused'
+        with self.assertRaises(ValueError):self.check()
+        del self.go[-1]['finding']['trace'][0]['package']
+        self.go[2]['osv']['aliases']=[]
+        with self.assertRaises(ValueError):self.check()
+        self.go[2]['osv']['aliases']=['CVE-test'];self.go.pop()
         with self.assertRaises(ValueError):self.check()
 
     def test_approval_detects_changed_binary_archive_source_and_image(self):
