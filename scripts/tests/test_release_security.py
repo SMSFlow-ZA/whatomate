@@ -34,6 +34,14 @@ class SecurityTests(unittest.TestCase):
 
     def test_clean_candidate_passes(self):self.check()
 
+    def test_retained_report_never_contains_secret_matches_or_image_environment(self):
+        self.report['Metadata']['ImageConfig']={'config':{'Env':['PRIVATE=secret-sentinel']}}
+        self.report['Results'][0]['Secrets']=[{'RuleID':'private-key','Match':'secret-sentinel',
+            'Code':{'Lines':[{'Content':'secret-sentinel'}]}}]
+        value=security.safe_report(self.report)
+        self.assertNotIn('secret-sentinel',json.dumps(value))
+        self.assertEqual(value['Results'][0]['SecretCount'],1)
+
     def test_critical_new_high_fixable_high_and_secrets_block(self):
         for change in ({},{'Severity':'CRITICAL'},{'FixedVersion':'1.3'}):
             with self.subTest(change=change):

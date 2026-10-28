@@ -30,8 +30,10 @@ them and the local image identity immediately before pushing, and checks the
 published manifest's config digest. It never rebuilds after scanning. The loaded
 single-platform image deliberately omits BuildKit attestations; the retained
 source/config/archive/binary hashes and scanner evidence provide the release record.
-Scan reports are retained for 30 days, runtime archives for seven days. Reports
-can contain detected secret matches: do not paste them into public issues or logs.
+Safe advisory reports are retained for 30 days, runtime archives for seven days.
+Raw scanner reports can contain secrets and remain ephemeral: artifact reports
+omit matches, source snippets and image environment values. Never paste raw
+reports into public issues or logs.
 Existing application, browser and lint checks remain prerequisites to publication.
 
 The managed image retains upstream `v0.1.1-beta-0.17` application behavior with

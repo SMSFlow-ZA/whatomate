@@ -85,13 +85,28 @@ def archive_config(path):
         return 'sha256:'+hashlib.sha256(config).hexdigest(),json.loads(config)
 
 
+def safe_report(report):
+    # Raw scanner output may contain actual secrets and image environment values.
+    # Retain reviewable advisory identities and counts, never matched content.
+    return {'SchemaVersion':report.get('SchemaVersion'),'CreatedAt':report.get('CreatedAt'),
+            'ImageID':report.get('Metadata',{}).get('ImageID'),
+            'Results':[{'Type':result.get('Type'),'Class':result.get('Class'),
+                        'SecretCount':len(result.get('Secrets') or []),
+                        'Vulnerabilities':[{k:v.get(k) for k in ('VulnerabilityID','PkgName',
+                            'InstalledVersion','FixedVersion','Severity','Status')} for v in result.get('Vulnerabilities') or []]}
+                       for result in report.get('Results') or []]}
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['approve','verify'])
+    parser.add_argument('mode',choices=['approve','verify','redact'])
     parser.add_argument('--evidence',type=Path,required=True)
-    parser.add_argument('--source',required=True)
-    parser.add_argument('--local-id',required=True)
+    parser.add_argument('--source')
+    parser.add_argument('--local-id')
     args=parser.parse_args();folder=args.evidence
+    if args.mode=='redact':
+        (folder/'trivy-safe.json').write_text(json.dumps(safe_report(json.loads((folder/'trivy.json').read_text())),indent=2)+'\n')
+        return
     if not re.fullmatch('[a-f0-9]{40}',args.source) or not re.fullmatch('sha256:[a-f0-9]{64}',args.local_id):
         raise ValueError('Invalid candidate identity')
     names=['whatomate-image.tar','whatomate-binary','trivy.json','govulncheck.json','trivy-db.json','trivy-version.json']

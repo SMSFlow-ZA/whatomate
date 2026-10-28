@@ -101,13 +101,19 @@ jobs:
             evidence/published-manifest.json
             evidence/published-descriptor.json
           retention-days: 7
-      - name: Retain security reports even when publication is blocked
+      - name: Remove matched secrets and environment from retained report
+        if: always()
+        run: |
+          if test -f evidence/trivy.json; then
+            python3 scripts/release_security.py redact --evidence evidence
+          fi
+      - name: Retain safe security reports even when publication is blocked
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: managed-security
           path: |
-            evidence/trivy.json
+            evidence/trivy-safe.json
             evidence/trivy-db.json
             evidence/trivy-version.json
             evidence/govulncheck.json
