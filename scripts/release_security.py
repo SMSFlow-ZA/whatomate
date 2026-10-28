@@ -132,7 +132,13 @@ def main():
             raise ValueError('Candidate changed after security approval')
         print('Scanned candidate unchanged');return
     image,config=archive_config(folder/'whatomate-image.tar')
-    bind_candidate(config,json.loads((folder/'local-image.json').read_text()),args.local_id)
+    local=json.loads((folder/'local-image.json').read_text())
+    if local.get('Id')!=args.local_id:raise ValueError('Frozen local image identity differs')
+    # Classic Docker IDs are the raw config digest: equality binds every config
+    # byte and layer cryptographically, without comparing its legacy inspection
+    # defaults with OCI fields. Containerd index/manifest IDs need the detailed
+    # runtime/rootfs comparison instead. Never weaken that path to a tag match.
+    if image!=args.local_id:bind_candidate(config,local,args.local_id)
     if config.get('architecture')!='amd64' or config.get('os')!='linux' or config['config']['Labels'].get('org.opencontainers.image.revision')!=args.source:
         raise ValueError('Wrong candidate platform/source')
     version=json.loads((folder/'trivy-version.json').read_text())

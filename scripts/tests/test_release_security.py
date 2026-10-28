@@ -110,6 +110,17 @@ class SecurityTests(unittest.TestCase):
             with patch('sys.argv',args):security.main()
             args[1]='verify'
             with patch('sys.argv',args):security.main()
+            # Docker 28 overlay2 returns a config digest and adds legacy
+            # container defaults that are absent from the OCI archive config.
+            local['Id']=self.report['Metadata']['ImageID']
+            local['Config'].update(Hostname='',Domainname='',AttachStdin=False,
+                                   AttachStdout=False,AttachStderr=False,Tty=False,
+                                   OpenStdin=False,StdinOnce=False,Image='')
+            (folder/'local-image.json').write_text(json.dumps(local))
+            args[-1]=local['Id'];args[1]='approve'
+            with patch('sys.argv',args):security.main()
+            args[1]='verify'
+            with patch('sys.argv',args):security.main()
             for name in ['whatomate-binary','whatomate-image.tar','govulncheck.json']:
                 path=folder/name;old=path.read_bytes();path.write_bytes(old+b'changed')
                 with patch('sys.argv',args),self.assertRaisesRegex(ValueError,'changed'):security.main()

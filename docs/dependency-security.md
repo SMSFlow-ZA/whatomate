@@ -28,6 +28,10 @@ native media parsers or copied Piper libraries safe.
 The workflow hashes the archive, binary and reports in a security receipt, verifies
 them and the local image identity immediately before pushing, and checks the
 published manifest's config digest. It never rebuilds after scanning. The loaded
+candidate uses exact archive/config digest equality on classic Docker; containerd
+manifest/index identities require the full runtime/rootfs comparison. Classic
+Docker's extra empty container defaults are not OCI image configuration changes.
+The loaded
 single-platform image deliberately omits BuildKit attestations; the retained
 source/config/archive/binary hashes and scanner evidence provide the release record.
 Safe advisory reports are retained for 30 days, runtime archives for seven days.
