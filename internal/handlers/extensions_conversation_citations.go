@@ -30,6 +30,7 @@ func extensionCitationLabel(value string, maximum int) bool {
 
 // Render only provenance returned by the authorized current-source service.
 // Source has no title field: do not infer a title or leak unrelated page text.
+// Keep digest references in structured evidence, not the human-facing label.
 // Never clip an approved quote or silently omit citations to fit the channel.
 func extensionConversationAnswer(result ai.Result) conversation.Answer {
 	fallback := conversation.Answer{Text: ai.FixedResponse, Handoff: true}
@@ -52,7 +53,7 @@ func extensionConversationAnswer(result ai.Result) conversation.Answer {
 		}
 		seen[source.Reference] = source
 		references = append(references, source.Reference)
-		lines = append(lines, fmt.Sprintf("- %s | version %s | page %d | %s", source.DocumentID, source.Version, source.Page.Number, source.Reference))
+		lines = append(lines, fmt.Sprintf("- %s | version %s | page %d", source.DocumentID, source.Version, source.Page.Number))
 		if strings.Contains(source.Page.Text, result.Text) {
 			supported = true
 		}

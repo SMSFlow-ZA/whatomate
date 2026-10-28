@@ -71,8 +71,11 @@ func TestConversationCitationsPersistQuestionOnlyReply(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if turn.Selected != "" || len(turn.Cases) != 0 || !strings.Contains(turn.Reply, "Sources:") || !strings.Contains(turn.Reply, answer.Citations[0].Reference) {
+	if turn.Selected != "" || len(turn.Cases) != 0 || !strings.Contains(turn.Reply, "Sources:\n- DEMO-SOP-001 | version 2 | page 3") || strings.Contains(turn.Reply, answer.Citations[0].Reference) {
 		t.Fatal("question-only reply lost citations or invented a case")
+	}
+	if len(turn.Citations) != 1 || turn.Citations[0] != answer.Citations[0].Reference {
+		t.Fatal("readable reply lost internal structured provenance")
 	}
 	messages, e := delivery.List(ctx, db, tenant, inbound.Sender)
 	if e != nil || len(messages) != 1 || messages[0].Text != turn.Reply || messages[0].CaseID != "" {
@@ -83,7 +86,7 @@ func TestConversationCitationsPersistQuestionOnlyReply(t *testing.T) {
 		t.Fatal("question created an unconfirmed case", e)
 	}
 	replay, e := service.Receive(ctx, inbound)
-	if e != nil || replay.Reply != turn.Reply {
+	if e != nil || replay.Reply != turn.Reply || len(replay.Citations) != 1 || replay.Citations[0] != answer.Citations[0].Reference {
 		t.Fatal("replay changed sourced response", e)
 	}
 	messages, e = delivery.List(ctx, db, tenant, inbound.Sender)
