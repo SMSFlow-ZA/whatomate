@@ -20,6 +20,11 @@ configuration and stopping a connection. Existing Admin roles receive these
 permissions. Connections are scoped to the current organization. Credentials
 are encrypted using the deployment encryption key and never returned to clients.
 
+Connection-health counts cover enabled connections only. Disabling a retired
+connection preserves its failure counters and error details without reporting
+them as an active polling fault. Unknown submissions, blocked messages and bot
+work remain visible to health checks even when their connection is disabled.
+
 SMSFlow customers use their own dedicated SMPP-enabled Client ID and Client Secret. SMS fees
 are charged by SMSFlow, independently of the Whatomate subscription. Validation
 sends no SMS. Connection-prefixed SMPP message references filter report routing

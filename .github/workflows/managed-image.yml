@@ -4,6 +4,11 @@ on:
   push:
     branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027, codex/release-security-20261028]
   workflow_dispatch:
+    inputs:
+      rebuild_native:
+        description: Rebuild pinned FFmpeg/Piper native runtime from the full recipe
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ jobs:
         id: build
         with:
           context: .
-          file: docker/Dockerfile.managed
+          file: ${{ inputs.rebuild_native && 'docker/Dockerfile.managed' || 'docker/Dockerfile.managed-patch' }}
           push: false
           load: true
           provenance: false

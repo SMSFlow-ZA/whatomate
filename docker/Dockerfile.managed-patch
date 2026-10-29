@@ -1,0 +1,54 @@
+# Application patches reuse the immutable, security-reviewed native runtime.
+# Refresh native components with Dockerfile.managed, then review/update this pin.
+ARG RUNTIME_IMAGE=ghcr.io/smsflow-za/whatomate@sha256:802cb5f45a9cca5b1ce535db983d15eb63e1e320cab6f87907b76cb63b74b356
+FROM ${RUNTIME_IMAGE} AS verified-runtime
+
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS media-verifier
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gnupg \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=verified-runtime /usr/share/doc/whatomate-media/ /media/
+WORKDIR /media
+RUN echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmpeg-9.0.2.tar.xz" | sha256sum -c - \
+    && gpg --batch --import ffmpeg-devel.asc \
+    && gpg --batch --status-fd=1 --verify ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > patch-verification.txt \
+    && grep -q 'VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8 ' patch-verification.txt
+
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM golang:1.26.10-alpine@sha256:27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+COPY --from=frontend-builder /app/frontend/dist/ ./internal/frontend/dist/
+ARG VCS_REF
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-X main.Version=0.1.1-beta-0.17-managed-${VCS_REF} -X main.SourceRevision=${VCS_REF}" -o /whatomate ./cmd/whatomate
+
+FROM verified-runtime
+USER root
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+ARG VCS_REF
+LABEL org.opencontainers.image.source="https://github.com/SMSFlow-ZA/whatomate" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="0.1.1-beta-0.17-managed" \
+      org.opencontainers.image.base.name="ghcr.io/smsflow-za/whatomate" \
+      org.opencontainers.image.base.digest="sha256:802cb5f45a9cca5b1ce535db983d15eb63e1e320cab6f87907b76cb63b74b356"
+COPY --from=media-verifier /media/patch-verification.txt /usr/share/doc/whatomate-media/patch-verification.txt
+COPY --from=builder --chmod=0755 /whatomate /app/whatomate
+USER 10001:10001
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/app/whatomate"]
+CMD ["server","-config","/app/config.toml","-migrate"]
