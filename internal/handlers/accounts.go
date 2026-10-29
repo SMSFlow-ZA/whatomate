@@ -42,7 +42,7 @@ type AccountResponse struct {
 	AppID                  string     `json:"app_id"`
 	PhoneID                string     `json:"phone_id"`
 	BusinessID             string     `json:"business_id"`
-	WebhookVerifyToken     string     `json:"webhook_verify_token"`
+	WebhookVerifyToken     string     `json:"webhook_verify_token,omitempty"`
 	APIVersion             string     `json:"api_version"`
 	IsDefaultIncoming      bool       `json:"is_default_incoming"`
 	IsDefaultOutgoing      bool       `json:"is_default_outgoing"`
@@ -63,7 +63,7 @@ type AccountResponse struct {
 
 // ListAccounts returns all WhatsApp accounts for the organization
 func (a *App) ListAccounts(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceAccounts, models.ActionRead)
+	orgID, userID, err := a.requireAuth(r, models.ResourceAccounts, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -76,8 +76,12 @@ func (a *App) ListAccounts(r *fastglue.Request) error {
 
 	// Convert to response format (hide sensitive data)
 	response := make([]AccountResponse, len(accounts))
+	mayManage := a.HasPermission(userID, models.ResourceAccounts, models.ActionWrite, orgID)
 	for i, acc := range accounts {
 		response[i] = accountToResponse(acc)
+		if !mayManage {
+			response[i].WebhookVerifyToken = ""
+		}
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -176,7 +180,7 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 
 // GetAccount returns a single WhatsApp account
 func (a *App) GetAccount(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceAccounts, models.ActionRead)
+	orgID, userID, err := a.requireAuth(r, models.ResourceAccounts, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -192,7 +196,11 @@ func (a *App) GetAccount(r *fastglue.Request) error {
 		return nil
 	}
 
-	return r.SendEnvelope(accountToResponse(*account))
+	response := accountToResponse(*account)
+	if !a.HasPermission(userID, models.ResourceAccounts, models.ActionWrite, orgID) {
+		response.WebhookVerifyToken = ""
+	}
+	return r.SendEnvelope(response)
 }
 
 // UpdateAccount updates a WhatsApp account
