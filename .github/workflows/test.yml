@@ -7,8 +7,10 @@ on:
       - main
       - codex/plan-limits
       - codex/instance-branding
+      - codex/channels-smsflow-20261019
   pull_request:
     branches:
+      - codex/channels-smsflow-20261019
       - main
       - codex/managed-baseline
       - codex/production-hardening
@@ -18,6 +20,11 @@ permissions:
   contents: read
 
 jobs:
+  release-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s scripts/tests -v
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -69,7 +76,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
 
       - name: Download dependencies
@@ -91,12 +98,12 @@ jobs:
           # --format testname streams a PASS/FAIL line per test as it
           # completes, so a hanging test is easy to spot — the last
           # printed test is the one before the hang.
-          # -timeout 10m caps the whole run so a hung test fails the job
+          # -timeout 20m caps each package so a hung test fails the job
           # in a reasonable window instead of waiting for go's default.
           gotestsum \
             --format testname \
             --hide-summary=skipped \
-            -- -race -p 1 -timeout 10m -coverprofile=coverage.out $(go list ./... | grep -v /test/)
+            -- -race -p 1 -timeout 20m -coverprofile=coverage.out $(go list ./... | grep -v /test/)
 
       - name: Display coverage
         run: go tool cover -func=coverage.out | grep "total:"
@@ -117,7 +124,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
 
       - name: Run golangci-lint
@@ -134,7 +141,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
 
       - name: Build

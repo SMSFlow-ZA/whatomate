@@ -45,25 +45,28 @@ type ContactResponse struct {
 
 // MessageResponse represents a message for the frontend
 type MessageResponse struct {
-	ID               uuid.UUID            `json:"id"`
-	ContactID        uuid.UUID            `json:"contact_id"`
-	Direction        models.Direction     `json:"direction"`
-	MessageType      models.MessageType   `json:"message_type"`
-	Content          any                  `json:"content"`
-	MediaURL         string               `json:"media_url,omitempty"`
-	MediaMimeType    string               `json:"media_mime_type,omitempty"`
-	MediaFilename    string               `json:"media_filename,omitempty"`
-	InteractiveData  models.JSONB         `json:"interactive_data,omitempty"`
-	Status           models.MessageStatus `json:"status"`
-	WAMID            string               `json:"wamid"`
-	Error            string               `json:"error_message"`
-	IsReply          bool                 `json:"is_reply"`
-	ReplyToMessageID *string              `json:"reply_to_message_id,omitempty"`
-	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
-	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
-	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	Channel             string                  `json:"channel"`
+	ChannelConnectionID *uuid.UUID              `json:"channel_connection_id,omitempty"`
+	DeliveryAttempts    []models.ChannelAttempt `json:"delivery_attempts,omitempty"`
+	ID                  uuid.UUID               `json:"id"`
+	ContactID           uuid.UUID               `json:"contact_id"`
+	Direction           models.Direction        `json:"direction"`
+	MessageType         models.MessageType      `json:"message_type"`
+	Content             any                     `json:"content"`
+	MediaURL            string                  `json:"media_url,omitempty"` // base-path-relative path to the media endpoint, not the storage path
+	MediaMimeType       string                  `json:"media_mime_type,omitempty"`
+	MediaFilename       string                  `json:"media_filename,omitempty"`
+	InteractiveData     models.JSONB            `json:"interactive_data,omitempty"`
+	Status              models.MessageStatus    `json:"status"`
+	WAMID               string                  `json:"wamid"`
+	Error               string                  `json:"error_message"`
+	IsReply             bool                    `json:"is_reply"`
+	ReplyToMessageID    *string                 `json:"reply_to_message_id,omitempty"`
+	ReplyToMessage      *ReplyPreview           `json:"reply_to_message,omitempty"`
+	Reactions           []ReactionInfo          `json:"reactions,omitempty"`
+	WhatsAppAccount     string                  `json:"whatsapp_account,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+	UpdatedAt           time.Time               `json:"updated_at"`
 }
 
 // ReplyPreview contains a preview of the replied-to message
@@ -146,15 +149,11 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Check if phone masking is enabled
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
 
+	unreadCounts := a.unreadCountsByContact(contacts)
+
 	// Convert to response format
 	response := make([]ContactResponse, len(contacts))
 	for i, c := range contacts {
-		// Count unread messages
-		var unreadCount int64
-		a.DB.Model(&models.Message{}).
-			Where("contact_id = ? AND direction = ? AND status != ?", c.ID, models.DirectionIncoming, models.MessageStatusRead).
-			Count(&unreadCount)
-
 		tags := []string{}
 		if c.Tags != nil {
 			for _, t := range c.Tags {
@@ -183,7 +182,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			Metadata:           c.Metadata,
 			LastMessageAt:      c.LastMessageAt,
 			LastMessagePreview: c.LastMessagePreview,
-			UnreadCount:        int(unreadCount),
+			UnreadCount:        int(unreadCounts[c.ID]),
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
 			LastInboundAt:      c.LastInboundAt,
@@ -195,6 +194,38 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	}
 
 	return r.SendEnvelope(listEnvelope("contacts", response, total, pg))
+}
+
+// unreadCountsByContact returns unread incoming message counts for a page of
+// contacts in one grouped query. Contacts with no unread messages are absent (0).
+func (a *App) unreadCountsByContact(contacts []models.Contact) map[uuid.UUID]int64 {
+	counts := make(map[uuid.UUID]int64, len(contacts))
+	if len(contacts) == 0 {
+		return counts
+	}
+	ids := make([]uuid.UUID, len(contacts))
+	for i := range contacts {
+		ids[i] = contacts[i].ID
+	}
+
+	var rows []struct {
+		ContactID uuid.UUID
+		Count     int64
+	}
+	if err := a.DB.Model(&models.Message{}).
+		Select("contact_id, COUNT(*) AS count").
+		Where("contact_id IN ?", ids).
+		// Literals, not bind params, so cached generic plans still match idx_messages_contact_unread.
+		Where("direction = 'incoming' AND status <> 'read'").
+		Group("contact_id").
+		Scan(&rows).Error; err != nil {
+		a.Log.Error("Failed to count unread messages", "error", err)
+		return counts
+	}
+	for _, row := range rows {
+		counts[row.ContactID] = row.Count
+	}
+	return counts
 }
 
 // scopeAssignedContact narrows a contact query for users who lack the
@@ -281,7 +312,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	// Filter by WhatsApp account if specified
 	accountFilter := string(r.RequestCtx.QueryArgs().Peek("account"))
 	if accountFilter != "" {
-		msgQuery = msgQuery.Where("whats_app_account = ?", accountFilter)
+		msgQuery = msgQuery.Where("(whats_app_account = ? OR channel = 'sms')", accountFilter)
 	}
 
 	// Check if user without contacts:read should only see current conversation
@@ -352,7 +383,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	var messages []models.Message
-	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage").Preload("DeliveryAttempts").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
@@ -382,12 +413,13 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 		}
 
 		msgResp := MessageResponse{
+			Channel: m.Channel, ChannelConnectionID: m.ChannelConnectionID, DeliveryAttempts: m.DeliveryAttempts,
 			ID:              m.ID,
 			ContactID:       m.ContactID,
 			Direction:       m.Direction,
 			MessageType:     m.MessageType,
 			Content:         content,
-			MediaURL:        m.MediaURL,
+			MediaURL:        messageMediaURL(&m),
 			MediaMimeType:   m.MediaMimeType,
 			MediaFilename:   m.MediaFilename,
 			InteractiveData: m.InteractiveData,
@@ -504,8 +536,13 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 
 // SendMessageRequest represents a send message request
 type SendMessageRequest struct {
-	Type    models.MessageType `json:"type"`
-	Content struct {
+	Channel             string              `json:"channel"`
+	ClientMessageID     string              `json:"client_message_id,omitempty"`
+	ChannelConnectionID uuid.UUID           `json:"channel_connection_id"`
+	ConsentConfirmed    bool                `json:"consent_confirmed"`
+	Fallback            *SMSFallbackOptions `json:"sms_fallback,omitempty"`
+	Type                models.MessageType  `json:"type"`
+	Content             struct {
 		Body string `json:"body"`
 	} `json:"content"`
 	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
@@ -568,6 +605,26 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	}
 
 	// Get WhatsApp account - prefer request-specified account over contact default
+	if req.Channel == "sms" {
+		if a.Channels == nil || req.Type != models.MessageTypeText {
+			return r.SendErrorEnvelope(422, "SMS supports text messages only", nil, "")
+		}
+		var clientMessageID uuid.UUID
+		if req.ClientMessageID != "" {
+			clientMessageID, err = uuid.Parse(req.ClientMessageID)
+			if err != nil || clientMessageID == uuid.Nil {
+				return r.SendErrorEnvelope(422, "client_message_id must be a nonzero UUID", nil, "")
+			}
+		}
+		message, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{Contact: &contact, Channel: "sms", ChannelConnectionID: req.ChannelConnectionID, IdempotencyKey: clientMessageID, Type: req.Type, Content: req.Content.Body, ConsentConfirmed: req.ConsentConfirmed}, MessageSendOptions{SentByUserID: &userID})
+		if err != nil {
+			return r.SendErrorEnvelope(422, "SMS could not be queued; check connection, consent, opt-out and segment limit", nil, "sms_rejected")
+		}
+		return r.SendEnvelope(a.buildMessagesResponse([]models.Message{*message})[0])
+	}
+	if req.Channel != "" && req.Channel != "whatsapp" {
+		return r.SendErrorEnvelope(400, "Unsupported channel", nil, "")
+	}
 	accountName := contact.WhatsAppAccount
 	if req.WhatsAppAccount != "" {
 		accountName = req.WhatsAppAccount
@@ -591,6 +648,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Build request and send using unified sender
 	msgReq := OutgoingMessageRequest{
+		Fallback:       req.Fallback,
 		Account:        account,
 		Contact:        &contact,
 		Type:           req.Type,
@@ -757,6 +815,15 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid multipart form", nil, "")
 	}
 
+	if values := form.Value["channel"]; len(values) > 0 && values[0] != "" && values[0] != "whatsapp" {
+		return r.SendErrorEnvelope(400, "Media requires WhatsApp; add an SMS fallback version instead", nil, "")
+	}
+	var fallback *SMSFallbackOptions
+	if values := form.Value["sms_fallback"]; len(values) > 0 && values[0] != "" {
+		if len(values[0]) > 10000 || json.Unmarshal([]byte(values[0]), &fallback) != nil {
+			return r.SendErrorEnvelope(400, "Invalid SMS fallback policy", nil, "")
+		}
+	}
 	// Get contact ID from form
 	contactIDValues := form.Value["contact_id"]
 	if len(contactIDValues) == 0 {
@@ -842,6 +909,7 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 
 	// Build and send via unified message sender
 	msgReq := OutgoingMessageRequest{
+		Fallback:      fallback,
 		Account:       account,
 		Contact:       &contact,
 		Type:          models.MessageType(mediaType),
@@ -868,7 +936,7 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		Direction:       message.Direction,
 		MessageType:     message.MessageType,
 		Content:         map[string]string{"body": message.Content},
-		MediaURL:        message.MediaURL,
+		MediaURL:        messageMediaURL(message),
 		MediaMimeType:   message.MediaMimeType,
 		MediaFilename:   message.MediaFilename,
 		Status:          message.Status,

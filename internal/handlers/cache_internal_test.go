@@ -203,23 +203,16 @@ func TestGetWebhooksCached_OnlyActiveAndOrgScoped(t *testing.T) {
 }
 
 func TestGetWebhooksCached_CacheHitSkipsDB(t *testing.T) {
-	app := cacheTestApp(t)
-	orgID := uuid.New()
-
-	// Plant a synthetic cache entry — there is no matching row in the DB.
-	cacheKey := fmt.Sprintf("%s%s", webhooksCachePrefix, orgID.String())
-	cached := []models.Webhook{{
-		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: orgID,
-		Name: "from-cache", IsActive: true,
-	}}
-	data, err := json.Marshal(cached)
+	app, hook := signedCacheFixture(t)
+	_, err := app.getWebhooksCached(hook.OrganizationID)
 	require.NoError(t, err)
-	require.NoError(t, app.Redis.Set(context.Background(), cacheKey, data, time.Hour).Err())
-
-	got, err := app.getWebhooksCached(orgID)
+	// Change the DB without invalidation to prove the encrypted cache is used.
+	require.NoError(t, app.DB.Model(hook).Update("name", "database-only").Error)
+	got, err := app.getWebhooksCached(hook.OrganizationID)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	assert.Equal(t, "from-cache", got[0].Name, "cache hit must skip the DB read")
+	assert.Equal(t, "Signed cache fixture", got[0].Name, "cache hit must skip the DB read")
+	assert.Equal(t, hook.Secret, got[0].Secret)
 }
 
 func TestInvalidateWebhooksCache_DeletesKey(t *testing.T) {

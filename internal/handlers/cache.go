@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"gorm.io/gorm"
@@ -99,7 +100,7 @@ func (a *App) getChatbotFlowsCached(orgID uuid.UUID) ([]models.ChatbotFlow, erro
 
 	// Cache miss - fetch from database
 	var flows []models.ChatbotFlow
-	if err := a.DB.Where("organization_id = ? AND is_enabled = true", orgID).
+	if err := a.DB.Where("organization_id = ? AND is_enabled = true AND channel = 'whatsapp'", orgID).
 		Find(&flows).Error; err != nil {
 		return nil, err
 	}
@@ -264,17 +265,51 @@ func (a *App) InvalidateWhatsAppAccountCache(phoneID string) {
 	a.Redis.Del(ctx, cacheKey)
 }
 
-// getWebhooksCached retrieves active webhooks for an organization from cache or database
+// webhookCache is server-only: the public Webhook JSON intentionally omits Secret.
+// Encrypt the whole envelope, including any private custom HTTP headers.
+type webhookCache struct {
+	Version        int                 `json:"version"`
+	OrganizationID uuid.UUID           `json:"organization_id"`
+	Webhooks       []webhookCacheEntry `json:"webhooks"`
+}
+
+type webhookCacheEntry struct {
+	models.Webhook
+	SigningSecret string `json:"signing_secret"`
+}
+
+// getWebhooksCached retrieves active webhooks without losing their signing secrets.
 func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("%s%s", webhooksCachePrefix, orgID.String())
+	key := ""
+	if a.Config != nil {
+		key = a.Config.App.EncryptionKey
+	}
 
-	// Try cache first
-	cached, err := a.Redis.Get(ctx, cacheKey).Result()
-	if err == nil && cached != "" {
-		var webhooks []models.Webhook
-		if err := json.Unmarshal([]byte(cached), &webhooks); err == nil {
-			return webhooks, nil
+	// Without a key, Encrypt is a no-op. Bypass Redis rather than store secrets
+	// in plaintext or trust legacy entries that omitted the signing secret.
+	if key != "" && a.Redis != nil {
+		cached, err := a.Redis.Get(ctx, cacheKey).Result()
+		if err == nil && crypto.IsEncrypted(cached) {
+			if plaintext, err := crypto.Decrypt(cached, key); err == nil {
+				var envelope webhookCache
+				if json.Unmarshal([]byte(plaintext), &envelope) == nil && envelope.Version == 1 && envelope.OrganizationID == orgID {
+					webhooks := make([]models.Webhook, 0, len(envelope.Webhooks))
+					valid := true
+					for _, entry := range envelope.Webhooks {
+						if entry.OrganizationID != orgID || !entry.IsActive {
+							valid = false
+							break
+						}
+						entry.Secret = entry.SigningSecret
+						webhooks = append(webhooks, entry.Webhook)
+					}
+					if valid {
+						return webhooks, nil
+					}
+				}
+			}
 		}
 	}
 
@@ -284,9 +319,16 @@ func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 		return nil, err
 	}
 
-	// Cache the result
-	if data, err := json.Marshal(webhooks); err == nil {
-		a.Redis.Set(ctx, cacheKey, data, webhooksCacheTTL)
+	if key != "" && a.Redis != nil {
+		envelope := webhookCache{Version: 1, OrganizationID: orgID, Webhooks: make([]webhookCacheEntry, 0, len(webhooks))}
+		for _, hook := range webhooks {
+			envelope.Webhooks = append(envelope.Webhooks, webhookCacheEntry{Webhook: hook, SigningSecret: hook.Secret})
+		}
+		if data, err := json.Marshal(envelope); err == nil {
+			if encrypted, err := crypto.Encrypt(string(data), key); err == nil {
+				a.Redis.Set(ctx, cacheKey, encrypted, webhooksCacheTTL)
+			}
+		}
 	}
 
 	return webhooks, nil
@@ -446,14 +488,18 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 		return &UserPermissions{IsSuperAdmin: true}, nil
 	}
 	// Determine which role to use
+	// Determine which role to use. For a specific org the role has to come from
+	// that org's membership row — falling back to users.role_id would carry the
+	// user's home-org role (possibly admin) into a tenant they only belong to as
+	// a plain member. The fallback survives only for the user's own org, where
+	// legacy rows may predate user_organizations.
 	var roleID *uuid.UUID
 	if orgID != uuid.Nil {
-		// Look up role from user_organizations for this specific org
 		var userOrg models.UserOrganization
-		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&userOrg).Error; err == nil && userOrg.RoleID != nil {
+		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&userOrg).Error; err == nil {
 			roleID = userOrg.RoleID
-		} else {
-			// Fall back to user's default role
+		}
+		if roleID == nil && orgID == user.OrganizationID {
 			roleID = user.RoleID
 		}
 	} else {
@@ -461,7 +507,18 @@ func (a *App) getUserPermissionsCached(userID uuid.UUID, orgIDs ...uuid.UUID) (*
 	}
 
 	if roleID == nil {
-		return nil, gorm.ErrRecordNotFound
+		if !user.IsSuperAdmin {
+			return nil, gorm.ErrRecordNotFound
+		}
+		// Super admin in an org they hold no membership in: the flag alone grants
+		// access (HasPermission short-circuits on it), with no role-derived perms.
+		perms := UserPermissions{IsSuperAdmin: true, Permissions: []string{}}
+		if a.Redis != nil {
+			if data, err := json.Marshal(perms); err == nil {
+				a.Redis.Set(ctx, cacheKey, data, userPermissionsCacheTTL)
+			}
+		}
+		return &perms, nil
 	}
 
 	// Fetch role and load permissions via JOIN

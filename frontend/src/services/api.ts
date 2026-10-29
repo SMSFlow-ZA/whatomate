@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import type { ChannelSendFields } from '@/lib/channels'
 
 // Get base path from server-injected config or fallback
 const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
@@ -164,7 +165,7 @@ export const usersService = {
     api.put(`/users/${id}`, data),
   delete: (id: string) => api.delete(`/users/${id}`),
   me: () => api.get('/me'),
-  updateSettings: (data: { email_notifications: boolean; new_message_alerts: boolean; campaign_updates: boolean }) =>
+  updateSettings: (data: { email_notifications: boolean; new_message_alerts: boolean; campaign_updates: boolean; call_ringtone?: string }) =>
     api.put('/me/settings', data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.put('/me/password', data),
@@ -267,7 +268,7 @@ export const messagesService = {
     api.get(`/contacts/${contactId}/messages`, { params }),
   send: (
     contactId: string,
-    data: {
+    data: ChannelSendFields & {
       type: string
       content: any
       reply_to_message_id?: string
@@ -289,11 +290,12 @@ export const messagesService = {
       }
     },
   ) => api.post(`/contacts/${contactId}/messages`, data),
-  sendTemplate: (contactId: string, data: { template_name: string; template_params?: Record<string, string>; header_params?: Record<string, string>; button_params?: Record<string, string>; account_name?: string }, headerFile?: File) => {
+  sendTemplate: (contactId: string, data: ChannelSendFields & { template_name: string; template_params?: Record<string, string>; header_params?: Record<string, string>; button_params?: Record<string, string>; account_name?: string }, headerFile?: File) => {
     if (headerFile) {
       const formData = new FormData()
       formData.append('contact_id', contactId)
       formData.append('template_name', data.template_name)
+      if (data.sms_fallback) formData.append('sms_fallback', JSON.stringify(data.sms_fallback))
       if (data.template_params) {
         formData.append('template_params', JSON.stringify(data.template_params))
       }
@@ -390,6 +392,7 @@ export const chatbotService = {
     api.get<{ flows: any[]; total?: number }>('/chatbot/flows', { params }),
   getFlow: (id: string) => api.get(`/chatbot/flows/${id}`),
   createFlow: (data: any) => api.post('/chatbot/flows', data),
+  duplicateFlow: (id: string) => api.post(`/chatbot/flows/${id}/duplicate`),
   updateFlow: (id: string, data: any) => api.put(`/chatbot/flows/${id}`, data),
   deleteFlow: (id: string) => api.delete(`/chatbot/flows/${id}`),
 
@@ -578,6 +581,7 @@ export interface MetaAnalyticsResponse {
   account_name: string
   data: MetaAnalyticsData | null
   template_names?: Record<string, string> // meta_template_id -> template name
+  currency?: string // ISO 4217 code the WABA is billed in, from Meta
 }
 
 export const metaAnalyticsService = {
@@ -1144,7 +1148,7 @@ export interface CallTransfer {
   caller_phone: string
   contact_id: string
   whatsapp_account: string
-  status: 'waiting' | 'connected' | 'completed' | 'abandoned' | 'no_answer'
+  status: 'waiting' | 'connecting' | 'connected' | 'completed' | 'abandoned' | 'no_answer'
   team_id?: string
   agent_id?: string
   initiating_agent_id?: string

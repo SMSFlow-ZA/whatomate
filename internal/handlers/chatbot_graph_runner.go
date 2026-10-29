@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -152,7 +153,7 @@ func (a *App) runChatGraph(
 		// the same run, mirroring IVR's executeGotoFlow recursion. The
 		// outer loop's max-iteration guard prevents A→B→A pathologies.
 		if session.CurrentFlowID != nil && *session.CurrentFlowID != flow.ID {
-			newFlow, err := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
+			newFlow, err := a.getChatbotFlowByIDCached(session.OrganizationID, *session.CurrentFlowID)
 			if err != nil {
 				_ = a.persistChatSession(session)
 				return fmt.Errorf("goto_flow: load target: %w", err)
@@ -237,7 +238,7 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{outcome: "default"}, nil
 	}
 	text = processTemplate(text, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, text); err != nil {
+	if err := a.sendBotText(node, ctx, text); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send message: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, node.ID)
@@ -250,6 +251,28 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 // next edge and advance.
 // Config: { "body": "...", "buttons": [{ "id": "...", "title": "..." }, ...] }
 func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
+	if ctx.session.Channel == "sms" {
+		if !ctx.consumed && ctx.userInput != "" {
+			for i, b := range buttonsFromConfig(node.Config) {
+				id, _ := b["id"].(string)
+				title, _ := b["title"].(string)
+				if strings.EqualFold(strings.TrimSpace(ctx.userInput), title) || ctx.userInput == id || ctx.userInput == strconv.Itoa(i+1) {
+					ctx.buttonID = id
+					break
+				}
+			}
+		}
+		if ctx.buttonID == "" || ctx.consumed {
+			text := processTemplate(stringFromConfig(node.Config, "sms_text"), ctx.session.SessionData)
+			if text == "" {
+				return nodeOutcome{}, errors.New("SMS choices require an authored SMS version")
+			}
+			if err := a.sendBotText(node, ctx, text); err != nil {
+				return nodeOutcome{}, err
+			}
+			return nodeOutcome{yield: true}, nil
+		}
+	}
 	if !ctx.consumed && ctx.buttonID != "" {
 		ctx.consumed = true
 		// Persist the selection when the node configures store_as, mirroring
@@ -287,7 +310,20 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 		}
 	}
-	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons); err != nil {
+	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, func(req *OutgoingMessageRequest, index int) error {
+		copyNode := *node
+		if index > 0 {
+			copyNode.ID = fmt.Sprintf("%s:part:%d", node.ID, index)
+		}
+		if err := prepareBotDelivery(&copyNode, ctx, req); err != nil {
+			return err
+		}
+		// Multiple CTA cards belong to one node action: only the first owns SMS.
+		if index > 0 {
+			req.Fallback = nil
+		}
+		return nil
+	}); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
@@ -322,7 +358,7 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 			return nodeOutcome{}, fmt.Errorf("prompt node %q has no body configured", node.ID)
 		}
 		rendered := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+		if err := a.sendBotText(node, ctx, rendered); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
@@ -375,7 +411,7 @@ func (a *App) handleChatPromptInvalid(node *ChatNode, ctx *chatNodeCtx) (nodeOut
 		errorMsg = "Invalid input. Please try again."
 	}
 	errorMsg = processTemplate(errorMsg, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, errorMsg); err != nil {
+	if err := a.sendBotText(node, ctx, errorMsg); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send validation error: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, errorMsg, node.ID)
@@ -448,7 +484,7 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
 		rendered := processTemplate(tmpl, sessionData)
 		if rendered != "" {
-			if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+			if err := a.sendBotText(node, ctx, rendered); err != nil {
 				a.Log.Error("api_call node failed to send message_template",
 					"node", node.ID, "session", ctx.session.ID, "error", err)
 				// Still advance via http:2xx — the data fetch succeeded.
@@ -683,7 +719,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, answer); err != nil {
+	if err := a.sendBotText(node, ctx, answer); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
@@ -709,7 +745,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
 		message := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, message); err != nil {
+		if err := a.sendBotText(node, ctx, message); err != nil {
 			a.Log.Error("transfer node failed to send body",
 				"node", node.ID, "session", ctx.session.ID, "error", err)
 		} else {
@@ -923,7 +959,7 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 func (a *App) execChatEnd(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if msg := stringFromConfig(node.Config, "message"); msg != "" {
 		msg = processTemplate(msg, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, msg); err != nil {
+		if err := a.sendBotText(node, ctx, msg); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send end message: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, msg, node.ID)

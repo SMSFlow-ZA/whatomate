@@ -296,10 +296,21 @@ class WebSocketService {
     const currentContact = store.currentContact
     const isViewingThisContact = currentContact && payload.contact_id === currentContact.id
 
+    // The sidebar row is updated in place (addMessage does it for the open
+    // chat). Only refetch, coalesced, when the contact isn't loaded yet,
+    // e.g. a brand-new conversation.
+    if (!store.contacts.some(c => c.id === payload.contact_id)) {
+      store.scheduleContactsRefresh()
+    }
+
     if (isViewingThisContact) {
       // Add message to the store
       store.addMessage({
         id: payload.id,
+        channel: payload.channel,
+        channel_connection_id: payload.channel_connection_id,
+        delivery_attempts: payload.delivery_attempts,
+        whatsapp_account: payload.whatsapp_account,
         contact_id: payload.contact_id,
         direction: payload.direction,
         message_type: payload.message_type,
@@ -318,6 +329,8 @@ class WebSocketService {
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })
+    } else {
+      store.updateContactFromMessage(payload)
     }
 
     // Show toast notification for incoming messages if:
@@ -351,9 +364,8 @@ class WebSocketService {
     }
 
     // If the user is actively viewing this contact, mark messages read on
-    // the server before refetching so the unread badge stays at zero
-    // (otherwise the new message comes back as unread and the sidebar flashes
-    // a count for a chat that's already open). See issue #280.
+    // the server and clear the sidebar badge, so a chat that's already open
+    // doesn't show an unread count. See issue #280.
     // Use currentContact.id (already validated, from our /contacts response)
     // rather than the WS payload value to avoid pushing untrusted data into
     // a request URL.
@@ -371,15 +383,18 @@ class WebSocketService {
       || (document.visibilityState === 'visible' && document.hasFocus())
     if (isViewingThisContact && currentContact && payload.direction === 'incoming' && !alreadyRead && userActive) {
       contactsService.markRead(currentContact.id)
+        .then(() => store.markContactRead(currentContact.id))
         .catch(() => { /* non-critical, will resync on next chat-open */ })
-        .finally(() => store.fetchContacts())
-    } else {
-      store.fetchContacts()
     }
   }
 
   private handleStatusUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
-    store.updateMessageStatus(payload.message_id, payload.status, payload.error_message)
+    if (payload.channel_invalidation) {
+      store.scheduleContactsRefresh()
+      if (store.currentContact) void store.fetchMessages(store.currentContact.id)
+      return
+    }
+    store.updateMessageStatus(payload.message_id, payload.status, payload.error_message, payload.delivery_attempts)
   }
 
   private handleReactionUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
@@ -526,8 +541,9 @@ class WebSocketService {
     const callingStore = useCallingStore()
     callingStore.handleCallEvent('call_transfer_waiting', payload)
 
+    // No one-shot beep here — the calling store rings a looping tone for as
+    // long as the transfer is waiting.
     const contactName = payload.caller_phone || 'Unknown'
-    playNotificationSound()
     toast.info('Incoming Call Transfer', {
       description: `Call from ${contactName} waiting for an agent`,
       duration: 10000,

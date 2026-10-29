@@ -149,6 +149,7 @@ func (KeywordRule) TableName() string {
 // ChatbotFlow defines multi-step conversation flows
 type ChatbotFlow struct {
 	BaseModel
+	Channel            string       `gorm:"size:20;not null;default:whatsapp;index" json:"channel"`
 	OrganizationID     uuid.UUID    `gorm:"type:uuid;index;not null" json:"organization_id"`
 	WhatsAppAccount    string       `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	Name               string       `gorm:"size:255;not null" json:"name"`
@@ -215,18 +216,22 @@ func (ChatbotFlowStep) TableName() string {
 // ChatbotSession tracks active conversation sessions
 type ChatbotSession struct {
 	BaseModel
-	OrganizationID  uuid.UUID     `gorm:"type:uuid;index;not null" json:"organization_id"`
-	ContactID       uuid.UUID     `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppAccount string        `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	PhoneNumber     string        `gorm:"size:50;not null" json:"phone_number"`
-	Status          SessionStatus `gorm:"size:20;default:'active'" json:"status"` // active, completed, cancelled, timeout
-	CurrentFlowID   *uuid.UUID    `gorm:"type:uuid" json:"current_flow_id,omitempty"`
-	CurrentStep     string        `gorm:"size:100" json:"current_step"`
-	StepRetries     int           `gorm:"default:0" json:"step_retries"`
-	SessionData     JSONB         `gorm:"type:jsonb;default:'{}'" json:"session_data"`
-	StartedAt       time.Time     `gorm:"autoCreateTime" json:"started_at"`
-	LastActivityAt  time.Time     `json:"last_activity_at"`
-	CompletedAt     *time.Time    `json:"completed_at,omitempty"`
+	Channel                 string        `gorm:"size:20;not null;default:'whatsapp';index" json:"channel"`
+	ChannelConnectionID     *uuid.UUID    `gorm:"type:uuid;index" json:"channel_connection_id,omitempty"`
+	ChannelInboundMessageID *uuid.UUID    `gorm:"type:uuid" json:"-"`
+	SMSConsentConfirmed     bool          `gorm:"not null;default:false" json:"-"`
+	OrganizationID          uuid.UUID     `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ContactID               uuid.UUID     `gorm:"type:uuid;index;not null" json:"contact_id"`
+	WhatsAppAccount         string        `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	PhoneNumber             string        `gorm:"size:50;not null" json:"phone_number"`
+	Status                  SessionStatus `gorm:"size:20;default:'active'" json:"status"` // active, completed, cancelled, timeout
+	CurrentFlowID           *uuid.UUID    `gorm:"type:uuid" json:"current_flow_id,omitempty"`
+	CurrentStep             string        `gorm:"size:100" json:"current_step"`
+	StepRetries             int           `gorm:"default:0" json:"step_retries"`
+	SessionData             JSONB         `gorm:"type:jsonb;default:'{}'" json:"session_data"`
+	StartedAt               time.Time     `gorm:"autoCreateTime" json:"started_at"`
+	LastActivityAt          time.Time     `json:"last_activity_at"`
+	CompletedAt             *time.Time    `json:"completed_at,omitempty"`
 
 	// Relations
 	Organization *Organization           `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`

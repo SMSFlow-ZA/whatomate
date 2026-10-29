@@ -84,6 +84,7 @@ const completionConfig = ref<{
 }>({ url: '', method: 'POST', headers: {}, body: '' })
 const panelConfig = ref<PanelConfig>({ sections: [] })
 
+const flowChannel = ref<'whatsapp' | 'sms'>('whatsapp')
 const isLoading = ref(true)
 const loadError = ref(false)
 const isSaving = ref(false)
@@ -555,6 +556,7 @@ async function loadFlow() {
     const response = await chatbotService.getFlow(flowId.value)
     const flow = response.data.data || response.data
 
+    flowChannel.value = flow.channel || 'whatsapp'
     name.value = flow.name || flow.Name || ''
     description.value = flow.description || flow.Description || ''
     enabled.value = flow.is_enabled ?? flow.IsEnabled ?? flow.enabled ?? true
@@ -592,7 +594,7 @@ async function loadAvailableFlows() {
   try {
     const res = await chatbotService.listFlows({ limit: 200 })
     const list = (res.data as any)?.data?.flows || (res.data as any)?.flows || []
-    availableFlows.value = list.map((f: any) => ({ id: f.id || f.ID, name: f.name || f.Name }))
+    availableFlows.value = list.filter((f:any) => f.channel !== 'sms').map((f: any) => ({ id: f.id || f.ID, name: f.name || f.Name }))
   } catch {
     availableFlows.value = []
   }
@@ -609,6 +611,7 @@ async function saveFlow() {
     const graph = toGraphPayload()
     const data: Record<string, any> = {
       name: name.value,
+      channel: flowChannel.value,
       description: description.value,
       trigger_keywords: triggerKeywords.value.split(',').map((k) => k.trim()).filter(Boolean),
       initial_message: initialMessage.value,
@@ -733,7 +736,7 @@ onMounted(async () => {
     <div class="flex items-center gap-2 px-4 py-2 border-b bg-muted/30 overflow-x-auto shrink-0">
       <span class="text-xs text-muted-foreground shrink-0">Add node:</span>
       <Button
-        v-for="p in palette"
+        v-for="p in palette.filter(p => flowChannel !== 'sms' || ['message','buttons','condition','timing','end'].includes(p.type))"
         :key="p.type"
         variant="outline"
         size="sm"
@@ -787,6 +790,7 @@ onMounted(async () => {
         <div v-if="selectedChatNode && selectedChatNode.type !== 'start'" class="flex-1 overflow-y-auto">
           <ChatNodeProperties
             :node="selectedChatNode"
+            :sms-flow="flowChannel === 'sms'"
             :current-flow-id="flowId"
             :available-flows="availableFlows"
             @update:node="onUpdateNode"
@@ -801,6 +805,8 @@ onMounted(async () => {
               <CardTitle class="text-sm font-medium">{{ $t('flowBuilder.flowSettings') }}</CardTitle>
             </CardHeader>
 
+            <label class="block space-y-1 text-xs">Flow channel<select v-model="flowChannel" :disabled="!isNewFlow" class="w-full rounded border bg-background p-2"><option value="whatsapp">WhatsApp</option><option value="sms">SMS</option></select></label>
+            <p v-if="flowChannel === 'sms'" class="text-xs text-muted-foreground">Bind this flow to an SMS connection under Settings → Channels. SMS replies do not open a WhatsApp session.</p>
             <!-- Trigger keywords -->
             <div class="space-y-1.5">
               <Label class="text-xs">{{ $t('flowBuilder.triggerKeywords') }}</Label>

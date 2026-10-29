@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/channelmigration"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
@@ -58,6 +59,10 @@ func GetMigrationModels() []MigrationModel {
 		// Core models
 		{"Organization", &models.Organization{}},
 		{"InstanceBranding", &models.InstanceBranding{}},
+		{"ChannelConnection", &models.ChannelConnection{}},
+		{"ChannelAttempt", &models.ChannelAttempt{}},
+		{"ChannelReceipt", &models.ChannelReceipt{}},
+		{"ChannelBotJob", &models.ChannelBotJob{}},
 		{"Permission", &models.Permission{}},
 		{"CustomRole", &models.CustomRole{}},
 		{"User", &models.User{}},
@@ -127,7 +132,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return nil
+	return channelmigration.Run(db)
 }
 
 // RunMigrationWithProgress runs migrations with a progress bar display
@@ -166,6 +171,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	}
 
 	// Create indexes
+	if err := channelmigration.Run(silentDB); err != nil {
+		return err
+	}
 	for _, idx := range indexes {
 		printProgress(currentStep, totalSteps)
 		if err := silentDB.Exec(idx).Error; err != nil {
@@ -244,6 +252,8 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
+		// Partial index for per-contact unread counts in the contact list
+		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_assigned_read ON contacts(assigned_user_id, is_read)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
@@ -392,7 +402,8 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 }
 
 // BackfillLastInboundAt sets last_inbound_at for existing contacts from their
-// most recent incoming message. Only updates contacts where the field is NULL.
+// most recent WhatsApp incoming message. Only updates contacts where the field
+// is NULL; SMS activity must never open the WhatsApp service window.
 func BackfillLastInboundAt(db *gorm.DB) error {
 	return db.Exec(`
 		UPDATE contacts c
@@ -401,6 +412,7 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 			SELECT contact_id, MAX(created_at) AS max_created
 			FROM messages
 			WHERE direction = 'incoming' AND deleted_at IS NULL
+			  AND COALESCE(channel, '') IN ('', 'whatsapp')
 			GROUP BY contact_id
 		) sub
 		WHERE c.id = sub.contact_id AND c.last_inbound_at IS NULL AND c.deleted_at IS NULL

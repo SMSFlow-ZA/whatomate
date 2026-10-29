@@ -246,6 +246,10 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 
 	// Get or create active session for this contact
 	session, isNewSession := a.getOrCreateSession(account.OrganizationID, contact.ID, account.Name, msg.From, settings.SessionTimeoutMins)
+	if msg.ID != "" {
+		inboundID := uuid.NewSHA1(account.OrganizationID, []byte("whatsapp:"+account.PhoneID+":"+msg.ID))
+		session.ChannelInboundMessageID = &inboundID
+	}
 
 	// Log incoming message to session
 	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
@@ -521,7 +525,18 @@ func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *m
 // sendAndSaveInteractiveButtons sends an interactive button message and saves it to the database.
 // Buttons with type "url" are automatically separated and sent as CTA URL messages,
 // since WhatsApp doesn't allow mixing reply buttons and URL buttons in the same message.
-func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any) error {
+func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any, prepare ...func(*OutgoingMessageRequest, int) error) error {
+	index := 0
+	send := func(req OutgoingMessageRequest) error {
+		if len(prepare) > 0 {
+			if err := prepare[0](&req, index); err != nil {
+				return err
+			}
+		}
+		index++
+		_, err := a.SendOutgoingMessage(context.Background(), req, ChatbotSendOptions())
+		return err
+	}
 	// Separate reply buttons from CTA buttons (url / phone)
 	replyButtons := make([]map[string]any, 0, len(buttons))
 	ctaButtons := make([]map[string]any, 0)
@@ -576,15 +591,14 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 			if len(waButtons) > 3 {
 				interactiveType = "list"
 			}
-			ctx := context.Background()
-			if _, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+			if err := send(OutgoingMessageRequest{
 				Account:         account,
 				Contact:         contact,
 				Type:            models.MessageTypeInteractive,
 				InteractiveType: interactiveType,
 				BodyText:        bodyText,
 				Buttons:         waButtons,
-			}, ChatbotSendOptions()); err != nil {
+			}); err != nil {
 				return err
 			}
 		}
@@ -604,7 +618,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 			if i > 0 {
 				ctaBody = btnTitle
 			}
-			if err := a.sendAndSaveCTAURLButton(account, contact, ctaBody, btnTitle, btnURL); err != nil {
+			if err := send(OutgoingMessageRequest{Account: account, Contact: contact, Type: models.MessageTypeInteractive, InteractiveType: "cta_url", BodyText: ctaBody, ButtonText: btnTitle, URL: btnURL}); err != nil {
 				return err
 			}
 		}
@@ -612,26 +626,10 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 	// No buttons at all — fall back to text
 	if len(replyButtons) == 0 && len(ctaButtons) == 0 {
-		return a.sendAndSaveTextMessage(account, contact, bodyText)
+		return send(OutgoingMessageRequest{Account: account, Contact: contact, Type: models.MessageTypeText, Content: bodyText})
 	}
 
 	return nil
-}
-
-// sendAndSaveCTAURLButton sends a CTA URL button message and saves it to the database
-// Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveCTAURLButton(account *models.WhatsAppAccount, contact *models.Contact, bodyText, buttonText, url string) error {
-	ctx := context.Background()
-	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
-		Account:         account,
-		Contact:         contact,
-		Type:            models.MessageTypeInteractive,
-		InteractiveType: "cta_url",
-		BodyText:        bodyText,
-		ButtonText:      buttonText,
-		URL:             url,
-	}, ChatbotSendOptions())
-	return err
 }
 
 // sendAndSaveFlowMessage sends a WhatsApp Flow message and saves it to the database
@@ -660,7 +658,7 @@ func (a *App) getOrCreateSession(orgID, contactID uuid.UUID, accountName, phoneN
 	// Look for an active session that hasn't timed out
 	var session models.ChatbotSession
 	timeout := now.Add(-time.Duration(timeoutMins) * time.Minute)
-	result := a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND status = ? AND last_activity_at > ?",
+	result := a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND channel = 'whatsapp' AND status = ? AND last_activity_at > ?",
 		orgID, contactID, accountName, models.SessionStatusActive, timeout).First(&session)
 
 	if result.Error == nil {
@@ -1615,14 +1613,18 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 
 	// Dispatch webhook for incoming message
 	a.DispatchWebhook(account.OrganizationID, models.WebhookEventMessageIncoming, MessageEventData{
-		MessageID:       message.ID.String(),
-		ContactID:       contact.ID.String(),
-		ContactPhone:    contact.PhoneNumber,
-		ContactName:     contact.ProfileName,
-		MessageType:     models.MessageType(msgType),
-		Content:         content,
-		WhatsAppAccount: account.Name,
-		Direction:       models.DirectionIncoming,
+		MessageID:        message.ID.String(),
+		ContactID:        contact.ID.String(),
+		ContactPhone:     contact.PhoneNumber,
+		ContactName:      contact.ProfileName,
+		MessageType:      models.MessageType(msgType),
+		Content:          content,
+		MediaURL:         messageMediaURL(&message),
+		MediaMimeType:    message.MediaMimeType,
+		MediaFilename:    message.MediaFilename,
+		ReplyToMessageID: replyToMessageIDString(&message),
+		WhatsAppAccount:  account.Name,
+		Direction:        models.DirectionIncoming,
 	})
 }
 
@@ -1673,4 +1675,12 @@ func (a *App) isWithinBusinessHours(businessHours models.JSONBArray) bool {
 
 	// If no matching day found, assume outside business hours
 	return false
+}
+
+// replyToMessageIDString renders a message's reply target for webhook payloads.
+func replyToMessageIDString(m *models.Message) string {
+	if m == nil || m.ReplyToMessageID == nil {
+		return ""
+	}
+	return m.ReplyToMessageID.String()
 }

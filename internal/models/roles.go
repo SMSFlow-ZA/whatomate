@@ -51,6 +51,7 @@ const (
 	ResourceRoles                = "roles"
 	ResourceSettingsGeneral      = "settings.general"
 	ResourceSettingsBranding     = "settings.branding"
+	ResourceSettingsChannels     = "settings.channels"
 	ResourceSettingsChatbot      = "settings.chatbot"
 	ResourceSettingsSSO          = "settings.sso"
 	ResourceSettingsCalling      = "settings.calling"
@@ -124,6 +125,8 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceSettingsGeneral, Action: ActionWrite, Description: "Edit general settings"},
 		{Resource: ResourceSettingsBranding, Action: ActionRead, Description: "View instance branding settings"},
 		{Resource: ResourceSettingsBranding, Action: ActionWrite, Description: "Edit instance branding"},
+		{Resource: ResourceSettingsChannels, Action: ActionRead, Description: "View channel settings"},
+		{Resource: ResourceSettingsChannels, Action: ActionWrite, Description: "Manage channel connections"},
 		{Resource: ResourceSettingsChatbot, Action: ActionRead, Description: "View chatbot settings"},
 		{Resource: ResourceSettingsChatbot, Action: ActionWrite, Description: "Edit chatbot settings"},
 		{Resource: ResourceSettingsSSO, Action: ActionRead, Description: "View SSO settings"},

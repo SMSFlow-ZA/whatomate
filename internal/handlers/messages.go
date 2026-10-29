@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -20,6 +22,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ============================================================================
@@ -28,6 +31,12 @@ import (
 
 // OutgoingMessageRequest contains all parameters for sending any type of message
 type OutgoingMessageRequest struct {
+	IdempotencyKey      uuid.UUID
+	Source              string
+	Channel             string
+	ChannelConnectionID uuid.UUID
+	ConsentConfirmed    bool
+	Fallback            *SMSFallbackOptions
 	// Required
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
@@ -75,6 +84,17 @@ type OutgoingMessageRequest struct {
 
 	// Reply context
 	ReplyToMessage *models.Message
+}
+
+// SMSFallbackOptions is explicit workflow consent and policy, never an
+// account-wide implicit fallback. Rich content requires an authored SMS text.
+type SMSFallbackOptions struct {
+	Enabled          bool      `json:"enabled"`
+	ConnectionID     uuid.UUID `json:"connection_id"`
+	Text             string    `json:"text"`
+	ConsentConfirmed bool      `json:"consent_confirmed"`
+	TimeoutEnabled   bool      `json:"timeout_enabled"`
+	TimeoutMinutes   int       `json:"timeout_minutes"`
 }
 
 // MessageSendOptions configures optional behaviors for message sending
@@ -145,13 +165,97 @@ func SLASendOptions() MessageSendOptions {
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	if req.Contact == nil {
+		return nil, fmt.Errorf("contact required")
+	}
+	if req.Channel == "sms" {
+		if a.Channels == nil || req.Type != models.MessageTypeText {
+			return nil, fmt.Errorf("SMS text channel unavailable")
+		}
+		source := req.Source
+		if source == "" {
+			source = "message"
+		}
+		if req.IdempotencyKey != uuid.Nil {
+			return a.Channels.EnqueueSMSWithID(ctx, req.Contact.OrganizationID, req.Contact.ID, req.ChannelConnectionID, req.IdempotencyKey, req.Content, opts.SentByUserID, req.ConsentConfirmed, source)
+		}
+		return a.Channels.EnqueueSMS(ctx, req.Contact.OrganizationID, req.Contact.ID, req.ChannelConnectionID, req.Content, opts.SentByUserID, req.ConsentConfirmed, source)
+	}
+	if req.Channel != "" && req.Channel != "whatsapp" {
+		return nil, fmt.Errorf("unsupported channel")
+	}
+	if req.Account == nil || req.Account.OrganizationID != req.Contact.OrganizationID {
+		return nil, fmt.Errorf("WhatsApp account required")
+	}
 	// 1. Create message record
 	msg := a.createOutgoingMessage(req, opts)
+	replayed := false
+	if req.IdempotencyKey != uuid.Nil {
+		msg.ID = req.IdempotencyKey
+		// Hash only message input, never account credentials or mutable account
+		// configuration. JSON map encoding is canonical for string keys.
+		payload, err := json.Marshal(struct {
+			Type                                                                                               models.MessageType
+			Content, MediaID, MediaURL, Caption, InteractiveType, BodyText, ButtonText, URL, FlowID, FlowToken string
+			Buttons                                                                                            []whatsapp.Button
+			Fallback                                                                                           *SMSFallbackOptions
+		}{req.Type, req.Content, req.MediaID, req.MediaURL, req.Caption, req.InteractiveType, req.BodyText, req.ButtonText, req.URL, req.FlowID, req.FlowToken, req.Buttons, req.Fallback})
+		if err != nil {
+			return nil, err
+		}
+		if msg.Metadata == nil {
+			msg.Metadata = models.JSONB{}
+		}
+		msg.Metadata["bot_payload_hash"] = fmt.Sprintf("%x", sha256.Sum256(payload))
+	}
 
 	// Save to database
-	if err := a.DB.Create(msg).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if req.IdempotencyKey != uuid.Nil {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", msg.ID.String()).Error; err != nil {
+				return err
+			}
+			var existing models.Message
+			if err := tx.First(&existing, "id = ?", msg.ID).Error; err == nil {
+				if existing.OrganizationID != msg.OrganizationID || existing.ContactID != msg.ContactID || existing.WhatsAppAccount != msg.WhatsAppAccount || existing.Channel == "sms" || existing.MessageType != msg.MessageType || existing.Content != msg.Content {
+					return fmt.Errorf("conflicting bot message identifier")
+				}
+				if hash, ok := existing.Metadata["bot_payload_hash"]; ok && hash != msg.Metadata["bot_payload_hash"] {
+					return fmt.Errorf("conflicting bot message payload")
+				}
+				*msg = existing
+				replayed = true
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		if err := tx.Create(msg).Error; err != nil {
+			return err
+		}
+		if req.Fallback != nil && req.Fallback.Enabled {
+			if a.Channels == nil {
+				return fmt.Errorf("SMS fallback unavailable")
+			}
+			var timeout time.Duration
+			if req.Fallback.TimeoutEnabled {
+				minutes := req.Fallback.TimeoutMinutes
+				if minutes == 0 {
+					minutes = 10
+				}
+				timeout = time.Duration(minutes) * time.Minute
+			}
+			svc := *a.Channels
+			svc.DB = tx
+			return svc.AttachFallback(ctx, msg, req.Fallback.ConnectionID, req.Fallback.Text, req.Fallback.ConsentConfirmed, timeout)
+		}
+		return nil
+	}); err != nil {
 		a.Log.Error("Failed to create message", "error", err)
 		return nil, fmt.Errorf("failed to create message: %w", err)
+	}
+	if replayed {
+		return msg, nil
 	}
 
 	// 2. Define the send function based on message type
@@ -426,15 +530,32 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 
 // finalizeMessageSend updates message status and triggers post-send actions
 func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageRequest, opts MessageSendOptions, wamid string, err error) {
+	if a.Channels != nil && req.Fallback != nil && req.Fallback.Enabled {
+		status, code := "sent", 0
+		if err != nil {
+			status = "unknown"
+			var apiErr *whatsapp.CodedAPIError
+			if errors.As(err, &apiErr) {
+				status = "failed"
+				code = apiErr.Code
+			}
+		}
+		if recordErr := a.Channels.RecordWhatsApp(context.Background(), msg.ID, status, code); recordErr != nil {
+			a.Log.Error("Failed to record WhatsApp delivery attempt", "message_id", msg.ID)
+		}
+	}
 	// Use Where instead of Model(msg) to avoid mutating the shared msg struct,
 	// which may be read concurrently by the caller when sending is async.
 	if err != nil {
 		errMsg := err.Error()
 
-		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
+		q := a.DB.Model(&models.Message{}).Where("id = ? AND status NOT IN ?", msg.ID, []models.MessageStatus{models.MessageStatusDelivered, models.MessageStatusRead}).Updates(map[string]any{
 			"status":        models.MessageStatusFailed,
 			"error_message": errMsg,
 		})
+		if q.Error != nil || q.RowsAffected == 0 {
+			return
+		}
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
 		// Broadcast failure status via WebSocket so frontend updates immediately
@@ -452,10 +573,22 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		return
 	}
 
-	a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
+	q := a.DB.Model(&models.Message{}).Where("id = ? AND status NOT IN ?", msg.ID, []models.MessageStatus{models.MessageStatusDelivered, models.MessageStatusRead}).Updates(map[string]any{
 		"status":               models.MessageStatusSent,
 		"whats_app_message_id": wamid,
 	})
+	if q.Error != nil {
+		return
+	}
+	broadcastStatus := models.MessageStatusSent
+	if q.RowsAffected == 0 {
+		var stored models.Message
+		if a.DB.Select("id,status").First(&stored, "id = ?", msg.ID).Error != nil {
+			return
+		}
+		broadcastStatus = stored.Status
+		a.DB.Model(&models.Message{}).Where("id = ? AND whats_app_message_id = ''", msg.ID).Update("whats_app_message_id", wamid)
+	}
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
 
 	// Dispatch webhook for successful send
@@ -470,7 +603,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			Payload: map[string]any{
 				"message_id": msg.ID,
 				"contact_id": req.Contact.ID,
-				"status":     models.MessageStatusSent,
+				"status":     broadcastStatus,
 				"wamid":      wamid,
 			},
 		})
@@ -500,22 +633,24 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	}
 
 	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
+		"channel":               msg.Channel,
+		"channel_connection_id": msg.ChannelConnectionID,
+		"id":                    msg.ID.String(),
+		"contact_id":            contact.ID.String(),
+		"assigned_user_id":      assignedUserIDStr,
+		"profile_name":          profileName,
+		"direction":             msg.Direction,
+		"message_type":          msg.MessageType,
+		"content":               map[string]string{"body": msg.Content},
+		"media_url":             messageMediaURL(msg),
+		"media_mime_type":       msg.MediaMimeType,
+		"media_filename":        msg.MediaFilename,
+		"interactive_data":      msg.InteractiveData,
+		"status":                msg.Status,
+		"wamid":                 msg.WhatsAppMessageID,
+		"created_at":            msg.CreatedAt,
+		"updated_at":            msg.UpdatedAt,
+		"is_reply":              msg.IsReply,
 	}
 
 	// Add interactive data
@@ -574,6 +709,9 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		ContactName:     contact.ProfileName,
 		MessageType:     msg.MessageType,
 		Content:         msg.Content,
+		MediaURL:        messageMediaURL(msg),
+		MediaMimeType:   msg.MediaMimeType,
+		MediaFilename:   msg.MediaFilename,
 		WhatsAppAccount: account.Name,
 		Direction:       models.DirectionOutgoing,
 		SentByUserID:    sentByUserID,
@@ -630,13 +768,15 @@ func (a *App) getMessagePreview(req OutgoingMessageRequest) string {
 
 // SendTemplateMessageRequest represents the request to send a template message
 type SendTemplateMessageRequest struct {
-	ContactID      string            `json:"contact_id"`
-	PhoneNumber    string            `json:"phone_number"`    // Alternative to contact_id - send to phone directly
-	TemplateName   string            `json:"template_name"`   // Template name
-	TemplateID     string            `json:"template_id"`     // Alternative: template UUID
-	TemplateParams map[string]string `json:"template_params"` // Named or positional params
-	ButtonParams   map[string]string `json:"button_params"`   // Button index -> dynamic URL param value
-	AccountName    string            `json:"account_name"`    // Optional: specific WhatsApp account
+	Channel        string              `json:"channel"`
+	Fallback       *SMSFallbackOptions `json:"sms_fallback,omitempty"`
+	ContactID      string              `json:"contact_id"`
+	PhoneNumber    string              `json:"phone_number"`    // Alternative to contact_id - send to phone directly
+	TemplateName   string              `json:"template_name"`   // Template name
+	TemplateID     string              `json:"template_id"`     // Alternative: template UUID
+	TemplateParams map[string]string   `json:"template_params"` // Named or positional params
+	ButtonParams   map[string]string   `json:"button_params"`   // Button index -> dynamic URL param value
+	AccountName    string              `json:"account_name"`    // Optional: specific WhatsApp account
 
 	// Header media for templates with IMAGE/VIDEO/DOCUMENT headers.
 	// Three options (in priority order):
@@ -688,6 +828,14 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		if v := form.Value["account_name"]; len(v) > 0 {
 			req.AccountName = v[0]
+		}
+		if v := form.Value["channel"]; len(v) > 0 {
+			req.Channel = v[0]
+		}
+		if v := form.Value["sms_fallback"]; len(v) > 0 && v[0] != "" {
+			if json.Unmarshal([]byte(v[0]), &req.Fallback) != nil {
+				return r.SendErrorEnvelope(400, "Invalid SMS fallback policy", nil, "")
+			}
 		}
 		// Parse template_params from JSON string
 		if v := form.Value["template_params"]; len(v) > 0 && v[0] != "" {
@@ -953,8 +1101,12 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 	}
 
+	if req.Channel != "" && req.Channel != "whatsapp" {
+		return r.SendErrorEnvelope(400, "Templates require WhatsApp; add an SMS fallback version instead", nil, "")
+	}
 	// Send using unified message sender
 	msgReq := OutgoingMessageRequest{
+		Fallback:            req.Fallback,
 		Account:             account,
 		Contact:             contact,
 		Type:                models.MessageTypeTemplate,

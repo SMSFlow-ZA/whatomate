@@ -2,8 +2,13 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening]
+    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027, codex/release-security-20261028]
   workflow_dispatch:
+    inputs:
+      rebuild_native:
+        description: Rebuild pinned FFmpeg/Piper native runtime from the full recipe
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,41 +22,106 @@ jobs:
   image:
     needs: verification
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: ghcr.io/smsflow-za/whatomate:managed-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/setup-go@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          go-version: '1.26.10'
       - uses: docker/build-push-action@v6
         id: build
         with:
           context: .
-          file: docker/Dockerfile.managed
-          push: true
+          file: ${{ inputs.rebuild_native && 'docker/Dockerfile.managed' || 'docker/Dockerfile.managed-patch' }}
+          push: false
+          load: true
+          provenance: false
           platforms: linux/amd64
           tags: ghcr.io/smsflow-za/whatomate:managed-${{ github.sha }}
           build-args: VCS_REF=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Record immutable release
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Export candidate and extract binary without executing it
         run: |
-          printf 'Image: ghcr.io/smsflow-za/whatomate@%s\nSource: https://github.com/SMSFlow-ZA/whatomate/commit/%s\n' "$DIGEST" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-      - name: Export deployment image without registry credentials
+          set -euo pipefail
+          mkdir evidence
+          candidate=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+          printf 'CANDIDATE_ID=%s\n' "$candidate" >> "$GITHUB_ENV"
+          docker image inspect "$candidate" --format '{{json .}}' > evidence/local-image.json
+          docker save --output evidence/whatomate-image.tar "$IMAGE"
+          container=$(docker create --network none --entrypoint /not-executed "$candidate")
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/app/whatomate" evidence/whatomate-binary
+          sha256sum evidence/whatomate-image.tar > evidence/whatomate-image.tar.sha256
+          printf '%s\n' "$GITHUB_SHA" > evidence/source-revision.txt
+      - name: Install verified security tools
         run: |
-          docker pull "ghcr.io/smsflow-za/whatomate:managed-$GITHUB_SHA"
-          docker save --output whatomate-image.tar "ghcr.io/smsflow-za/whatomate:managed-$GITHUB_SHA"
-          sha256sum whatomate-image.tar > whatomate-image.tar.sha256
-          printf '%s\n' "$GITHUB_SHA" > source-revision.txt
+          set -euo pipefail
+          curl --fail --location --retry 3 --output trivy.tar.gz https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz
+          echo 'c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0  trivy.tar.gz' | sha256sum --check
+          mkdir scanner
+          tar -xzf trivy.tar.gz -C scanner trivy
+          ./scanner/trivy --version --format json > evidence/trivy-version.json
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: Scan saved candidate and exact Go binary
+        run: |
+          set -euo pipefail
+          ./scanner/trivy image --cache-dir "$RUNNER_TEMP/trivy" --download-db-only
+          cp "$RUNNER_TEMP/trivy/db/metadata.json" evidence/trivy-db.json
+          ./scanner/trivy image --cache-dir "$RUNNER_TEMP/trivy" --skip-db-update --skip-java-db-update --offline-scan --scanners vuln,secret --list-all-pkgs --ignorefile /dev/null --format json --output evidence/trivy.json --input evidence/whatomate-image.tar
+          govulncheck -mode=binary -scan=package -format=json evidence/whatomate-binary > evidence/govulncheck.json
+          python3 scripts/release_security.py approve --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish only the unchanged scanned candidate
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Id}}' "$IMAGE")" = "$CANDIDATE_ID"
+          python3 scripts/release_security.py verify --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID"
+          docker push "$IMAGE"
+          docker buildx imagetools inspect "$IMAGE" --raw > evidence/published-manifest.json
+          docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' > evidence/published-descriptor.json
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('evidence')
+          approval=json.loads((p/'security-approval.json').read_text())
+          manifest=json.loads((p/'published-manifest.json').read_text())
+          assert manifest['config']['digest']==approval['config_id'], 'Published image differs from scanned config'
+          PY
+          digest=$(python3 -c 'import json; print(json.load(open("evidence/published-descriptor.json"))["digest"])')
+          printf 'Image: ghcr.io/smsflow-za/whatomate@%s\nSource: https://github.com/SMSFlow-ZA/whatomate/commit/%s\n' "$digest" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: managed-runtime
           path: |
-            whatomate-image.tar
-            whatomate-image.tar.sha256
-            source-revision.txt
+            evidence/whatomate-image.tar
+            evidence/whatomate-image.tar.sha256
+            evidence/source-revision.txt
+            evidence/security-approval.json
+            evidence/published-manifest.json
+            evidence/published-descriptor.json
           retention-days: 7
+      - name: Remove matched secrets and environment from retained report
+        if: always()
+        run: |
+          if test -f evidence/trivy.json; then
+            python3 scripts/release_security.py redact --evidence evidence
+          fi
+      - name: Retain safe security reports even when publication is blocked
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-security
+          path: |
+            evidence/trivy-safe.json
+            evidence/trivy-db.json
+            evidence/trivy-version.json
+            evidence/govulncheck.json
+            evidence/security-approval.json
+          retention-days: 30

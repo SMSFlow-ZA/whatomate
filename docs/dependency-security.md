@@ -1,14 +1,66 @@
 # Dependency and runtime security
 
+## Automated publication gate (28 October 2026)
+
+The managed workflow builds once, saves the candidate and copies its binary from
+an unstarted container. Trivy 0.76.1 is checked against the official Linux release
+SHA-256 `c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0`.
+Official govulncheck v1.9.0 checks the extracted binary at package level. JSON mode
+does not fail on findings, so `scripts/release_security.py` evaluates the results
+explicitly. Imported affected packages block even without an identified call.
+
+The gate rejects secrets, critical findings, high findings with fixes, new high
+findings, unreviewed module/unknown findings, expired reviews and missing/stale or
+substituted evidence. A source-controlled, exact package/version/advisory review
+expires on 27 November 2026. It carries forward 47 unfixed high native entries
+described below; it does not declare the image free of vulnerabilities.
+
+The refreshed accepted-image scan also retains Debian's unclassified
+[CVE-2026-82560](https://security-tracker.debian.org/tracker/CVE-2026-82560),
+Perl POD-formatting resource exhaustion: the server does not format POD documents.
+The official Go database additionally lists GO-2026-6860 and GO-2026-6866 for
+`golang.org/x/net/html` in x/net v0.60.0. The accepted binary's package scan finds
+neither affected package in its imports; exact module-only exceptions are retained,
+alongside GO-2026-5932's unused OpenPGP package. Any affected imported package still
+blocks, irrespective of these module exceptions. This review does not certify
+native media parsers or copied Piper libraries safe.
+
+Trivy can name GO-2026-6860 and GO-2026-6866 as CVE-2026-78661 and
+CVE-2026-97045. Alias resolution uses only the official Go scan's OSV metadata
+and an exact reviewed module/version finding with no affected package. An alias
+alone, a changed version, a missing matching Go finding or an affected imported
+package cannot use the exception. OS-package exceptions remain exact identities.
+
+The workflow hashes the archive, binary and reports in a security receipt, verifies
+them and the local image identity immediately before pushing, and checks the
+published manifest's config digest. It never rebuilds after scanning. The loaded
+candidate uses exact archive/config digest equality on classic Docker; containerd
+manifest/index identities require the full runtime/rootfs comparison. Classic
+Docker's extra empty container defaults are not OCI image configuration changes.
+The loaded
+single-platform image deliberately omits BuildKit attestations; the retained
+source/config/archive/binary hashes and scanner evidence provide the release record.
+Safe advisory reports are retained for 30 days, runtime archives for seven days.
+Raw scanner reports can contain secrets and remain ephemeral: artifact reports
+omit matches, source snippets and image environment values. Never paste raw
+reports into public issues or logs.
+Existing application, browser and lint checks remain prerequisites to publication.
+
 The managed image retains upstream `v0.1.1-beta-0.17` application behavior with
 the fork's documented changes. Security dependency updates do not require an
 unrelated upstream application upgrade.
 
 ## Go dependencies
 
-The module requires Go 1.26. The managed Dockerfile pins Go 1.26.9 by image digest;
+The module requires Go 1.26. The managed Dockerfile pins Go 1.26.10 by image digest;
 use that patched compiler for release builds, rather than only the minimum module
 version. See the [Go release history](https://go.dev/doc/devel/release).
+
+The 26 October release check identified [GO-2026-6809 / CVE-2026-111943](https://pkg.go.dev/vuln/GO-2026-6809)
+in the former 1.26.9 compiler. The [official 1.26.10 security release](https://go.dev/doc/devel/release#go1.26.10)
+distrusts affected CA intermediate certificates in `crypto/x509`. The managed
+builder and CI toolchain use that patch without changing the application baseline
+or module graph. The pre-patch candidate must not be promoted as the patched image.
 
 The 15 October 2026 review updated `golang.org/x/crypto` to 0.57.0 and
 `golang.org/x/net` to 0.60.0, with their required transitive versions. The official
@@ -119,6 +171,17 @@ vulnerabilities. Compare the pinned source and compiled components with the
 build manifest, and review new parser findings before refreshing the image.
 
 ## Residual image findings, 15 October 2026
+
+Application patch releases use `docker/Dockerfile.managed-patch` with immutable
+native-runtime digest `802cb5f45a9cca5b1ce535db983d15eb63e1e320cab6f87907b76cb63b74b356`
+from reviewed source `41207ef1acf07305f213c1cfae08944492bb7b93`. The retained
+FFmpeg source checksum and detached signature are verified again with the same
+pinned signing fingerprint. FFmpeg/Piper binaries and notices remain inherited
+from that pinned image; Debian security updates and the application are rebuilt.
+The original complete native build stays in `docker/Dockerfile.managed`, selected
+with the managed workflow's `rebuild_native` input. Refresh/review the native pin
+when its components need updates. Both recipes must pass the same fresh exact-image
+and Go-binary security gates; a native pin never exempts a new or fixable advisory.
 
 Trivy 0.76.0 scanned the saved candidate image offline after a separate database
 download. It reported 187 OS package/advisory entries (84 unique advisories),
