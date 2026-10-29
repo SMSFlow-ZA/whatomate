@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/channelmigration"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -78,9 +79,13 @@ func SetupTestDBWithCleanup(t *testing.T, cleanup bool) *gorm.DB {
 
 // runMigrations runs all model migrations.
 func runMigrations(db *gorm.DB) error {
-	return db.AutoMigrate(
+	migrations := []any{
 		// Core models
 		&models.Organization{},
+		&models.ChannelConnection{},
+		&models.ChannelAttempt{},
+		&models.ChannelReceipt{},
+		&models.ChannelBotJob{},
 		&models.Permission{},
 		&models.CustomRole{},
 		&models.User{},
@@ -128,13 +133,23 @@ func runMigrations(db *gorm.DB) error {
 		&models.CallPermission{},
 		// Audit
 		&models.AuditLog{},
-	)
+	}
+	// Match production's per-model order. A single GORM migration batch can
+	// reorder the self-referencing message/attempt graph incorrectly on an
+	// empty database, hiding fresh-install failures behind existing test state.
+	for _, model := range migrations {
+		if err := db.AutoMigrate(model); err != nil {
+			return err
+		}
+	}
+	return channelmigration.Run(db)
 }
 
 // cleanupTables removes all data from tables (for PostgreSQL cleanup).
 // Uses TRUNCATE CASCADE to handle foreign key constraints properly.
 func cleanupTables(db *gorm.DB) {
 	tables := []string{
+		"channel_bot_jobs", "channel_receipts", "channel_attempts", "channel_connections",
 		// Dashboard tables
 		"widgets",
 		// Catalog tables
@@ -187,6 +202,7 @@ func cleanupTables(db *gorm.DB) {
 // TruncateTables truncates all tables (PostgreSQL only, faster than DELETE).
 func TruncateTables(db *gorm.DB) {
 	tables := []string{
+		"channel_bot_jobs", "channel_receipts", "channel_attempts", "channel_connections",
 		"widgets",
 		"catalog_products",
 		"catalogs",
