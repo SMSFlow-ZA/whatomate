@@ -172,6 +172,17 @@ build manifest, and review new parser findings before refreshing the image.
 
 ## Residual image findings, 15 October 2026
 
+Application patch releases use `docker/Dockerfile.managed-patch` with immutable
+native-runtime digest `802cb5f45a9cca5b1ce535db983d15eb63e1e320cab6f87907b76cb63b74b356`
+from reviewed source `41207ef1acf07305f213c1cfae08944492bb7b93`. The retained
+FFmpeg source checksum and detached signature are verified again with the same
+pinned signing fingerprint. FFmpeg/Piper binaries and notices remain inherited
+from that pinned image; Debian security updates and the application are rebuilt.
+The original complete native build stays in `docker/Dockerfile.managed`, selected
+with the managed workflow's `rebuild_native` input. Refresh/review the native pin
+when its components need updates. Both recipes must pass the same fresh exact-image
+and Go-binary security gates; a native pin never exempts a new or fixable advisory.
+
 Trivy 0.76.0 scanned the saved candidate image offline after a separate database
 download. It reported 187 OS package/advisory entries (84 unique advisories),
 including 47 high entries and no critical entries. None had a distribution fixed
