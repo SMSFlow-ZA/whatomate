@@ -162,6 +162,9 @@ func (a *App) Register(r *fastglue.Request) error {
 			IsDefault:      false,
 		}
 		if err := a.DB.Create(&userOrg).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to add existing user to organization", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to join organization", nil, "")
 		}
@@ -219,6 +222,9 @@ func (a *App) Register(r *fastglue.Request) error {
 
 	if err := tx.Create(&user).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create user", "error", err, "email", req.Email, "org_id", req.OrganizationID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
@@ -231,11 +237,17 @@ func (a *App) Register(r *fastglue.Request) error {
 	}
 	if err := tx.Create(&userOrg).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create user organization entry", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
 
 	if err := tx.Commit().Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to commit transaction", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}

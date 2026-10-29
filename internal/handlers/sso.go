@@ -314,6 +314,9 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 		}
 
 		if err := a.DB.Create(&user).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to create SSO user", "error", err, "email", userInfo.Email)
 			a.redirectWithError(r, "Failed to create user account")
 			return nil
@@ -327,6 +330,9 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 			IsDefault:      true,
 		}
 		if err := a.DB.Create(&userOrg).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to create user organization entry for SSO user", "error", err)
 			// Non-fatal: user was already created
 		}
@@ -474,6 +480,9 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 	ssoConfig.UserInfoURL = req.UserInfoURL
 
 	if err := a.DB.Save(&ssoConfig).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to save SSO provider", "error", err, "provider", provider)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save SSO settings", nil, "")
 	}
@@ -506,6 +515,9 @@ func (a *App) DeleteSSOProvider(r *fastglue.Request) error {
 
 	result := a.DB.Unscoped().Where("organization_id = ? AND provider = ?", orgID, provider).Delete(&models.SSOProvider{})
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to delete SSO provider", "error", result.Error, "provider", provider)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete SSO provider", nil, "")
 	}

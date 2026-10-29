@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -862,6 +861,9 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	// Save file locally first
 	localPath, err := a.saveMediaLocally(fileData, mimeType, fileHeader.Filename)
 	if err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to save media locally", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save media", nil, "")
 	}
@@ -921,11 +923,6 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 		subdir = "documents"
 	}
 
-	// Ensure directory exists
-	if err := a.ensureMediaDir(subdir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
-	}
-
 	// Get extension from MIME type or filename
 	ext := getExtensionFromMimeType(mimeType)
 	if ext == "" {
@@ -942,7 +939,7 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 	filePath := filepath.Join(a.getMediaStoragePath(), subdir, newFilename)
 
 	// Save file
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := a.storePlanMedia(filePath, data); err != nil {
 		return "", fmt.Errorf("failed to save media file: %w", err)
 	}
 

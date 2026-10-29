@@ -562,6 +562,9 @@ func (a *App) ImportData(r *fastglue.Request) error {
 					delete(recordMap, config.UniqueColumn)
 					if len(recordMap) > 0 {
 						if err := a.DB.Model(existing).Updates(recordMap).Error; err != nil {
+							if handled, responseErr := a.sendPlanError(r, err); handled {
+								return responseErr
+							}
 							errors++
 							errorMessages = append(errorMessages, fmt.Sprintf("Row %d: failed to update", rowNum))
 						} else {
@@ -616,6 +619,9 @@ func (a *App) ImportData(r *fastglue.Request) error {
 		// Use GORM to create the populated struct - this handles PostgreSQL properly
 		newRecord := newRecordVal.Addr().Interface()
 		if err := a.DB.Create(newRecord).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			errors++
 			errorMessages = append(errorMessages, fmt.Sprintf("Row %d: failed to create - %s", rowNum, err.Error()))
 			continue

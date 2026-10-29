@@ -150,6 +150,9 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Create(&account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
@@ -264,6 +267,9 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	account.UpdatedByID = &userID
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
 	}
@@ -309,6 +315,9 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Delete(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to delete account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete account", nil, "")
 	}
@@ -642,6 +651,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to save account", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
 	}
@@ -926,6 +938,9 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(account).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
 	}
 
