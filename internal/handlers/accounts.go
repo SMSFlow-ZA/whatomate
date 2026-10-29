@@ -269,6 +269,13 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	account.AutoReadReceipt = req.AutoReadReceipt
 	account.BusinessCallingEnabled = req.BusinessCallingEnabled
 
+	// The resolver decrypts stored credentials, including unchanged fields.
+	// Encrypt the complete model before saving a metadata-only update.
+	if err := a.encryptAccountSecrets(account); err != nil {
+		a.Log.Error("Failed to encrypt account secrets", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
+	}
+
 	// Handle default flags
 	if req.IsDefaultIncoming && !account.IsDefaultIncoming {
 		a.DB.Model(&models.WhatsAppAccount{}).
