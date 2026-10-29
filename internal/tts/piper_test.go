@@ -1,6 +1,7 @@
 package tts_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPiperTTS_Generate_UsesGuardAndKeepsTemporaryFilesOutsideAudio(t *testing.T) {
+	dir := t.TempDir()
+	denied := errors.New("storage quota reached")
+	p := &tts.PiperTTS{BinaryPath: fakePiper(t), ModelPath: "model", OpusencBinary: fakeOpusenc(t), AudioDir: dir}
+	p.Store = func(path string, data []byte) error {
+		require.Equal(t, dir, filepath.Dir(path))
+		require.Equal(t, "OggS", string(data))
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		require.Empty(t, entries, "temporary conversions must not consume persistent storage")
+		return denied
+	}
+	_, err := p.Generate("quota test")
+	require.ErrorIs(t, err, denied)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "denial must not leave audio or temporary files")
+}
+
+func TestPiperTTS_Generate_RejectsOversizedTemporaryOutput(t *testing.T) {
+	dir := t.TempDir()
+	p := &tts.PiperTTS{BinaryPath: fakeBin(t, "piper", `
+while [ "$#" -gt 0 ]; do
+  case "$1" in --output_file) out="$2"; shift 2;; *) shift;; esac
+done
+truncate -s 34603008 "$out"
+`), ModelPath: "model", OpusencBinary: fakeOpusenc(t), AudioDir: dir}
+	_, err := p.Generate("large output")
+	require.ErrorContains(t, err, "temporary output limit exceeded")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
 
 // fakeBin writes a small shell script that emulates piper or opusenc by
 // touching its --output_file (or last positional arg for opusenc) with a
