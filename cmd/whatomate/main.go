@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -162,6 +163,10 @@ func runServer(args []string) {
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
 		}
+	}
+
+	if err := plan.Install(db, cfg.Plan); err != nil {
+		lo.Fatal("Optional allowance initialization failed", "error", err)
 	}
 
 	// Connect to Redis
@@ -388,6 +393,10 @@ func runWorker(args []string) {
 	}
 	lo.Info("Connected to PostgreSQL")
 
+	if err := plan.Install(db, cfg.Plan); err != nil {
+		lo.Fatal("Optional allowance initialization failed", "error", err)
+	}
+
 	// Connect to Redis
 	rdb, err := database.NewRedis(&cfg.Redis)
 	if err != nil {
@@ -587,6 +596,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)
+	g.GET("/api/plan", app.GetPlan)
 	g.POST("/api/users", app.CreateUser)
 	g.GET("/api/users/{id}", app.GetUser)
 	g.PUT("/api/users/{id}", app.UpdateUser)

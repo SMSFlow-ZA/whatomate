@@ -305,6 +305,9 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 			"is_active":       true,
 			"is_super_admin":  isSuperAdmin,
 		}).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to restore user", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
 		}
@@ -357,6 +360,9 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Create(&user).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create user", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
 	}
@@ -369,6 +375,9 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		IsDefault:      true,
 	}
 	if err := a.DB.Create(&userOrg).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create user organization entry", "error", err)
 		// Non-fatal: user was already created
 	}
@@ -532,6 +541,9 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(&user).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update user", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
 	}
@@ -594,6 +606,9 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 		// Cross-org member: only remove from this organization
 		result := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Delete(&models.UserOrganization{})
 		if result.Error != nil {
+			if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to remove member", "error", result.Error)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
 		}
@@ -624,6 +639,9 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 
 	result := a.DB.Where("id = ?", id).Delete(&models.User{})
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to delete user", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete user", nil, "")
 	}
@@ -740,6 +758,9 @@ func (a *App) UpdateCurrentUserSettings(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(&user).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update user settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update settings", nil, "")
 	}
@@ -806,6 +827,9 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 
 	user.PasswordHash = string(hashedPassword)
 	if err := a.DB.Save(&user).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update password", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change password", nil, "")
 	}
@@ -963,6 +987,9 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 			StartedAt:      now,
 		}
 		if err := a.DB.Create(&log).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to create availability log", "error", err)
 			// Continue anyway - logging failure shouldn't block availability update
 		}
@@ -971,6 +998,9 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	user.IsAvailable = req.IsAvailable
 
 	if err := a.DB.Save(&user).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update availability", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update availability", nil, "")
 	}

@@ -223,6 +223,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Save(&org).Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update settings", nil, "")
 	}
@@ -425,6 +428,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 
 	if err := tx.Create(&org).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create organization", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -444,6 +450,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 	}
 	if err := tx.Create(&chatbotSettings).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to create chatbot settings", "error", err, "org_id", org.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -464,6 +473,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 	}
 	if err := tx.Create(&userOrg).Error; err != nil {
 		tx.Rollback()
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to add creator to organization", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -476,6 +488,9 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 	}
 
 	if err := tx.Commit().Error; err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to commit transaction", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
@@ -627,6 +642,9 @@ func (a *App) AddOrganizationMember(r *fastglue.Request) error {
 			IsDefault:      false,
 		}
 		if err := a.DB.Create(&userOrg).Error; err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
+				return responseErr
+			}
 			a.Log.Error("Failed to add organization member", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add member", nil, "")
 		}
@@ -661,6 +679,9 @@ func (a *App) RemoveOrganizationMember(r *fastglue.Request) error {
 	result := a.DB.Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
 		Delete(&models.UserOrganization{})
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to remove organization member", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
 	}
@@ -720,6 +741,9 @@ func (a *App) UpdateOrganizationMemberRole(r *fastglue.Request) error {
 		Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
 		Update("role_id", req.RoleID)
 	if result.Error != nil {
+		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+			return responseErr
+		}
 		a.Log.Error("Failed to update member role", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update member role", nil, "")
 	}

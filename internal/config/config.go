@@ -16,6 +16,7 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
+	Plan         PlanConfig         `koanf:"plan"`
 	App          AppConfig          `koanf:"app"`
 	Server       ServerConfig       `koanf:"server"`
 	Database     DatabaseConfig     `koanf:"database"`
@@ -222,6 +223,9 @@ func Load(configPath string) (*Config, error) {
 	// Set defaults
 	setDefaults(&cfg)
 
+	if err := ValidatePlan(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 

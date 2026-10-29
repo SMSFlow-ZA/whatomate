@@ -141,3 +141,10 @@ udp_port_max = 10100          # WebRTC UDP port range end
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+
+# Optional instance entity allowances. Disabled retains ordinary operation.
+[plan]
+enabled = false
+max_users = 100
+max_numbers = 10
+max_organizations = 0 # unlimited; explicitly set 1 for a single-organization host
