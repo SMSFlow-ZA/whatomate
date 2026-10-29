@@ -17,10 +17,16 @@ policy; `Notify` receives committed invalidations only.
 Each logical SMS ID is immutable. A durable one-shot claim precedes the network
 call; uncertain results are reconciled rather than resubmitted. Event pages and
 their cursor commit together; repeated receipts are deduplicated. Marketing and
-SMS opt-outs are checked again at dispatch. Author-written fallback is eligible
-only after confirmed recipient-undeliverable WhatsApp failure; timeouts alone do
-not authorize a second delivery channel. Balance snapshots retain their advertised
-units and never calculate billing or provision accounts.
+SMS opt-outs are checked again at dispatch. Fallback requires explicit consent
+and policy. Plain WhatsApp text can be reused; rich content needs an authored SMS
+alternative. A confirmed recipient-undeliverable WhatsApp
+failure (code 131026) queues it. Timeout fallback is off when the supplied timeout
+is zero; a caller may separately opt in with a positive interval up to 24 hours.
+After that interval, a waiting attempt is eligible only if WhatsApp submission
+was confirmed as sent. An unknown or unconfirmed submission cannot qualify by
+elapsed time, and delivered/read WhatsApp cancels pending fallback. Unread status
+alone is never a trigger. Balance snapshots retain their advertised units and
+never calculate billing or provision accounts.
 
 `channelmigration.Run` only relaxes the existing campaign template column to
 allow an SMS campaign; existing WhatsApp references remain. Channel fields default
