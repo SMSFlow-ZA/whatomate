@@ -264,6 +264,90 @@ func TestChannelHealthIncludesBalanceFailuresAndScopesOrganizations(t *testing.T
 	require.Contains(t, body, `"low_balance_connections":0`)
 }
 
+func TestChannelHealthCountsOnlyEnabledConnectionFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		enabled  bool
+		failures int
+		stale    bool
+		foreign  bool
+		wantLate int
+	}{
+		{name: "retired failure history", failures: 806, stale: true},
+		{name: "disabled overdue poll", stale: true},
+		{name: "enabled failed poll", enabled: true, failures: 1, wantLate: 1},
+		{name: "enabled overdue poll", enabled: true, stale: true, wantLate: 1},
+		{name: "enabled healthy poll", enabled: true},
+		{name: "foreign enabled failure", enabled: true, failures: 1, stale: true, foreign: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newTestApp(t)
+			org := testutil.CreateTestOrganization(t, app.DB)
+			user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
+			owner := org.ID
+			if tc.foreign {
+				owner = testutil.CreateTestOrganization(t, app.DB).ID
+			}
+			nextPoll := time.Now().Add(time.Minute)
+			if tc.stale {
+				nextPoll = time.Now().Add(-3 * time.Minute)
+			}
+			code := ""
+			if tc.failures > 0 {
+				code = "poll_failed"
+			}
+			connection := models.ChannelConnection{OrganizationID: owner, Name: "Health fixture", Provider: "fake", Enabled: tc.enabled, Credentials: "enc:unused", Capabilities: models.JSONB{}, NextPollAt: nextPoll, PollFailures: tc.failures, ErrorCode: code}
+			require.NoError(t, app.DB.Create(&connection).Error)
+			r := testutil.NewGETRequest(t)
+			testutil.SetAuthContext(r, org.ID, user.ID)
+			require.NoError(t, app.ChannelHealth(r))
+			require.Equal(t, 200, testutil.GetResponseStatusCode(r))
+			var response struct {
+				Data struct {
+					Healthy              bool `json:"healthy"`
+					UnhealthyConnections int  `json:"unhealthy_connections"`
+				}
+			}
+			require.NoError(t, json.Unmarshal(testutil.GetResponseBody(r), &response))
+			require.Equal(t, tc.wantLate, response.Data.UnhealthyConnections)
+			require.Equal(t, tc.wantLate == 0, response.Data.Healthy)
+			var retained models.ChannelConnection
+			require.NoError(t, app.DB.First(&retained, "id = ?", connection.ID).Error)
+			require.Equal(t, tc.enabled, retained.Enabled)
+			require.Equal(t, tc.failures, retained.PollFailures, "health must preserve historical failures")
+			require.Equal(t, code, retained.ErrorCode)
+		})
+	}
+}
+
+func TestChannelHealthRetiredConnectionDoesNotHideUnresolvedMessages(t *testing.T) {
+	for _, status := range []string{"unknown", "blocked"} {
+		t.Run(status, func(t *testing.T) {
+			app := newTestApp(t)
+			org := testutil.CreateTestOrganization(t, app.DB)
+			user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
+			contact := testutil.CreateTestContact(t, app.DB, org.ID)
+			message := models.Message{OrganizationID: org.ID, ContactID: contact.ID, Channel: "sms", Direction: models.DirectionOutgoing, MessageType: models.MessageTypeText, Content: "Pending review", Status: models.MessageStatusPending}
+			require.NoError(t, app.DB.Create(&message).Error)
+			connection := models.ChannelConnection{OrganizationID: org.ID, Name: "Retired", Provider: "fake", Enabled: false, Credentials: "enc:unused", Capabilities: models.JSONB{}}
+			require.NoError(t, app.DB.Create(&connection).Error)
+			attempt := models.ChannelAttempt{OrganizationID: org.ID, MessageID: message.ID, LogicalMessageID: message.ID, ConnectionID: &connection.ID, Channel: "sms", Status: status}
+			require.NoError(t, app.DB.Create(&attempt).Error)
+			r := testutil.NewGETRequest(t)
+			testutil.SetAuthContext(r, org.ID, user.ID)
+			require.NoError(t, app.ChannelHealth(r))
+			body := string(testutil.GetResponseBody(r))
+			require.Contains(t, body, `"healthy":false`)
+			require.Contains(t, body, `"unhealthy_connections":0`)
+			if status == "unknown" {
+				require.Contains(t, body, `"unresolved_submissions":1`)
+			} else {
+				require.Contains(t, body, `"blocked_sends":1`)
+			}
+		})
+	}
+}
+
 func TestSMSCampaignResumesDurableQueuedRecipients(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

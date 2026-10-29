@@ -277,7 +277,7 @@ func (a *App) ChannelHealth(r *fastglue.Request) error {
 	if err = a.DB.Model(&models.ChannelAttempt{}).Where("organization_id = ? AND status = ?", org, "blocked").Count(&blocked).Error; err != nil {
 		return r.SendErrorEnvelope(503, "Monitoring unavailable", nil, "")
 	}
-	if err = a.DB.Model(&models.ChannelConnection{}).Where("organization_id = ? AND (poll_failures > 0 OR (enabled = true AND next_poll_at < ?))", org, time.Now().Add(-2*time.Minute)).Count(&late).Error; err != nil {
+	if err = a.DB.Model(&models.ChannelConnection{}).Where("organization_id = ? AND enabled = true AND (poll_failures > 0 OR next_poll_at < ?)", org, time.Now().Add(-2*time.Minute)).Count(&late).Error; err != nil {
 		return r.SendErrorEnvelope(503, "Monitoring unavailable", nil, "")
 	}
 	var balances struct{ Low, Failed int64 }
