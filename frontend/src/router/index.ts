@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/branding',
+          name: 'branding',
+          component: () => import('@/views/settings/BrandingView.vue'),
+          meta: { permission: 'settings.branding' }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
           component: () => import('@/views/settings/ChatbotSettingsView.vue'),
@@ -361,6 +367,7 @@ const navigationOrder = [
   ]},
   { path: '/settings', permission: 'settings.general', childPaths: [
     { path: '/settings', permission: 'settings.general' },
+    { path: '/settings/branding', permission: 'settings.branding' },
     { path: '/settings/chatbot', permission: 'settings.chatbot' },
     { path: '/settings/accounts', permission: 'accounts' },
     { path: '/settings/canned-responses', permission: 'canned_responses' },

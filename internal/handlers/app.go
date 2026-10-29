@@ -24,14 +24,16 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
-	Config            *config.Config
-	DB                *gorm.DB
-	Redis             *redis.Client
-	Log               logf.Logger
-	WhatsApp          *whatsapp.Client
-	WSHub             *websocket.Hub
-	Queue             queue.Queue
-	CampaignSubCancel context.CancelFunc
+	// BrandingStorageLimit optionally resolves a host budget under the publication lock.
+	BrandingStorageLimit func(*gorm.DB) (int64, error)
+	Config               *config.Config
+	DB                   *gorm.DB
+	Redis                *redis.Client
+	Log                  logf.Logger
+	WhatsApp             *whatsapp.Client
+	WSHub                *websocket.Hub
+	Queue                queue.Queue
+	CampaignSubCancel    context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)

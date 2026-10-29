@@ -57,6 +57,7 @@ func GetMigrationModels() []MigrationModel {
 	return []MigrationModel{
 		// Core models
 		{"Organization", &models.Organization{}},
+		{"InstanceBranding", &models.InstanceBranding{}},
 		{"Permission", &models.Permission{}},
 		{"CustomRole", &models.CustomRole{}},
 		{"User", &models.User{}},
@@ -184,6 +185,10 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Fix existing organizations - link permissions to system roles if missing
 	if err := SeedSystemRolesForAllOrgs(silentDB); err != nil {
 		fmt.Printf("\n  \033[31m✗ Failed to fix existing role permissions\033[0m\n\n")
+		return err
+	}
+
+	if err := SeedBrandingAdminPermissions(silentDB); err != nil {
 		return err
 	}
 

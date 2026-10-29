@@ -20,6 +20,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
+	"github.com/shridarpatil/whatomate/internal/storagepublication"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
@@ -162,6 +163,10 @@ func runServer(args []string) {
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
 		}
+	}
+
+	if err := storagepublication.RecoverMediaPublications(db, []string{cfg.Storage.LocalPath, cfg.Calling.AudioDir}); err != nil {
+		lo.Fatal("Branding publication recovery failed", "error", err)
 	}
 
 	// Connect to Redis
@@ -454,6 +459,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Health check
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)
+	g.GET("/api/branding", app.GetBranding)
+	g.GET("/api/branding/assets/{asset}", app.BrandingAsset)
+	g.PUT("/api/branding", app.UpdateBranding)
+	g.DELETE("/api/branding", app.ResetBranding)
 
 	g.GET("/api/embedded-signup/config", app.GetEmbeddedSignupConfig)
 
@@ -515,6 +524,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 			return r
 		}
 		path := string(r.RequestCtx.Path())
+		if string(r.RequestCtx.Method()) == "GET" && (path == "/api/branding" || path == "/api/branding/assets/logo" || path == "/api/branding/assets/favicon") {
+			return r
+		}
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||

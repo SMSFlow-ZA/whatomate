@@ -81,6 +81,7 @@ func runMigrations(db *gorm.DB) error {
 	return db.AutoMigrate(
 		// Core models
 		&models.Organization{},
+		&models.InstanceBranding{},
 		&models.Permission{},
 		&models.CustomRole{},
 		&models.User{},
