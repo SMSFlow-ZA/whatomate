@@ -35,8 +35,11 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 FROM verified-runtime
 USER root
+# Single-process application containers do not need login accounting or SQLite.
+# Removing these image packages never changes the VM host.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get purge -y --allow-remove-essential util-linux liblastlog2-2 libsqlite3-0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 ARG VCS_REF

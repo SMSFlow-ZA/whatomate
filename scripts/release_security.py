@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import tarfile
+import urllib.request
 
 
 def timestamp(value):
@@ -19,7 +20,35 @@ def fresh(value,now,hours=24):
     if not -300 <= age <= hours*3600:raise ValueError('Stale or future scan evidence')
 
 
-def evaluate(report,go,policy,image,now):
+GO_DB_URL='https://vuln.go.dev/index/db.json'
+
+
+def collect_go_database(folder):
+    # A database can be unchanged for days. Fetch its current version rather
+    # than treating its last advisory modification as a download timestamp.
+    request=urllib.request.Request(GO_DB_URL,headers={'Cache-Control':'no-cache'})
+    with urllib.request.urlopen(request,timeout=30) as response:
+        if response.geturl()!=GO_DB_URL:raise ValueError('Unexpected Go database endpoint')
+        raw=response.read(4097)
+    if len(raw)>4096:raise ValueError('Oversized Go database metadata')
+    modified=json.loads(raw)['modified'];timestamp(modified)
+    evidence={'url':GO_DB_URL,'checked_utc':dt.datetime.now(dt.timezone.utc).isoformat(),'modified':modified}
+    (folder/'govulndb.json').write_text(json.dumps(evidence,indent=2)+'\n')
+
+
+def validate_go_database(config,evidence,now):
+    if not isinstance(evidence,dict) or set(evidence)!={'url','checked_utc','modified'}:
+        raise ValueError('Missing official Go database verification')
+    if config.get('db')!='https://vuln.go.dev' or evidence['url']!=GO_DB_URL:
+        raise ValueError('Untrusted Go database endpoint')
+    fresh(evidence['checked_utc'],now)
+    modified=timestamp(evidence['modified'])
+    if modified>now+dt.timedelta(seconds=300):raise ValueError('Future Go database metadata')
+    if timestamp(config['db_last_modified'])!=modified:
+        raise ValueError('Scanned Go database differs from freshly retrieved official version')
+
+
+def evaluate(report,go,policy,image,now,go_db):
     if timestamp(policy['expires_utc']) <= now:raise ValueError('Residual review expired')
     if report.get('SchemaVersion')!=2 or report.get('ArtifactType')!='container_image':
         raise ValueError('Unsupported image report')
@@ -37,7 +66,7 @@ def evaluate(report,go,policy,image,now):
     config=configs[0]
     if config.get('scanner_name')!='govulncheck' or config.get('scanner_version')!='v1.9.0' or config.get('scan_level')!='package':
         raise ValueError('Wrong Go scanner/version/level')
-    fresh(config['db_last_modified'],now,72)
+    validate_go_database(config,go_db,now)
     unused={tuple(v) for v in policy['reviewed_unused_go']}
     aliases={v['osv']['id']:v['osv'].get('aliases',[]) for v in go if isinstance(v.get('osv'),dict)}
     resolved_unused=set()
@@ -119,17 +148,19 @@ def bind_candidate(config,local,identity):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['approve','verify','redact'])
+    parser.add_argument('mode',choices=['approve','verify','redact','go-db'])
     parser.add_argument('--evidence',type=Path,required=True)
     parser.add_argument('--source')
     parser.add_argument('--local-id')
     args=parser.parse_args();folder=args.evidence
+    if args.mode=='go-db':
+        collect_go_database(folder);return
     if args.mode=='redact':
         (folder/'trivy-safe.json').write_text(json.dumps(safe_report(json.loads((folder/'trivy.json').read_text())),indent=2)+'\n')
         return
     if not re.fullmatch('[a-f0-9]{40}',args.source) or not re.fullmatch('sha256:[a-f0-9]{64}',args.local_id):
         raise ValueError('Invalid candidate identity')
-    names=['whatomate-image.tar','whatomate-binary','trivy.json','govulncheck.json','trivy-db.json','trivy-version.json','local-image.json']
+    names=['whatomate-image.tar','whatomate-binary','trivy.json','govulncheck.json','trivy-db.json','trivy-version.json','local-image.json','govulndb.json']
     hashes={name:sha(folder/name) for name in names}
     now=dt.datetime.now(dt.timezone.utc)
     if args.mode=='verify':
@@ -152,7 +183,7 @@ def main():
     if version.get('Version')!='0.76.1':raise ValueError('Wrong Trivy version')
     fresh(json.loads((folder/'trivy-db.json').read_text())['UpdatedAt'],now,72)
     policy=json.loads(Path(__file__).with_name('release-security-policy.json').read_text())
-    result=evaluate(json.loads((folder/'trivy.json').read_text()),stream_json(folder/'govulncheck.json'),policy,image,now)
+    result=evaluate(json.loads((folder/'trivy.json').read_text()),stream_json(folder/'govulncheck.json'),policy,image,now,json.loads((folder/'govulndb.json').read_text()))
     approval={**result,'checked_utc':now.isoformat(),'source':args.source,'local_id':args.local_id,'config_id':image,'hashes':hashes}
     (folder/'security-approval.json').write_text(json.dumps(approval,indent=2)+'\n')
     print(json.dumps(result))

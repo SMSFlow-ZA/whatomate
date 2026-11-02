@@ -208,3 +208,28 @@ findings seen in the distribution build. These components are additionally absen
 from the configured application build. The retained upstream Piper/ONNX libraries
 are not certified clean by this package scan; models remain immutable trusted
 image assets, and their provenance and new advisories need separate review.
+
+## 2 November runtime and database-version refresh
+
+A fresh scan identified [CVE-2026-119373](https://security-tracker.debian.org/tracker/CVE-2026-119373)
+in Debian's SQLite library, with no distribution fix. The runtime does not use
+SQLite. Its only installed reverse dependency is login accounting through
+`liblastlog2-2` and `util-linux`. The application image now deliberately removes
+those three packages together, keeping the remaining package dependency graph
+consistent. Debian marks the login utilities essential for a general-purpose OS;
+this removal is confined to the single-process application image and must never
+be applied to a VM host. PostgreSQL remains the application database. The managed
+image workflow tests the absence of SQLite and offline Piper speech synthesis,
+Opus encoding and FFmpeg conversion as the non-root runtime user with a read-only
+root filesystem and bounded temporary storage before scanning/publication.
+
+The [official Go database API](https://go.dev/doc/security/vuln/database#api)
+specifies that its modification timestamp must not be compared with wall-clock
+time: an unchanged database can still be current. The release gate now retrieves
+`https://vuln.go.dev/index/db.json` over verified HTTPS, rejects an unexpected
+endpoint, retains `govulndb.json`, requires that retrieval evidence to be less
+than 24 hours old and requires the scanner's database version to match it exactly.
+Missing, future, mismatched or substituted evidence still blocks publication.
+The receipt hashes this additional evidence alongside the reports and image.
+No advisory exception, residual-review expiry or vulnerability severity gate was
+relaxed. A newly published database during a scan requires a fresh matching scan.
