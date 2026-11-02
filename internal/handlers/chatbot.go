@@ -9,6 +9,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ChatbotSettingsResponse represents the response for chatbot settings
@@ -942,10 +943,19 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(422, err.Error(), nil, "")
 		}
 	}
-	if err := a.DB.Create(&flow).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		// GORM replaces a false bool with the model's default:true on insert.
+		// Persist the requested state explicitly in the same transaction so
+		// workers can never observe an unintentionally enabled draft.
+		if err := tx.Omit("IsEnabled").Create(&flow).Error; err != nil {
+			return err
+		}
+		return tx.Model(&flow).Update("is_enabled", req.Enabled).Error
+	}); err != nil {
 		a.Log.Error("Failed to create flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create flow", nil, "")
 	}
+	flow.IsEnabled = req.Enabled
 
 	// Invalidate cache
 	a.InvalidateChatbotFlowsCache(orgID)
