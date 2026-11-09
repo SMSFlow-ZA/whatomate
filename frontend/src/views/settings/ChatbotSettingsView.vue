@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import MessageButtonsEditor from '@/components/shared/MessageButtonsEditor.vue'
+import AIConnectionsPanel from './AIConnectionsPanel.vue'
 import type { ButtonConfig } from '@/types/flow-preview'
 import { validateWhatsAppButtons } from '@/lib/whatsappButtons'
 import { toast } from 'vue-sonner'
@@ -43,6 +44,7 @@ const agentsLogKey = ref(0)
 const hoursLogKey = ref(0)
 const slaLogKey = ref(0)
 const aiLogKey = ref(0)
+const refreshAIActivityLog = () => refreshActivityLog(aiLogKey)
 
 function refreshActivityLog(key: typeof messagesLogKey) {
   setTimeout(() => { key.value++ }, 500)
@@ -886,6 +888,7 @@ function removeEscalationUser(userId: string) {
                 </div>
               </CardContent>
             </Card>
+            <AIConnectionsPanel :key="orgID" :ai-enabled="isAIEnabled" @changed="refreshAIActivityLog" />
             <div v-if="orgID" class="mt-4">
               <AuditLogPanel :key="aiLogKey" resource-type="settings.chatbot.ai" :resource-id="orgID" />
             </div>

@@ -59,6 +59,8 @@ func GetMigrationModels() []MigrationModel {
 		// Core models
 		{"Organization", &models.Organization{}},
 		{"InstanceBranding", &models.InstanceBranding{}},
+		{"ChatbotAIConnection", &models.ChatbotAIConnection{}},
+		{"ChatbotAIBinding", &models.ChatbotAIBinding{}},
 		{"ChannelConnection", &models.ChannelConnection{}},
 		{"ChannelAttempt", &models.ChannelAttempt{}},
 		{"ChannelReceipt", &models.ChannelReceipt{}},

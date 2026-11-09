@@ -692,7 +692,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 			"node", node.ID, "session", ctx.session.ID, "error", err)
 		return nodeOutcome{outcome: "default"}, nil
 	}
-	if !settings.AI.Enabled || settings.AI.Provider == "" || settings.AI.APIKey == "" {
+	if !settings.AI.Enabled {
 		a.Log.Warn("ai_response node hit but AI not configured",
 			"node", node.ID, "session", ctx.session.ID,
 			"ai_enabled", settings.AI.Enabled, "has_provider", settings.AI.Provider != "")
@@ -707,7 +707,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		userMessage = processTemplate(tmpl, ctx.session.SessionData)
 	}
 
-	answer, err := a.generateAIResponse(settings, ctx.session, userMessage)
+	answer, err := a.generateAIResponse(settings, ctx.account.ID, ctx.session, userMessage)
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)

@@ -154,6 +154,11 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 				resource = models.ResourceChatbotKeywords
 			case "flows":
 				resource = models.ResourceFlowsChatbot
+			case "ai-connections":
+				resource = models.ResourceSettingsChatbot
+				if method != "GET" {
+					action = models.ActionWrite
+				}
 			case "ai-contexts":
 				resource = models.ResourceChatbotAI
 			case "sessions":

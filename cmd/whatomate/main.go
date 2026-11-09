@@ -227,6 +227,7 @@ func runServer(args []string) {
 	if err := app.InitializeChannels(); err != nil {
 		lo.Fatal("Channel registration failed", "error", err)
 	}
+	app.InitializeAIConnections()
 	channelCancel := app.StartChannelWorker()
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -750,6 +751,13 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Chatbot Settings
 	g.GET("/api/chatbot/settings", app.GetChatbotSettings)
 	g.PUT("/api/chatbot/settings", app.UpdateChatbotSettings)
+	g.GET("/api/chatbot/ai-connections", app.ListAIConnections)
+	g.POST("/api/chatbot/ai-connections", app.CreateAIConnection)
+	g.PUT("/api/chatbot/ai-connections/assignment", app.AssignAIConnection)
+	g.PUT("/api/chatbot/ai-connections/{id}", app.UpdateAIConnection)
+	g.POST("/api/chatbot/ai-connections/{id}/test", app.TestAIConnection)
+	g.POST("/api/chatbot/ai-connections/{id}/disable", app.DisableAIConnection)
+	g.DELETE("/api/chatbot/ai-connections/{id}", app.DeleteAIConnection)
 
 	// Keyword Rules
 	g.GET("/api/chatbot/keywords", app.ListKeywordRules)

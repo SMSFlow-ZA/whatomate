@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/aiproviders"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
 
@@ -29,14 +30,6 @@ func redactURLForLog(raw string) string {
 	}
 
 	return parsed.Scheme + "://" + parsed.Host + parsed.Path
-}
-
-func truncateLogValue(value string, maxLen int) string {
-	if len(value) <= maxLen {
-		return value
-	}
-
-	return value[:maxLen] + "...(truncated)"
 }
 
 // IncomingTextMessage represents a text, interactive, or media message from the webhook
@@ -242,7 +235,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
-	a.Log.Info("Processing message", "text", messageText, "buttonID", buttonID, "from", msg.From)
+	a.Log.Info("Processing chatbot message", "message_type", messageType)
 
 	// Get or create active session for this contact
 	session, isNewSession := a.getOrCreateSession(account.OrganizationID, contact.ID, account.Name, msg.From, settings.SessionTimeoutMins)
@@ -368,9 +361,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// If no keyword matched, try AI response if enabled
-	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
+	if settings.AI.Enabled {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
-		aiResponse, err := a.generateAIResponse(settings, session, messageText)
+		aiResponse, err := a.generateAIResponse(settings, account.ID, session, messageText)
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
@@ -795,7 +788,6 @@ func (a *App) executeConfiguredAPI(apiConfig models.JSONB, replaceVar func(strin
 			"method", method,
 			"url", logURL,
 			"status_code", resp.StatusCode,
-			"response_preview", truncateLogValue(string(body), 300),
 		)
 	} else {
 		a.Log.Info(
@@ -822,7 +814,21 @@ type ApiResponse struct {
 //
 // Mirrors fetchAPIContext in seeding implicit variables (phone_number) so flow-step
 // API templates can interpolate {{phone_number}} just like AI-context API templates.
-func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+func (a *App) generateAIResponse(settings *models.ChatbotSettings, accountID uuid.UUID, session *models.ChatbotSession, userMessage string) (string, error) {
+	if s := a.AIConnections; s != nil {
+		ctx := context.Background()
+		binding, err := s.Binding(ctx, settings.OrganizationID, accountID)
+		if err != nil {
+			return "", aiproviders.ErrUnavailable
+		}
+		if binding != nil {
+			return a.generateConnectedAI(ctx, settings, *binding, session, userMessage)
+		}
+	}
+	if settings.AI.Provider == "" || settings.AI.APIKey == "" {
+		return "", nil
+	}
+
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
@@ -931,51 +937,35 @@ func (a *App) fetchAPIContext(apiConfig models.JSONB, session *models.ChatbotSes
 	return string(respBody), nil
 }
 
-// generateOpenAIResponse generates a response using OpenAI API
-func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := "https://api.openai.com/v1/chat/completions"
-
-	// Build messages array
-	messages := []map[string]string{}
-
-	// Build system prompt with context
+// chatCompletionMessages shares the existing prompt and history projection.
+func (a *App) chatCompletionMessages(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage, contextData string, historyEnabled bool, historyLimit int) []aiproviders.Message {
+	messages := []aiproviders.Message{}
 	systemPrompt := settings.AI.SystemPrompt
 	if contextData != "" {
 		if systemPrompt != "" {
-			systemPrompt = systemPrompt + "\n\n" + contextData
-		} else {
-			systemPrompt = contextData
+			systemPrompt += "\n\n"
 		}
+		systemPrompt += contextData
 	}
-
-	// Add system prompt if configured
 	if systemPrompt != "" {
-		messages = append(messages, map[string]string{
-			"role":    "system",
-			"content": systemPrompt,
-		})
+		messages = append(messages, aiproviders.Message{Role: "system", Content: systemPrompt})
 	}
-
-	// Add conversation history if enabled
-	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
-		for _, msg := range history {
+	if historyEnabled && session != nil {
+		for _, msg := range a.getSessionHistory(session.ID, historyLimit) {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
-			messages = append(messages, map[string]string{
-				"role":    role,
-				"content": msg.Message,
-			})
+			messages = append(messages, aiproviders.Message{Role: role, Content: msg.Message})
 		}
 	}
+	return append(messages, aiproviders.Message{Role: "user", Content: userMessage})
+}
 
-	// Add current user message
-	messages = append(messages, map[string]string{
-		"role":    "user",
-		"content": userMessage,
-	})
+// generateOpenAIResponse generates a response using the built-in OpenAI API.
+func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
+	url := "https://api.openai.com/v1/chat/completions"
+	messages := a.chatCompletionMessages(settings, session, userMessage, contextData, settings.AI.IncludeHistory, settings.AI.HistoryLimit)
 
 	payload := map[string]any{
 		"model":      settings.AI.Model,
