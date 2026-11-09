@@ -116,3 +116,12 @@ func TestChangingApprovedHostDoesNotReuseStoredCredential(t *testing.T) {
 	_, err = changed.Probe(ctx, org, conn.ID)
 	require.ErrorIs(t, err, ErrNotReady)
 }
+
+func TestSettingsCanBeEnabledWithoutApprovedEndpoints(t *testing.T) {
+	s, err := New(nil, strings.Repeat("k", 32), true, "[]", nil)
+	require.NoError(t, err)
+	require.True(t, s.Enabled())
+	require.Empty(t, s.Options())
+	_, err = s.Create(context.Background(), uuid.New(), "Test", "unapproved", "fixture", "key")
+	require.ErrorIs(t, err, aiproviders.ErrInvalidRequest)
+}

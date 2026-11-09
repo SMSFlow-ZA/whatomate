@@ -9,6 +9,7 @@ AI Response node. An account override inherits the other chatbot settings.
 
 Set `WHATOMATE_AI_CONNECTIONS__ENABLED=true` and
 `WHATOMATE_AI_CONNECTIONS__ENDPOINTS` to a JSON array of approved endpoints.
+Use an empty array to make settings available while endpoint approval is pending.
 The runtime must also have its normal instance encryption key. Keep this
 configuration private and restrict it to workspaces that can use the endpoints.
 Invalid configuration disables custom connections. Existing assigned scopes

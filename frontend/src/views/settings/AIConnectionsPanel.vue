@@ -197,6 +197,7 @@ function saveAssignment() {
 
     <form v-if="settings.can_write" class="space-y-3 border-t pt-4" @submit.prevent="saveProfile">
       <h4 class="font-medium">{{ editing ? 'Edit connection' : 'Add a connection' }}</h4>
+      <p v-if="settings.endpoints.length === 0" class="text-sm text-muted-foreground">Ask your workspace operator to approve an endpoint before adding a connection.</p>
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="space-y-1 text-sm"><span>Connection name</span><Input v-model="draft.name" required maxlength="100" :disabled="busy" /></label>
         <label class="space-y-1 text-sm"><span>Approved endpoint</span>

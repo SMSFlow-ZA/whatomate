@@ -55,7 +55,7 @@ func New(db *gorm.DB, key string, enabled bool, policy string, factory func(aipr
 	var specs []aiproviders.Endpoint
 	decoder := json.NewDecoder(strings.NewReader(policy))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&specs) != nil || decoder.Decode(new(any)) != io.EOF || len(specs) == 0 || len(specs) > 32 {
+	if decoder.Decode(&specs) != nil || decoder.Decode(new(any)) != io.EOF || specs == nil || len(specs) > 32 {
 		return s, aiproviders.ErrEndpoint
 	}
 	for _, spec := range specs {

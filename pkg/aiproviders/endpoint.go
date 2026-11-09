@@ -72,9 +72,9 @@ func ParseEndpoint(e Endpoint) (Target, error) {
 	path := strings.TrimSuffix(u.Path, "/")
 	switch e.Kind {
 	case Foundry:
-		if path != "/openai/v1" || e.PrivateIP != "" || e.LocalOnly ||
-			!((strings.HasSuffix(host, ".openai.azure.com") && strings.Count(host, ".") == 3) ||
-				(strings.HasSuffix(host, ".services.ai.azure.com") && strings.Count(host, ".") == 4)) {
+		openAIHost := strings.HasSuffix(host, ".openai.azure.com") && strings.Count(host, ".") == 3
+		servicesHost := strings.HasSuffix(host, ".services.ai.azure.com") && strings.Count(host, ".") == 4
+		if path != "/openai/v1" || e.PrivateIP != "" || e.LocalOnly || (!openAIHost && !servicesHost) {
 			return Target{}, invalid
 		}
 	case Compatible:
@@ -140,7 +140,10 @@ func (t Target) Fingerprint() string {
 
 func ValidModel(model string) bool {
 	return model != "" && len(model) <= 150 && strings.IndexFunc(model, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:", r))
+		lowercase := r >= 'a' && r <= 'z'
+		uppercase := r >= 'A' && r <= 'Z'
+		digit := r >= '0' && r <= '9'
+		return !lowercase && !uppercase && !digit && !strings.ContainsRune("-_./:", r)
 	}) == -1
 }
 
