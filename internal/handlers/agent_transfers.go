@@ -537,24 +537,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	// Broadcast WebSocket notification
 	a.broadcastTransferCreated(&transfer, contact)
 
-	// Dispatch webhook for transfer created
-	var agentIDStr *string
-	var agentName *string
-	if transfer.AgentID != nil {
-		idStr := transfer.AgentID.String()
-		agentIDStr = &idStr
-	}
-	a.DispatchWebhook(orgID, models.WebhookEventTransferCreated, TransferEventData{
-		TransferID:      transfer.ID.String(),
-		ContactID:       contact.ID.String(),
-		ContactPhone:    contact.PhoneNumber,
-		ContactName:     contact.ProfileName,
-		Source:          transfer.Source,
-		Reason:          transfer.Notes,
-		AgentID:         agentIDStr,
-		AgentName:       agentName,
-		WhatsAppAccount: transfer.WhatsAppAccount,
-	})
+	a.dispatchTransferCreated(&transfer, contact)
 
 	// Load relations for response
 	a.DB.Preload("Agent").Preload("Team").Preload("TransferredByUser").First(&transfer, transfer.ID)
@@ -1234,6 +1217,25 @@ func (a *App) broadcastTransferAssigned(transfer *models.AgentTransfer) {
 	})
 }
 
+func (a *App) dispatchTransferCreated(transfer *models.AgentTransfer, contact *models.Contact) {
+	var agentIDStr *string
+	if transfer.AgentID != nil {
+		idStr := transfer.AgentID.String()
+		agentIDStr = &idStr
+	}
+	a.DispatchWebhook(transfer.OrganizationID, models.WebhookEventTransferCreated, TransferEventData{
+		TransferID:      transfer.ID.String(),
+		ContactID:       contact.ID.String(),
+		ContactPhone:    contact.PhoneNumber,
+		ContactName:     contact.ProfileName,
+		Source:          transfer.Source,
+		Reason:          transfer.Notes,
+		AgentID:         agentIDStr,
+		WhatsAppAccount: transfer.WhatsAppAccount,
+	})
+}
+
+
 // saveAndFinalizeTransfer handles the common post-creation steps for agent transfers:
 // sets SLA deadlines, saves to DB, updates contact assignment, optionally ends chatbot sessions, and broadcasts.
 func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings, endChatbotSession bool) error {
@@ -1270,6 +1272,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 
 	// Broadcast to WebSocket
 	a.broadcastTransferCreated(transfer, contact)
+	a.dispatchTransferCreated(transfer, contact)
 
 	return nil
 }
