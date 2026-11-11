@@ -18,3 +18,8 @@ OpenSSL 3.5 branch:
 Remove this backport and refresh the managed runtime pin when Debian publishes
 a package covering all five fixes. The managed release scanner still runs
 against the final image.
+
+The managed release checks the reviewed patch fingerprint, package versions,
+and installed runtime hashes on the exact candidate it scans. The gate records
+only the five listed unknown-severity findings for the three verified packages
+as patched. New CVEs, package versions, or vendor fixes require a new review.

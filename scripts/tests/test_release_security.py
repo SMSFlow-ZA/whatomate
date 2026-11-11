@@ -35,6 +35,31 @@ class SecurityTests(unittest.TestCase):
         value={'VulnerabilityID':'CVE-test','PkgName':'codec','InstalledVersion':'1.2','Severity':'HIGH'}
         value.update(changes);self.report['Results'][0]['Vulnerabilities']=[value];return value
 
+    def test_openssl_backport_requires_verified_fingerprint_and_exact_finding(self):
+        finding = self.vuln(Severity='UNKNOWN', PkgName='libssl3t64',
+                            InstalledVersion=security.OPENSSL_BACKPORT_VERSION,
+                            VulnerabilityID='CVE-2026-95691')
+        def evaluate(fingerprint):
+            return security.evaluate(self.report, self.go, self.policy, self.image,
+                                     self.now, self.database(), fingerprint)
+
+        for fingerprint in (None, 'unverified'):
+            with self.assertRaisesRegex(ValueError, 'Unreviewed'):
+                evaluate(fingerprint)
+        verified = security.OPENSSL_BACKPORT_FINGERPRINT
+        self.assertEqual(evaluate(verified)['verified_openssl_backport_entries'], 1)
+        original = finding.copy()
+        for changes in ({'InstalledVersion': '3.5.7-1~deb13u3'},
+                        {'VulnerabilityID': 'CVE-2026-99999'},
+                        {'FixedVersion': '3.5.7-1~deb13u4'},
+                        {'Severity': 'CRITICAL'}):
+            with self.subTest(changes=changes):
+                finding.update(original)
+                finding.pop('FixedVersion', None)
+                finding.update(changes)
+                with self.assertRaises(ValueError):
+                    evaluate(verified)
+
     def test_clean_candidate_passes(self):self.check()
 
     def test_retained_report_never_contains_secret_matches_or_image_environment(self):

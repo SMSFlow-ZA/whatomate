@@ -56,6 +56,18 @@ jobs:
           candidate=$(docker image inspect --format '{{.Id}}' "$IMAGE")
           printf 'CANDIDATE_ID=%s\n' "$candidate" >> "$GITHUB_ENV"
           docker image inspect "$candidate" --format '{{json .}}' > evidence/local-image.json
+          if docker run --rm --network none --read-only --entrypoint sh "$candidate" -ec '
+            test -f /usr/share/doc/whatomate-openssl/patch-fingerprint
+            sha256sum -c /usr/share/doc/whatomate-openssl/runtime-sha256 >&2
+            for package in libssl3t64 openssl openssl-provider-legacy; do
+              test "$(dpkg-query -W "$package" | cut -f2)" = "3.5.7-1~deb13u3+smsflow1"
+            done
+            cat /usr/share/doc/whatomate-openssl/patch-fingerprint
+          ' > evidence/openssl-backport.fingerprint; then
+            :
+          else
+            rm evidence/openssl-backport.fingerprint
+          fi
           docker save --output evidence/whatomate-image.tar "$IMAGE"
           container=$(docker create --network none --entrypoint /not-executed "$candidate")
           trap 'docker rm "$container" >/dev/null' EXIT
@@ -125,6 +137,7 @@ jobs:
         with:
           name: managed-security
           path: |
+            evidence/openssl-backport.fingerprint
             evidence/trivy-safe.json
             evidence/trivy-db.json
             evidence/trivy-version.json

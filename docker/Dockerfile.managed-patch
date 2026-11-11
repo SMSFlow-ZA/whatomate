@@ -50,6 +50,11 @@ RUN --mount=type=bind,from=openssl-builder,source=/packages,target=/openssl-pack
         test "$(dpkg-query -W -f='${Version}' "$package")" = '3.5.7-1~deb13u3+smsflow1' || exit 1; \
     done \
     && openssl list -providers -provider default -provider legacy \
+    && mkdir -p /usr/share/doc/whatomate-openssl \
+    && cp /openssl-packages/patch-fingerprint /usr/share/doc/whatomate-openssl/patch-fingerprint \
+    && sha256sum /usr/bin/openssl /usr/lib/x86_64-linux-gnu/libssl.so.3 \
+        /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/ossl-modules/legacy.so \
+        > /usr/share/doc/whatomate-openssl/runtime-sha256 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 ARG VCS_REF

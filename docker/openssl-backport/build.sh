@@ -10,6 +10,7 @@ sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sourc
 apt-get update
 apt-get install -y --no-install-recommends build-essential ca-certificates git dpkg-dev debhelper libzstd-dev zlib1g-dev
 mkdir -p /build /packages
+(cd /backport && sha256sum -c SHA256SUMS)
 cd /build
 apt-get source "openssl=$base"
 cd openssl-3.5.7
@@ -31,3 +32,4 @@ arch=$(dpkg --print-architecture)
 for package in libssl3t64 openssl openssl-provider-legacy; do
     cp "../${package}_${version}_${arch}.deb" /packages/
 done
+sha256sum /backport/SHA256SUMS | cut -d " " -f1 > /packages/patch-fingerprint
