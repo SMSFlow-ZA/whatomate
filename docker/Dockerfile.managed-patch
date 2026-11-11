@@ -14,6 +14,10 @@ RUN echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmp
     && gpg --batch --status-fd=1 --verify ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > patch-verification.txt \
     && grep -q 'VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8 ' patch-verification.txt
 
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS openssl-builder
+COPY docker/openssl-backport/ /backport/
+RUN sh /backport/build.sh
+
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -37,9 +41,15 @@ FROM verified-runtime
 USER root
 # Single-process application containers do not need login accounting or SQLite.
 # Removing these image packages never changes the VM host.
-RUN apt-get update \
+RUN --mount=type=bind,from=openssl-builder,source=/packages,target=/openssl-packages,ro \
+    apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /openssl-packages/*.deb \
     && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && apt-get purge -y --allow-remove-essential util-linux liblastlog2-2 libsqlite3-0 \
+    && for package in libssl3t64 openssl openssl-provider-legacy; do \
+        test "$(dpkg-query -W -f='${Version}' "$package")" = '3.5.7-1~deb13u3+smsflow1' || exit 1; \
+    done \
+    && openssl list -providers -provider default -provider legacy \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 ARG VCS_REF
