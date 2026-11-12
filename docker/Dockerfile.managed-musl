@@ -1,5 +1,5 @@
 # Build native tools against musl. Copy only model data from the old image.
-ARG MUSL_IMAGE=alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
+ARG MUSL_IMAGE=alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 ARG PIPER_ASSETS_IMAGE=shridh0r/whatomate@sha256:8091fd13661bc51d5e14e7fbf25a4792e781b85e10b715172bf22aa87ed1e669
 FROM ${PIPER_ASSETS_IMAGE} AS piper-assets
 
@@ -56,7 +56,7 @@ RUN ./configure --prefix=/opt/whatomate-media \
         > /opt/whatomate-media/share/source/manifest.txt
 
 FROM ${MUSL_IMAGE} AS piper-builder
-RUN apk add --no-cache build-base cmake git onnxruntime-dev=1.30.0-r0
+RUN apk add --no-cache build-base cmake git onnxruntime-dev=1.24.4-r1
 RUN git clone --depth 1 --branch v1.8.0 https://github.com/OHF-Voice/piper1-gpl.git /piper \
     && test "$(git -C /piper rev-parse HEAD)" = 639388b6317fc4731e91d53da42aea68fd4166ff \
     && cmake -S /piper/libpiper -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -65,7 +65,7 @@ RUN git clone --depth 1 --branch v1.8.0 https://github.com/OHF-Voice/piper1-gpl.
 
 FROM ${MUSL_IMAGE}
 RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates tzdata opus opus-tools libstdc++ onnxruntime=1.30.0-r0 zlib \
+    && apk add --no-cache ca-certificates tzdata opus opus-tools libstdc++ onnxruntime=1.24.4-r1 zlib \
     && mkdir -p /app/uploads /app/audio \
     && chown 10001:10001 /app/uploads /app/audio
 COPY --from=piper-builder /piper-out/usr/local/ /usr/local/
