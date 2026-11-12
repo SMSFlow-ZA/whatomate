@@ -2,6 +2,7 @@
 ARG MUSL_IMAGE=alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 ARG PIPER_ASSETS_IMAGE=shridh0r/whatomate@sha256:8091fd13661bc51d5e14e7fbf25a4792e781b85e10b715172bf22aa87ed1e669
 FROM ${PIPER_ASSETS_IMAGE} AS piper-assets
+FROM ghcr.io/smsflow-za/whatomate@sha256:802cb5f45a9cca5b1ce535db983d15eb63e1e320cab6f87907b76cb63b74b356 AS media-sources
 
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
@@ -23,12 +24,10 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 go build -trimpath -ldflags "-X main.Version=0.1.1-beta-0.17-managed-${VCS_REF} -X main.SourceRevision=${VCS_REF}" -o /whatomate ./cmd/whatomate
 
 FROM ${MUSL_IMAGE} AS media-builder
-RUN apk add --no-cache build-base ca-certificates curl gpg gpgv nasm pkgconf opus-dev zlib-dev xz
+RUN apk add --no-cache build-base ca-certificates gpg gpgv nasm pkgconf opus-dev zlib-dev xz
 WORKDIR /build
-RUN curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz \
-    && echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmpeg-9.0.2.tar.xz" | sha256sum -c - \
-    && curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc \
-    && curl -fsSLO https://ffmpeg.org/ffmpeg-devel.asc \
+COPY --from=media-sources /usr/share/doc/whatomate-media/ffmpeg-9.0.2.tar.xz /usr/share/doc/whatomate-media/ffmpeg-9.0.2.tar.xz.asc /usr/share/doc/whatomate-media/ffmpeg-devel.asc /build/
+RUN echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmpeg-9.0.2.tar.xz" | sha256sum -c - \
     && gpg --batch --dearmor --output /build/ffmpeg-keyring.gpg ffmpeg-devel.asc \
     && gpgv --keyring /build/ffmpeg-keyring.gpg --status-fd=1 ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > signature-status.txt \
     && grep -q 'VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8 ' signature-status.txt \
