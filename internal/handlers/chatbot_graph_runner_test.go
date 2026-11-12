@@ -516,6 +516,49 @@ func TestRunChatGraph_Prompt_MaxRetriesRoutesToEdge(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 }
 
+func TestRunChatGraph_InteractivePrompt(t *testing.T) {
+	for _, tt := range []struct {
+		name, input, buttonID, expected string
+	}{
+		{"tapped reply", "Get started", "1", "1"},
+		{"typed reply", "1", "", "1"},
+		{"main menu", "menu", "", "menu"},
+		{"agent", "agent", "", "agent"},
+		{"retry exhausted", "8", "", ""},
+		{"stale tap", "1", "unknown", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, org, account, contact, session := newGraphTestFixtures(t)
+			flow := newPromptFlow(t, app, org, account, `^(1|2|menu|agent)$`, 2)
+			cfg := flow.Graph["nodes"].([]any)[0].(map[string]any)["config"].(map[string]any)
+			cfg["store_as"] = "choice"
+			cfg["buttons"] = []any{
+				map[string]any{"id": "1", "title": "Get started"},
+				map[string]any{"id": "2", "title": "Can't sign in"},
+				map[string]any{"id": "menu", "title": "Main menu"},
+				map[string]any{"id": "agent", "title": "Talk to support"},
+			}
+			require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+			require.Equal(t, "p1", session.CurrentStep)
+
+			require.NoError(t, app.runChatGraph(account, contact, session, flow, "8", "", nil))
+			require.Equal(t, 1, session.StepRetries)
+			require.Equal(t, "p1", session.CurrentStep)
+
+			require.NoError(t, app.runChatGraph(account, contact, session, flow, tt.input, tt.buttonID, nil))
+			assert.Equal(t, models.SessionStatusCompleted, session.Status)
+			assert.Zero(t, session.StepRetries)
+			if tt.expected == "" {
+				assert.NotContains(t, session.SessionData, "choice")
+				path := chatGraphPath(t, session)
+				assert.Equal(t, "max_retries", path[len(path)-2]["outcome"])
+			} else {
+				assert.Equal(t, tt.expected, session.SessionData["choice"])
+			}
+		})
+	}
+}
+
 // newAPICallFlow builds a three-node graph (api_call → message → end)
 // where the api_call's outgoing edges route to differently-labelled
 // message nodes for 2xx vs non-2xx, making it easy to assert which

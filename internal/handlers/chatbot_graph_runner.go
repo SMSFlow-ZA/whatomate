@@ -351,6 +351,10 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 //	}
 func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	body := stringFromConfig(node.Config, "body", "message", "text")
+	choices := buttonsFromConfig(node.Config)
+	if len(choices) > 0 && (ctx.consumed || (ctx.userInput == "" && ctx.buttonID == "")) {
+		return a.sendChatPromptChoices(node, ctx, body)
+	}
 
 	// No input yet → send prompt and wait.
 	if !ctx.consumed && ctx.userInput == "" {
@@ -373,6 +377,19 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 
 	ctx.consumed = true
 	input := ctx.userInput
+	if len(choices) > 0 && ctx.buttonID != "" {
+		// Store the configured reply value so tapped and typed choices route identically.
+		input = ""
+		for _, choice := range choices {
+			if id, _ := choice["id"].(string); id == ctx.buttonID {
+				input = id
+				break
+			}
+		}
+		if input == "" {
+			return a.handleChatPromptInvalid(node, ctx)
+		}
+	}
 
 	validationRegex := stringFromConfig(node.Config, "validation_regex")
 	if validationRegex != "" {
@@ -410,11 +427,32 @@ func (a *App) handleChatPromptInvalid(node *ChatNode, ctx *chatNodeCtx) (nodeOut
 	if errorMsg == "" {
 		errorMsg = "Invalid input. Please try again."
 	}
+	if len(buttonsFromConfig(node.Config)) > 0 {
+		return a.sendChatPromptChoices(node, ctx, errorMsg)
+	}
 	errorMsg = processTemplate(errorMsg, ctx.session.SessionData)
 	if err := a.sendBotText(node, ctx, errorMsg); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send validation error: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, errorMsg, node.ID)
+	return nodeOutcome{yield: true}, nil
+}
+
+// sendChatPromptChoices renders the same choices on entry and on retry.
+func (a *App) sendChatPromptChoices(node *ChatNode, ctx *chatNodeCtx, body string) (nodeOutcome, error) {
+	body = processTemplate(body, ctx.session.SessionData)
+	if ctx.session.Channel == "sms" {
+		if err := a.sendBotText(node, ctx, body); err != nil {
+			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
+		}
+	} else {
+		if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttonsFromConfig(node.Config), func(req *OutgoingMessageRequest, _ int) error {
+			return prepareBotDelivery(node, ctx, req)
+		}); err != nil {
+			return nodeOutcome{}, fmt.Errorf("send prompt choices: %w", err)
+		}
+	}
+	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 	return nodeOutcome{yield: true}, nil
 }
 

@@ -59,10 +59,7 @@ watch(
 // Get the last message that has buttons
 const lastButtonMessage = computed(() => {
   if (!isWaitingForInput.value || !currentStep.value) return null
-  if (currentStep.value.message_type !== 'buttons') return null
-
-  const lastBotMessage = [...state.messages].reverse().find(m => m.type === 'bot' && m.buttons?.length)
-  return lastBotMessage
+  return [...state.messages].reverse().find(m => m.type === 'bot' && m.stepName === state.currentStepName && m.buttons?.length) || null
 })
 
 // Shim for DebugPanel which expects FlowStep[]-shaped objects with step_name.

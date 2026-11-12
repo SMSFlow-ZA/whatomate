@@ -318,7 +318,8 @@ export function useFlowGraphSimulation(
 
   function execPrompt(node: ChatNode): string {
     const body = interpolate(stringField(node, 'body', 'message', 'text'), state.variables)
-    if (body) addMessage('bot', body, { stepName: node.id, inputType: 'text' })
+    const buttons = node.config?.buttons as ButtonConfig[] | undefined
+    if (body) addMessage('bot', body, { stepName: node.id, inputType: 'text', buttons })
     state.status = 'waiting_input'
     return '__yield__'
   }
@@ -421,48 +422,44 @@ export function useFlowGraphSimulation(
     const node = nodeById(state.currentStepName)
     if (!node) return
 
-    if (typeof input === 'string') {
-      addMessage('user', input)
-      if (node.type === 'prompt') {
-        const regex = stringField(node, 'validation_regex')
-        if (regex) {
-          try {
-            if (!new RegExp(regex).test(input)) {
-              const max = (node.config?.max_retries as number) || 3
-              state.currentRetryCount++
-              if (state.currentRetryCount < max) {
-                addMessage('bot', stringField(node, 'validation_error') || 'Invalid input. Please try again.', {
-                  isValidationError: true,
-                })
-                return
-              }
-              state.currentRetryCount = 0
-              await advance(node, 'max_retries')
-              return
-            }
-          } catch {
-            // bad regex: skip validation
-          }
+    addMessage('user', typeof input === 'string' ? input : input.title)
+    const storeAs = stringField(node, 'store_as')
+    if (node.type === 'prompt') {
+      const buttons = node.config?.buttons as ButtonConfig[] | undefined
+      const value = typeof input === 'string' ? input : buttons?.find(button => button.id === input.id)?.id
+      const regex = stringField(node, 'validation_regex')
+      let invalid = value === undefined
+      if (regex && value !== undefined) {
+        try {
+          invalid = !new RegExp(regex).test(value)
+        } catch {
+          // Match the server's behavior for a malformed authored regex.
         }
-        const storeAs = stringField(node, 'store_as')
-        if (storeAs) setVariable(storeAs, input)
+      }
+      if (invalid) {
+        state.currentRetryCount++
+        const max = (node.config?.max_retries as number) || 3
+        if (state.currentRetryCount < max) {
+          addMessage('bot', stringField(node, 'validation_error') || 'Invalid input. Please try again.', {
+            stepName: node.id,
+            isValidationError: true,
+            buttons,
+          })
+          return
+        }
         state.currentRetryCount = 0
-        await advance(node, 'default')
+        await advance(node, 'max_retries')
         return
       }
-      // Treat free-text into a buttons node as no-op (re-yield).
-      state.status = 'waiting_input'
-      } else {
-      const btn = input
-      addMessage('user', btn.title)
-
-      const storeAs = stringField(node, 'store_as')
-      if (storeAs) {
-        setVariable(storeAs, btn.title || btn.id)
-      }
-
-      log('branch', node.id, { buttonId: btn.id })
-      await advance(node, `button:${btn.id}`)
+      if (storeAs && value !== undefined) setVariable(storeAs, value)
+      state.currentRetryCount = 0
+      await advance(node, 'default')
+      return
+    }
+    if (typeof input !== 'string') {
+      if (storeAs) setVariable(storeAs, input.title || input.id)
+      log('branch', node.id, { buttonId: input.id })
+      await advance(node, `button:${input.id}`)
     }
   }
 

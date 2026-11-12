@@ -54,8 +54,8 @@ const expectedResponse = computed<string>(() => {
 function setExpectedResponse(value: string) {
   if (value === 'none') {
     // Drop prompt-only fields, switch type back to message.
-    const { input_type: _unused, validation_regex: _r, validation_error: _e, store_as: _s, max_retries: _m, body, ...rest } = props.node.config || {}
-    void _unused; void _r; void _e; void _s; void _m
+    const { input_type: _unused, validation_regex: _r, validation_error: _e, store_as: _s, max_retries: _m, buttons: _b, body, ...rest } = props.node.config || {}
+    void _unused; void _r; void _e; void _s; void _m; void _b
     emit('update:node', {
       ...props.node,
       type: 'message',
@@ -321,9 +321,9 @@ const typeLabel: Record<string, string> = {
       </template>
     </template>
 
-    <!-- buttons -->
-    <template v-if="node.type === 'buttons'">
-      <div class="space-y-1.5">
+    <!-- Interactive choices -->
+    <template v-if="node.type === 'buttons' || node.type === 'prompt'">
+      <div v-if="node.type === 'buttons'" class="space-y-1.5">
         <Label class="text-xs">Body</Label>
         <Textarea
           :model-value="config.body || ''"
@@ -340,10 +340,10 @@ const typeLabel: Record<string, string> = {
           <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasCtaButtons || replyCount >= 10" @click="addReplyButton">
             <Plus class="h-3 w-3 mr-0.5" /> Reply
           </Button>
-          <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addUrlButton">
+          <Button v-if="node.type === 'buttons'" variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addUrlButton">
             <Plus class="h-3 w-3 mr-0.5" /> URL
           </Button>
-          <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addPhoneButton">
+          <Button v-if="node.type === 'buttons'" variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addPhoneButton">
             <Plus class="h-3 w-3 mr-0.5" /> Phone
           </Button>
         </div>
@@ -381,9 +381,13 @@ const typeLabel: Record<string, string> = {
             class="h-7 text-xs font-mono"
           />
         </div>
-        <p class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.</p>
+        <p v-if="node.type === 'prompt'" class="text-[10px] text-muted-foreground">Optional reply choices. Set each button ID to the reply value accepted by the validation regex. Typed replies remain available.</p>
+        <p v-else class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.</p>
       </div>
 
+    </template>
+
+    <template v-if="node.type === 'buttons'">
       <!-- Input — buttons always expect a button selection; surface this
            for visual consistency with text nodes. -->
       <div class="pt-2 border-t space-y-1.5">
