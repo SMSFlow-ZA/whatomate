@@ -23,16 +23,18 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 go build -trimpath -ldflags "-X main.Version=0.1.1-beta-0.17-managed-${VCS_REF} -X main.SourceRevision=${VCS_REF}" -o /whatomate ./cmd/whatomate
 
 FROM ${MUSL_IMAGE} AS media-builder
-RUN apk add --no-cache build-base ca-certificates curl gnupg nasm pkgconf opus-dev zlib-dev xz
+RUN apk add --no-cache build-base ca-certificates curl gpg gpgv nasm pkgconf opus-dev zlib-dev xz
 WORKDIR /build
 RUN curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz \
     && echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  ffmpeg-9.0.2.tar.xz" | sha256sum -c - \
     && curl -fsSLO https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc \
     && curl -fsSLO https://ffmpeg.org/ffmpeg-devel.asc \
-    && gpg --batch --import ffmpeg-devel.asc \
-    && gpg --batch --status-fd=1 --verify ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > signature-status.txt \
+    && gpg --batch --dearmor --output /build/ffmpeg-keyring.gpg ffmpeg-devel.asc \
+    && gpgv --keyring /build/ffmpeg-keyring.gpg --status-fd=1 ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz > signature-status.txt \
     && grep -q 'VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8 ' signature-status.txt \
-    && tar -xf ffmpeg-9.0.2.tar.xz
+    && xz -dc ffmpeg-9.0.2.tar.xz > ffmpeg-9.0.2.tar \
+    && tar -xf ffmpeg-9.0.2.tar \
+    && rm ffmpeg-9.0.2.tar
 WORKDIR /build/ffmpeg-9.0.2
 # Keep the application audio formats and mixing filters; omit unrelated parsers.
 RUN ./configure --prefix=/opt/whatomate-media \
