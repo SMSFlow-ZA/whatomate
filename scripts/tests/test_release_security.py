@@ -62,6 +62,29 @@ class SecurityTests(unittest.TestCase):
 
     def test_clean_candidate_passes(self):self.check()
 
+    def test_alpine_requires_explicit_selection_and_an_os_scan(self):
+        self.report['Metadata']['OS']['Family'] = 'alpine'
+        os_result = self.report['Results'][0]
+        os_result['Type'] = 'alpine'
+        with self.assertRaisesRegex(ValueError, 'identity or OS differs'):
+            self.check()
+
+        def check_alpine():
+            return security.evaluate(self.report, self.go, self.policy, self.image,
+                                     self.now, self.database(), expected_os='alpine')
+
+        check_alpine()
+        os_result['Vulnerabilities'] = [{
+            'VulnerabilityID': 'CVE-test', 'PkgName': 'musl',
+            'InstalledVersion': 'test', 'Severity': 'HIGH', 'FixedVersion': 'fixed',
+        }]
+        with self.assertRaisesRegex(ValueError, 'high image vulnerability'):
+            check_alpine()
+        os_result['Type'] = 'debian'
+        with self.assertRaisesRegex(ValueError, 'Missing OS or application scan'):
+            check_alpine()
+
+
     def test_retained_report_never_contains_secret_matches_or_image_environment(self):
         self.report['Metadata']['ImageConfig']={'config':{'Env':['PRIVATE=secret-sentinel']}}
         self.report['Results'][0]['Secrets']=[{'RuleID':'private-key','Match':'secret-sentinel',

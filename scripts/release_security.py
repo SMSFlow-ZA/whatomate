@@ -57,16 +57,16 @@ OPENSSL_BACKPORT_CVES = {
 }
 
 
-def evaluate(report,go,policy,image,now,go_db,openssl_fingerprint=None):
+def evaluate(report,go,policy,image,now,go_db,openssl_fingerprint=None,expected_os="debian"):
     if timestamp(policy['expires_utc']) <= now:raise ValueError('Residual review expired')
     if report.get('SchemaVersion')!=2 or report.get('ArtifactType')!='container_image':
         raise ValueError('Unsupported image report')
     fresh(report['CreatedAt'],now)
     meta=report['Metadata']
-    if meta.get('ImageID')!=image or meta.get('OS',{}).get('Family')!='debian':
+    if expected_os not in ('debian','alpine') or meta.get('ImageID')!=image or meta.get('OS',{}).get('Family')!=expected_os:
         raise ValueError('Scan candidate identity or OS differs')
     results=report['Results']
-    if not results or not any(r.get('Type')=='debian' for r in results) or not any(r.get('Type')=='gobinary' for r in results):
+    if not results or not any(r.get('Type')==expected_os for r in results) or not any(r.get('Type')=='gobinary' for r in results):
         raise ValueError('Missing OS or application scan')
     configs=[v['config'] for v in go if 'config' in v]
     sboms=[v['SBOM'] for v in go if 'SBOM' in v]
@@ -170,6 +170,7 @@ def main():
     parser.add_argument('--evidence',type=Path,required=True)
     parser.add_argument('--source')
     parser.add_argument('--local-id')
+    parser.add_argument('--expected-os', choices=('debian','alpine'), default='debian')
     args=parser.parse_args();folder=args.evidence
     if args.mode=='go-db':
         collect_go_database(folder);return
@@ -187,7 +188,7 @@ def main():
     if args.mode=='verify':
         approval=json.loads((folder/'security-approval.json').read_text())
         fresh(approval['checked_utc'],now)
-        if approval['hashes']!=hashes or approval['source']!=args.source or approval['local_id']!=args.local_id:
+        if approval.get('os')!=args.expected_os or approval['hashes']!=hashes or approval['source']!=args.source or approval['local_id']!=args.local_id:
             raise ValueError('Candidate changed after security approval')
         print('Scanned candidate unchanged');return
     image,config=archive_config(folder/'whatomate-image.tar')
@@ -205,8 +206,8 @@ def main():
     fresh(json.loads((folder/'trivy-db.json').read_text())['UpdatedAt'],now,72)
     policy=json.loads(Path(__file__).with_name('release-security-policy.json').read_text())
     result=evaluate(json.loads((folder/'trivy.json').read_text()),stream_json(folder/'govulncheck.json'),policy,image,now,json.loads((folder/'govulndb.json').read_text()),
-                    backport.read_text().strip() if backport.exists() else None)
-    approval={**result,'checked_utc':now.isoformat(),'source':args.source,'local_id':args.local_id,'config_id':image,'hashes':hashes}
+                    backport.read_text().strip() if backport.exists() else None, args.expected_os)
+    approval={**result,'os':args.expected_os,'checked_utc':now.isoformat(),'source':args.source,'local_id':args.local_id,'config_id':image,'hashes':hashes}
     (folder/'security-approval.json').write_text(json.dumps(approval,indent=2)+'\n')
     print(json.dumps(result))
 

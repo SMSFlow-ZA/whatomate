@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/local/bin/piper_exe --espeak_data /usr/local/share/espeak-ng-data "$@"
