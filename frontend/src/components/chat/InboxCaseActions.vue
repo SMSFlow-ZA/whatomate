@@ -67,7 +67,7 @@ async function update(input: { status?: CaseStatus; priority?: CasePriority; sno
     if (isHttpError(error) && error.response?.status === 409) {
       toast.error(t('inboxWorkflow.conflict'))
       await load()
-    } else if (isAxiosError(error) && error.response?.status === 422) {
+    } else if (isHttpError(error) && error.response?.status === 422) {
       toast.error(t('inboxFields.missing'))
     } else {
       toast.error(t('inboxWorkflow.updateError'))
