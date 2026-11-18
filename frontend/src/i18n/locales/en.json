@@ -1,4 +1,40 @@
 {
+  "inboxWorkflow": {
+    "title": "Inbox workflow",
+    "enable": "Enable conversation workflow",
+    "description": "Track status, priority and follow-ups for cases that enter the inbox.",
+    "settingsError": "Could not load or save conversation workflow settings.",
+    "caseStatus": "Case status",
+    "casePriority": "Case priority",
+    "status": {
+      "open": "Open",
+      "pending": "Pending",
+      "waiting_customer": "Waiting for customer",
+      "snoozed": "Snoozed",
+      "resolved": "Resolved"
+    },
+    "priority": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High",
+      "urgent": "Urgent"
+    },
+    "startCase": "Start case",
+    "reopen": "Reopen",
+    "snoozeUntil": "Snooze until",
+    "futureTime": "Choose a time in the future.",
+    "activity": "Case activity",
+    "conflict": "This case changed. The latest details have been loaded.",
+    "updateError": "Could not update this case.",
+    "event": {
+      "opened": "Case opened",
+      "reopened": "Case reopened",
+      "updated": "Case updated",
+      "customer_replied": "Customer replied",
+      "snooze_elapsed": "Snooze ended",
+      "human_reply": "Agent replied"
+    }
+  },
   "dateRange": {
     "from": "From",
     "to": "To",

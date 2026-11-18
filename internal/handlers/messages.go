@@ -457,6 +457,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		"whats_app_message_id": wamid,
 	})
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
+	if msg.SentByUserID != nil {
+		a.recordInboxHumanReply(req.Account, msg)
+	}
 
 	// Dispatch webhook for successful send
 	if opts.DispatchWebhook {

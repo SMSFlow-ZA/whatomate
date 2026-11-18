@@ -248,6 +248,8 @@ async function updateContactTags(tags: string[]) {
 
         <hr />
 
+        <slot name="case-history" />
+
         <!-- Tags Section (always shown) -->
         <section class="vstack gap-2">
           <div class="hstack justify-between">

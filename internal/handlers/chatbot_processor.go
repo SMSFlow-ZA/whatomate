@@ -191,7 +191,10 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if msg.Context != nil && msg.Context.ID != "" {
 		replyToWAMID = msg.Context.ID
 	}
-	a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
+	message := a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
+	if message != nil {
+		a.trackInboxIncoming(account, contact, message)
+	}
 
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
@@ -1543,7 +1546,7 @@ type MediaInfo struct {
 }
 
 // saveIncomingMessage saves an incoming message to the messages table
-func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) {
+func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) *models.Message {
 	now := time.Now()
 
 	message := models.Message{
@@ -1578,7 +1581,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to save incoming message", "error", err)
-		return
+		return nil
 	}
 
 	// If the chatbot will handle this conversation (enabled + no active
@@ -1628,6 +1631,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		WhatsAppAccount:  account.Name,
 		Direction:        models.DirectionIncoming,
 	})
+	return &message
 }
 
 // isWithinBusinessHours checks if current time is within configured business hours
