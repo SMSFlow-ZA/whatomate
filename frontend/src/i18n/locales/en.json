@@ -1,4 +1,35 @@
 {
+  "inboxSla": {
+    "title": "Inbox response targets",
+    "report": "Inbox deadlines",
+    "minutes": "minutes",
+    "businessHours": "Count business hours",
+    "timezone": "Time zone",
+    "day": "Day",
+    "from": "From",
+    "to": "To",
+    "midnight": "Until midnight",
+    "addShift": "Add business hours",
+    "removePolicy": "Remove targets",
+    "saveError": "Could not save response targets. Check the time zone and business hours.",
+    "loadError": "Could not load inbox deadlines.",
+    "any": "All",
+    "allCases": "Include cases on track",
+    "empty": "No matching inbox deadlines on this page.",
+    "target": {
+      "first_reply": "First reply",
+      "next_reply": "Next reply",
+      "resolution": "Resolution"
+    },
+    "state": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "breached": "Breached",
+      "paused": "Paused",
+      "met": "Met",
+      "unanswered": "Resolved without reply"
+    }
+  },
   "inboxQueue": {
     "contacts": "Contacts",
     "title": "Queues",

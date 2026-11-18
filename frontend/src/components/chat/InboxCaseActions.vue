@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@/lib/toast'
@@ -116,6 +117,7 @@ function saveSnooze() {
       </ol>
     </details>
     <template v-else-if="current && !history">
+      <InboxSLAIndicators v-if="current.sla" class="basis-full" :sla="current.sla" />
       <template v-if="canWrite">
         <select
           class="case-control"

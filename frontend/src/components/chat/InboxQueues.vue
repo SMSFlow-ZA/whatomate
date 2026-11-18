@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsService, tagsService, teamsService, usersService } from '@/services/api'
@@ -237,6 +238,7 @@ async function applyBulk() {
             <strong class="truncate">{{ row.contact_name || t('inboxQueue.unnamed') }}</strong>
             <small class="text-light truncate">{{ row.account_name }}</small>
             <small>{{ t('inboxWorkflow.status.' + row.status) }} · {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
+            <InboxSLAIndicators v-if="row.sla" class="mt-1" :sla="row.sla" />
             <small v-if="results[row.id]">{{ t('inboxQueue.result.' + results[row.id]) }}</small>
           </span>
         </button>

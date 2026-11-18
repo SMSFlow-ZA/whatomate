@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxSLAReport from '@/components/chat/InboxSLAReport.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAnalyticsService } from '@/services/api'
@@ -277,6 +278,7 @@ void _displayStats.value // Suppress unused warning
         </div>
       </template>
     </PageHeader>
+    <InboxSLAReport v-if="isAdminOrManager" class="mx-4 mt-2" />
 
     <!-- Content -->
     <div class="flex-1 scroll-y p-4">
