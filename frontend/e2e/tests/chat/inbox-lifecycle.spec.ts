@@ -18,7 +18,11 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
   const contact = await api.createContact(scope.phone(), scope.name('customer'))
   try {
     expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
+    const profile = await api.get('/api/me')
+    expect(profile.ok()).toBeTruthy()
+    const { data: user } = await profile.json()
     await page.context().addCookies((await request.storageState()).cookies)
+    await page.addInitScript(user => localStorage.setItem('user', JSON.stringify(user)), user)
     await page.goto('/chat/' + contact.id + '?inbox_account=' + encodeURIComponent(account.name))
     await page.getByRole('button', { name: 'Start case' }).click()
     const status = page.getByRole('combobox', { name: 'Case status' })
