@@ -1,5 +1,19 @@
 import { api } from '@/services/api'
 
+export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'select'
+export type FieldValue = string | number | boolean | null
+export interface FieldDefinition {
+  id: string
+  scope: 'case' | 'contact'
+  key: string
+  label: string
+  kind: FieldKind
+  options?: string[]
+  required_on_resolve: boolean
+  archived_at?: string
+}
+export interface FieldMatch { definition_id: string; value: FieldValue }
+
 export type CaseStatus = 'open' | 'pending' | 'waiting_customer' | 'snoozed' | 'resolved'
 export type CasePriority = 'low' | 'normal' | 'high' | 'urgent'
 
@@ -51,7 +65,14 @@ type Envelope<T> = { data: T }
 const conversationPath = (accountId: string, contactId: string) =>
   '/inbox/accounts/' + encodeURIComponent(accountId) + '/contacts/' + encodeURIComponent(contactId)
 
+const fieldPath = (contact: string, account?: string) => (account ? conversationPath(account, contact) : '/inbox/contacts/' + encodeURIComponent(contact)) + '/fields'
+
 export const inboxService = {
+  fieldDefinitions: (scope?: FieldDefinition['scope']) => api.get<Envelope<{ definitions: FieldDefinition[] }>>('/inbox/fields', { params: { scope } }),
+  createFieldDefinition: (input: Omit<FieldDefinition, 'id' | 'archived_at'>) => api.post('/inbox/fields', input),
+  updateFieldDefinition: (id: string, input: { label?: string; required_on_resolve?: boolean; archive?: boolean }) => api.put('/inbox/fields/' + encodeURIComponent(id), input),
+  fieldValues: (contact: string, account?: string) => api.get<Envelope<{ subject_id: string; values: FieldMatch[] }>>(fieldPath(contact, account)),
+  setFieldValue: (contact: string, account: string | undefined, definition: string, subject_id: string, value: FieldValue) => api.put(fieldPath(contact, account) + '/' + encodeURIComponent(definition), { subject_id, value }),
   slaPolicies: () => api.get<Envelope<{ policies: InboxSLAPolicy[] }>>('/inbox/sla/policies'),
   setSlaPolicy: (id: string, policy: InboxSLAPolicy) => api.put('/inbox/sla/policies/' + encodeURIComponent(id), policy),
   deleteSlaPolicy: (id: string) => api.delete('/inbox/sla/policies/' + encodeURIComponent(id)),
@@ -80,7 +101,7 @@ export const inboxService = {
 
 export type InboxQueue = '' | 'mine' | 'unassigned' | 'awaiting_reply' | 'follow_ups'
 export type BulkInboxAction = 'assign' | 'tag' | 'resolve'
-export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed'
+export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed' | 'required_fields'
 
 export interface InboxFilters {
   queue?: InboxQueue
@@ -90,6 +111,7 @@ export interface InboxFilters {
   status?: CaseStatus
   priority?: CasePriority
   tags?: string[]
+  fields?: FieldMatch[]
 }
 
 export interface QueueCase extends InboxCase {

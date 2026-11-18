@@ -179,6 +179,8 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 				if method == "DELETE" {
 					action = models.ActionWrite
 				}
+			} else if method != "GET" && (path == "/api/inbox/fields" || strings.HasPrefix(path, "/api/inbox/fields/")) {
+				resource = models.ResourceSettingsGeneral
 			} else if path == "/api/inbox/sla/report" {
 				resource = models.ResourceAnalyticsAgents
 			}
