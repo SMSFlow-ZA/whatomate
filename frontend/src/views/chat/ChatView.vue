@@ -131,7 +131,8 @@ const inboxContactIds = computed(() => contactsStore.sortedContacts.map(contact 
 const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
 
 function inboxSummaryFor(contact: { id: string; whatsapp_account?: string }) {
-  const accountId = orgAccounts.value.find(account => account.name === contact.whatsapp_account)?.id
+  const accountId = orgAccounts.value.find(account => account.name === contact.whatsapp_account)?.id ??
+    (orgAccounts.value.length === 1 ? orgAccounts.value[0].id : undefined)
   return accountId ? inboxSummaries.value[inboxCaseKey(contact.id, accountId)] : undefined
 }
 

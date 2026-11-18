@@ -16,7 +16,7 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
     business_id: '100000000001',
     access_token: 'local-test-fixture',
   })
-  const contact = await api.createContact(scope.phone(), scope.name('customer'))
+  const contact = await api.createContact('+12025550189', 'E2E Demo customer')
   try {
     expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
     await loginAsAdmin(page)
@@ -37,6 +37,7 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
     await page.getByLabel('Snooze until').fill(localDate)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(status).toHaveValue('snoozed')
+    await expect(page.getByRole('link', { name: /E2E Demo customer/ })).toContainText('Snoozed')
     if (process.env.INBOX_CAPTURE) await page.screenshot({ path: testInfo.outputPath('inbox-case-desktop.png') })
     await page.setViewportSize({ width: 390, height: 844 })
     await status.selectOption('resolved')

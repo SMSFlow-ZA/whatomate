@@ -118,6 +118,7 @@ function saveSnooze() {
     <template v-else-if="current && !history">
       <template v-if="canWrite">
         <select
+          class="case-control"
           :aria-label="t('inboxWorkflow.caseStatus')"
           :value="current.status"
           :disabled="busy"
@@ -129,6 +130,7 @@ function saveSnooze() {
         </select>
         <select
           v-if="current.status !== 'resolved'"
+          class="case-control"
           :aria-label="t('inboxWorkflow.casePriority')"
           :value="current.priority"
           :disabled="busy"
@@ -140,7 +142,7 @@ function saveSnooze() {
         </select>
       </template>
       <span v-else class="badge">{{ t('inboxWorkflow.status.' + current.status) }}</span>
-      <time v-if="current.snoozed_until" :datetime="current.snoozed_until">
+      <time class="text-sm text-light" v-if="current.snoozed_until" :datetime="current.snoozed_until">
         {{ format(current.snoozed_until) }}
       </time>
 
@@ -158,3 +160,10 @@ function saveSnooze() {
     </form>
   </div>
 </template>
+
+<style scoped>
+.case-control {
+  width: auto;
+  max-width: 100%;
+}
+</style>
