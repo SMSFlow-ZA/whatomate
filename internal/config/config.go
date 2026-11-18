@@ -16,19 +16,24 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	App          AppConfig          `koanf:"app"`
-	Server       ServerConfig       `koanf:"server"`
-	Database     DatabaseConfig     `koanf:"database"`
-	Redis        RedisConfig        `koanf:"redis"`
-	JWT          JWTConfig          `koanf:"jwt"`
-	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
-	AI           AIConfig           `koanf:"ai"`
-	Storage      StorageConfig      `koanf:"storage"`
-	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
-	RateLimit    RateLimitConfig    `koanf:"rate_limit"`
-	Cookie       CookieConfig       `koanf:"cookie"`
-	Calling      CallingConfig      `koanf:"calling"`
-	TTS          TTSConfig          `koanf:"tts"`
+	App             AppConfig             `koanf:"app"`
+	Server          ServerConfig          `koanf:"server"`
+	Database        DatabaseConfig        `koanf:"database"`
+	Redis           RedisConfig           `koanf:"redis"`
+	JWT             JWTConfig             `koanf:"jwt"`
+	WhatsApp        WhatsAppConfig        `koanf:"whatsapp"`
+	AI              AIConfig              `koanf:"ai"`
+	Storage         StorageConfig         `koanf:"storage"`
+	DefaultAdmin    DefaultAdminConfig    `koanf:"default_admin"`
+	RateLimit       RateLimitConfig       `koanf:"rate_limit"`
+	Cookie          CookieConfig          `koanf:"cookie"`
+	Calling         CallingConfig         `koanf:"calling"`
+	TTS             TTSConfig             `koanf:"tts"`
+	InboxAutomation InboxAutomationConfig `koanf:"inbox_automation"`
+}
+
+type InboxAutomationConfig struct {
+	DispatchEnabled bool `koanf:"dispatch_enabled"`
 }
 
 type TTSConfig struct {
@@ -99,7 +104,8 @@ type CallingConfig struct {
 }
 
 type AppConfig struct {
-	Name          string `koanf:"name"`
+	Name          string `koanf:"name"`        // Shown on the login page ("Welcome to <name>")
+	LogoURL       string `koanf:"logo_url"`    // Login page logo; empty uses the default icon
 	Environment   string `koanf:"environment"` // development, staging, production
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest

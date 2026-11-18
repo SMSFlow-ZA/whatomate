@@ -5,7 +5,8 @@
 # For local dev: use "localhost"
 
 [app]
-name = "Whatomate"
+name = "Whatomate"  # Shown on the login page ("Welcome to <name>")
+logo_url = ""       # Login page logo URL; empty uses the default icon
 environment = "development"  # development, staging, production
 debug = true
 encryption_key = ""  # AES-256 key for encrypting secrets at rest (32+ chars, required in production)
@@ -141,3 +142,6 @@ udp_port_max = 10100          # WebRTC UDP port range end
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+[inbox_automation]
+# Set true after WhatsApp reply dispatch has been commissioned. Keep false in restored copies until queued work is reconciled.
+dispatch_enabled = false

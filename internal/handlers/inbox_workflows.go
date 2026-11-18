@@ -9,12 +9,14 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const inboxWorkflowSettingsResource = models.ResourceSettingsGeneral
 
 func validInboxWorkflow(w models.InboxWorkflow) bool {
-	if strings.TrimSpace(w.Name) == "" || utf8.RuneCountInString(w.Name) > 100 || len(w.Actions) == 0 || len(w.Actions) > 10 {
+	if strings.TrimSpace(w.Name) == "" || utf8.RuneCountInString(w.Name) > 100 || len(w.Actions) == 0 || len(w.Actions) > 10 || w.Position < -10000 || w.Position > 10000 {
 		return false
 	}
 	switch w.Kind {
@@ -38,6 +40,9 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 	for _, action := range w.Actions {
 		switch action.Type {
 		case "assign", "send_template":
+			if action.Type == "send_template" && !action.ConsentConfirmed {
+				return false
+			}
 			if id, err := uuid.Parse(action.Value); err != nil || id == uuid.Nil {
 				return false
 			}
@@ -93,6 +98,7 @@ func (a *App) ListInboxWorkflows(r *fastglue.Request) error {
 }
 
 type inboxWorkflowRequest struct {
+	Enabled    bool                    `json:"enabled"`
 	Name       string                  `json:"name"`
 	Kind       string                  `json:"kind"`
 	Trigger    string                  `json:"trigger"`
@@ -147,4 +153,93 @@ func (a *App) DeleteInboxWorkflow(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Workflow not found", nil, "")
 	}
 	return r.SendEnvelope(map[string]bool{"deleted": true})
+}
+
+func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
+	org, _, ok := a.inboxFeatureAuth(r, models.ActionWrite)
+	if !ok {
+		return nil
+	}
+	if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+		return nil
+	}
+	id, err := parsePathUUID(r, "id", "inbox workflow")
+	if err != nil {
+		return nil
+	}
+	var input inboxWorkflowRequest
+	if a.decodeRequest(r, &input) != nil {
+		return nil
+	}
+	var w models.InboxWorkflow
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&w, "id = ? AND organization_id = ?", id, org).Error; err != nil {
+			return err
+		}
+		w.Name, w.Trigger, w.Position = strings.TrimSpace(input.Name), input.Trigger, input.Position
+		w.Actions, w.Conditions = input.Actions, input.Conditions
+		if input.Kind != w.Kind || !validInboxWorkflow(w) {
+			return errInboxTransition
+		}
+		w.EnabledAt = nil
+		if w.Kind == "rule" && input.Enabled {
+			now := time.Now().UTC()
+			w.EnabledAt = &now
+		}
+		return tx.Save(&w).Error
+	})
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"workflow": w})
+}
+
+func (a *App) InboxAutomationState(r *fastglue.Request) error {
+	org, _, ok := a.inboxFeatureAuth(r, models.ActionRead)
+	if !ok {
+		return nil
+	}
+	var settings models.Organization
+	if err := a.DB.Select("inbox_automation_sends_enabled").First(&settings, "id = ?", org).Error; err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]bool{"enabled": settings.InboxAutomationSendsEnabled, "dispatch_available": a.inboxDispatchAllowed()})
+}
+
+func (a *App) SetInboxAutomationState(r *fastglue.Request) error {
+	org, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var input struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if a.decodeRequest(r, &input) != nil {
+		return nil
+	}
+	if input.Enabled == nil || (*input.Enabled && !a.inboxDispatchAllowed()) {
+		return a.inboxError(r, errInboxTransition)
+	}
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Organization{}).Where("id = ?", org).Update("inbox_automation_sends_enabled", *input.Enabled).Error; err != nil {
+			return err
+		}
+		if *input.Enabled {
+			return nil
+		}
+		var runs []models.InboxWorkflowRun
+		if err := tx.Where("organization_id = ? AND kind = 'rule' AND state = ?", org, inboxRunPending).Find(&runs).Error; err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if err := finishInboxSend(tx, run, inboxRunBlocked, "sending_disabled"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]bool{"enabled": *input.Enabled, "dispatch_available": a.inboxDispatchAllowed()})
 }

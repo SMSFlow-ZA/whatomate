@@ -7,8 +7,9 @@ import (
 )
 
 type InboxAction struct {
-	Type  string `json:"type"`
-	Value string `json:"value,omitempty"`
+	ConsentConfirmed bool   `json:"consent_confirmed,omitempty"`
+	Type             string `json:"type"`
+	Value            string `json:"value,omitempty"`
 }
 
 type InboxWorkflow struct {
