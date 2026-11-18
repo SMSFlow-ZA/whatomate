@@ -1,4 +1,21 @@
 {
+  "inboxCapacity": {
+    "title": "Inbox workload",
+    "help": "Set a limit per agent and WhatsApp account across teams. A limit of 0 allows unlimited Open and Pending cases.",
+    "saveError": "Could not save the agent’s case limit.",
+    "loadError": "Could not load inbox workload.",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "unlimited": "Unlimited",
+    "workload": "{count} active",
+    "limit": "Case limit for {name}",
+    "override": "Capacity override reason (optional)",
+    "reason": {
+      "capacity": "Waiting for agent capacity",
+      "unavailable": "Waiting for an available agent",
+      "available_search": "Waiting for assignment"
+    }
+  },
   "inboxFields": {
     "title": "Custom fields",
     "add": "Add a custom field",
@@ -114,7 +131,8 @@
       "stale": "Changed since selection",
       "invalid": "Invalid action",
       "failed": "Failed",
-      "required_fields": "Required fields are missing"
+      "required_fields": "Required fields are missing",
+      "capacity": "Agent is at capacity"
     }
   },
   "inboxWorkflow": {
@@ -152,6 +170,7 @@
       "snooze_elapsed": "Snooze ended",
       "human_reply": "Agent replied",
       "assigned": "Case assigned",
+      "capacity_override": "Capacity override",
       "tagged": "Tag added"
     }
   },

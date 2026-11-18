@@ -186,6 +186,8 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 				}
 			} else if method != "GET" && (path == "/api/inbox/fields" || strings.HasPrefix(path, "/api/inbox/fields/")) {
 				resource = models.ResourceSettingsGeneral
+			} else if strings.HasPrefix(path, "/api/inbox/teams/") {
+				resource = models.ResourceTeams
 			} else if path == "/api/inbox/sla/report" {
 				resource = models.ResourceAnalyticsAgents
 			}

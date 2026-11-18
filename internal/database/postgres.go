@@ -85,6 +85,7 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxSLAPolicy", &models.InboxSLAPolicy{}},
 		{"InboxFieldDefinition", &models.InboxFieldDefinition{}},
 		{"InboxFieldValue", &models.InboxFieldValue{}},
+		{"InboxAgentCapacity", &models.InboxAgentCapacity{}},
 		{"Template", &models.Template{}},
 		{"WhatsAppFlow", &models.WhatsAppFlow{}},
 
