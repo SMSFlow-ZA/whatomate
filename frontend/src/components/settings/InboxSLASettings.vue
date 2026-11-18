@@ -74,7 +74,7 @@ onMounted(load)
             <label><input type="checkbox" :checked="shift.EndMinute === 1440" @change="shift.EndMinute = shift.EndMinute === 1440 ? 1020 : 1440" /> {{ t('inboxSla.midnight') }}</label>
             <button type="button" class="outline" @click="policy.shifts.splice(i, 1)">{{ t('common.remove') }}</button>
           </div>
-          <button class="justify-self-start" type="button" class="outline" :disabled="policy.shifts.length >= 28" @click="policy.shifts.push({ Day: 1, StartMinute: 480, EndMinute: 1020 })">{{ t('inboxSla.addShift') }}</button>
+          <button class="outline justify-self-start" type="button" :disabled="policy.shifts.length >= 28" @click="policy.shifts.push({ Day: 1, StartMinute: 480, EndMinute: 1020 })">{{ t('inboxSla.addShift') }}</button>
         </template>
         <div class="flex flex-wrap gap-2">
           <button type="submit" :disabled="busy">{{ t('common.save') }}</button>
