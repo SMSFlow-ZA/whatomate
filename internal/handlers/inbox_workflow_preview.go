@@ -15,12 +15,13 @@ import (
 var errInboxSendIneligible = errors.New("message is not eligible for this conversation")
 
 type inboxReplyPreview struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	Header   string `json:"header,omitempty"`
-	Footer   string `json:"footer,omitempty"`
-	Template string `json:"template,omitempty"`
-	Language string `json:"language,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	Header      string `json:"header,omitempty"`
+	Footer      string `json:"footer,omitempty"`
+	Template    string `json:"template,omitempty"`
+	TemplateKey string `json:"template_key,omitempty"`
+	Language    string `json:"language,omitempty"`
 }
 
 func workflowMatchesCase(conditions models.InboxQueueFilter, c models.InboxCase, contact models.Contact) bool {
@@ -47,16 +48,20 @@ func workflowMatchesCase(conditions models.InboxQueueFilter, c models.InboxCase,
 }
 
 func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
+	return previewInboxReplyWithDB(a.DB, c, account, contact, action, now)
+}
+
+func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
 	// A customer message on another business number cannot open this account's
 	// service window. Keep the check tied to the same thread as the intended send.
 	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID ||
-		contact.OrganizationID != c.OrganizationID || account.Status != "active" || contact.PhoneNumber == "" {
+		contact.OrganizationID != c.OrganizationID || account.Status != "active" || !eligibleInboxNumber(contact.PhoneNumber) {
 		return inboxReplyPreview{}, errInboxSendIneligible
 	}
 	switch action.Type {
 	case "send_text":
 		var inbound models.Message
-		err := a.DB.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ?",
+		err := db.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ? AND COALESCE(channel, '') IN ('', 'whatsapp')",
 			c.OrganizationID, c.ContactID, account.Name, models.DirectionIncoming).Order("created_at DESC, id DESC").First(&inbound).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return inboxReplyPreview{}, errInboxSendIneligible
@@ -70,11 +75,11 @@ func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccou
 		return inboxReplyPreview{Type: "text", Text: action.Value}, nil
 	case "send_template":
 		id, err := uuid.Parse(action.Value)
-		if err != nil {
+		if err != nil || !action.ConsentConfirmed || contact.MarketingOptOut {
 			return inboxReplyPreview{}, errInboxSendIneligible
 		}
 		var template models.Template
-		err = a.DB.Where("organization_id = ? AND whats_app_account = ? AND id = ? AND status = ? AND category = ?",
+		err = db.Where("organization_id = ? AND whats_app_account = ? AND id = ? AND status = ? AND category = ?",
 			c.OrganizationID, account.Name, id, "APPROVED", "UTILITY").First(&template).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return inboxReplyPreview{}, errInboxSendIneligible
@@ -89,9 +94,14 @@ func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccou
 			return inboxReplyPreview{}, errInboxSendIneligible
 		}
 		return inboxReplyPreview{Type: "template", Text: template.BodyContent, Header: template.HeaderContent,
-			Footer: template.FooterContent, Template: template.DisplayName, Language: template.Language}, nil
+			Footer: template.FooterContent, Template: template.DisplayName, TemplateKey: template.Name, Language: template.Language}, nil
 	}
 	return inboxReplyPreview{}, errInboxSendIneligible
+}
+
+func eligibleInboxNumber(phone string) bool {
+	digits := strings.TrimPrefix(phone, "+")
+	return len(digits) >= 7 && len(digits) <= 15 && strings.IndexFunc(digits, func(ch rune) bool { return ch < '0' || ch > '9' }) == -1
 }
 
 func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
@@ -128,7 +138,7 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return a.inboxError(r, err)
 	}
 	var account models.WhatsAppAccount
-	if err := a.DB.Select("id", "organization_id", "name", "status").
+	if err := a.DB.Select("id", "organization_id", "name", "status", "phone_id").
 		Where("id = ? AND organization_id = ?", c.AccountID, org).First(&account).Error; err != nil {
 		return a.inboxError(r, err)
 	}
@@ -137,25 +147,13 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		name = utils.MaskIfPhoneNumber(name)
 		phone = utils.MaskPhoneNumber(phone)
 	}
-	matches := workflowMatchesCase(workflow.Conditions, c, contact)
-	var reply *inboxReplyPreview
-	sendUnavailable := false
-	for _, action := range workflow.Actions {
-		if action.Type != "send_text" && action.Type != "send_template" {
-			continue
-		}
-		preview, err := a.previewInboxReply(c, account, contact, action, time.Now().UTC())
-		if errors.Is(err, errInboxSendIneligible) {
-			sendUnavailable = true
-		} else if err != nil {
-			return a.inboxError(r, err)
-		} else {
-			reply = &preview
-		}
+	preview, err := a.evaluateInboxWorkflow(a.DB, workflow, c, account, contact, user, time.Now().UTC())
+	if err != nil {
+		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{
-		"matches": matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
+		"matches": preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
 		"recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name,
-		"reply": reply, "send_unavailable": sendUnavailable,
+		"reply": preview.Reply, "send_unavailable": preview.SendUnavailable, "confirmation": preview.Confirmation,
 	})
 }

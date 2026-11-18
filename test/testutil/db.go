@@ -100,6 +100,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxCase{},
 		&models.InboxCaseActivity{},
 		&models.InboxSavedView{},
+		&models.InboxWorkflow{},
+		&models.InboxWorkflowRun{},
 		&models.Template{},
 		&models.WhatsAppFlow{},
 		// Chatbot models
@@ -142,6 +144,7 @@ func cleanupTables(db *gorm.DB) {
 		"inbox_case_activities",
 		"inbox_saved_views",
 		"inbox_cases",
+		"inbox_workflow_runs", "inbox_workflows",
 		// Dashboard tables
 		"widgets",
 		// Catalog tables

@@ -6,6 +6,7 @@ import { useContactsStore, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { inboxService, type InboxCase } from '@/services/inbox'
+import InboxMacroPicker from '@/components/chat/InboxMacroPicker.vue'
 import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
 import InboxQueues from '@/components/chat/InboxQueues.vue'
 import { useUsersStore } from '@/stores/users'
@@ -132,7 +133,7 @@ const inboxAccountId = computed<string | undefined>(() =>
   orgAccounts.value.find(account => account.name === selectedAccount.value)?.id ??
   (selectedAccount.value === queueAccount.value ? queueAccountId.value : undefined)
 )
-const inboxContactIds = computed(() => contactsStore.sortedContacts.map(contact => contact.id).join(','))
+const inboxContactIds = computed(() => [...new Set([...contactsStore.sortedContacts.map(contact => contact.id), contactsStore.currentContact?.id].filter(Boolean))].join(','))
 const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
 
 function inboxSummaryFor(contact: { id: string; whatsapp_account?: string }) {
@@ -2510,6 +2511,7 @@ async function sendMediaMessage() {
               @select="handleCannedSelect"
               @close="closeCannedPicker"
             />
+          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @applied="refreshInboxSummaries" />
             <TemplatePicker
               ref="templatePickerRef"
               :selected-account="selectedAccount"
