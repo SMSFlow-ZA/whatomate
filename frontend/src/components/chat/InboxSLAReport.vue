@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useTeamsStore } from '@/stores/teams'
 import { Button } from '@/components/ui/button'
-import { accountsService, teamsService } from '@/services/api'
+import { accountsService } from '@/services/api'
 import { inboxService, type QueueCase } from '@/services/inbox'
 import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
 
 const { t } = useI18n()
+const teamsStore = useTeamsStore()
 const rows = ref<QueueCase[]>([])
 const account = ref('')
 const team = ref('')
@@ -37,7 +39,7 @@ onMounted(async () => {
   try { available.value = (await inboxService.settings()).data.data.enabled } catch { return }
   if (!available.value) return
   void accountsService.list().then(reply => { accounts.value = reply.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsService.list().then(reply => { teams.value = reply.data?.teams ?? [] }).catch(() => {})
+  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => {})
   await load()
   timer = setInterval(load, 30000)
 })
