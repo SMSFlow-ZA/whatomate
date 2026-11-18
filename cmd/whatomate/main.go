@@ -304,6 +304,7 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	go app.RunInboxSnoozes(slaCtx, time.Minute)
 	go app.RunInboxOverflow(slaCtx, 15*time.Second)
+	go app.RunInboxWorkflows(slaCtx, 3*time.Second)
 	lo.Info("SLA processor started")
 
 	// Start embedded workers
@@ -691,6 +692,15 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/inbox/workflows", app.UpdateInboxWorkflowSettings)
 	g.GET("/api/inbox/cases", app.ListInboxCaseSummaries)
 	g.GET("/api/inbox/queue", app.ListInboxQueue)
+	g.GET("/api/inbox/workflow-definitions", app.ListInboxWorkflows)
+	g.POST("/api/inbox/workflow-definitions", app.CreateInboxWorkflow)
+	g.PUT("/api/inbox/workflow-definitions/{id}", app.UpdateInboxWorkflow)
+	g.DELETE("/api/inbox/workflow-definitions/{id}", app.DeleteInboxWorkflow)
+	g.POST("/api/inbox/workflow-definitions/{id}/preview", app.PreviewInboxWorkflow)
+	g.POST("/api/inbox/workflow-definitions/{id}/execute", app.ExecuteInboxMacro)
+	g.GET("/api/inbox/workflow-runs", app.ListInboxWorkflowRuns)
+	g.GET("/api/inbox/automation", app.InboxAutomationState)
+	g.PUT("/api/inbox/automation", app.SetInboxAutomationState)
 	g.GET("/api/inbox/teams/{team_id}/capacity/{account_id}", app.GetInboxTeamCapacity)
 	g.PUT("/api/inbox/teams/{team_id}/capacity/{account_id}", app.SetInboxTeamCapacity)
 	g.GET("/api/inbox/fields", app.ListInboxFieldDefinitions)

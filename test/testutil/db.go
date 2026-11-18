@@ -110,6 +110,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxFieldDefinition{},
 		&models.InboxFieldValue{},
 		&models.InboxAgentCapacity{},
+		&models.InboxWorkflow{},
+		&models.InboxWorkflowRun{},
 		&models.Template{},
 		&models.WhatsAppFlow{},
 		// Chatbot models
@@ -167,6 +169,7 @@ func cleanupTables(db *gorm.DB) {
 		"inbox_sla_policies",
 		"inbox_field_values", "inbox_field_definitions",
 		"inbox_agent_capacities",
+		"inbox_workflow_runs", "inbox_workflows",
 		// Dashboard tables
 		"widgets",
 		// Catalog tables
