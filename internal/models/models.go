@@ -89,10 +89,11 @@ type BaseModel struct {
 // Organization represents a tenant in the multi-tenant system
 type Organization struct {
 	BaseModel
-	Name                  string `gorm:"size:255;not null" json:"name"`
-	Slug                  string `gorm:"size:100;uniqueIndex;not null" json:"slug"`
-	Settings              JSONB  `gorm:"type:jsonb;default:'{}'" json:"settings"`
-	InboxWorkflowsEnabled bool   `gorm:"not null;default:false" json:"-"`
+	Name                        string `gorm:"size:255;not null" json:"name"`
+	Slug                        string `gorm:"size:100;uniqueIndex;not null" json:"slug"`
+	Settings                    JSONB  `gorm:"type:jsonb;default:'{}'" json:"settings"`
+	InboxAutomationSendsEnabled bool   `gorm:"not null;default:false" json:"-"`
+	InboxWorkflowsEnabled       bool   `gorm:"not null;default:false" json:"-"`
 
 	// Relations
 	Users             []User             `gorm:"foreignKey:OrganizationID" json:"users,omitempty"`

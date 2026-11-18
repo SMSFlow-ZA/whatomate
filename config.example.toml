@@ -143,6 +143,10 @@ password = "admin"
 full_name = "Admin"
 
 # Compiled channel providers; no new sidecars are required.
+[inbox_automation]
+# Set true after WhatsApp reply dispatch has been commissioned. Keep false in restored copies until queued work is reconciled.
+dispatch_enabled = false
+
 [channels]
 # Emergency/restore hold stops new SMS and SMS bot dispatch; receipts continue.
 stop_dispatch = false

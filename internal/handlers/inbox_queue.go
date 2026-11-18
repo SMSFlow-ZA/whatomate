@@ -364,53 +364,63 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 			if input.AssigneeID == nil {
 				return errInboxTransition
 			}
-			var member models.UserOrganization
-			if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
-				Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", org, input.AssigneeID).First(&member).Error; err != nil {
-				return err
-			}
-			if c.TeamID != nil {
-				var teamMember models.TeamMember
-				if err := tx.Where("team_id = ? AND user_id = ?", c.TeamID, input.AssigneeID).First(&teamMember).Error; err != nil {
-					return err
-				}
-			}
-			kind, overrideDetail := "assigned", ""
-			if err := reserveInboxAgent(tx, c, *input.AssigneeID); err != nil {
-				if !errors.Is(err, errInboxAgentAtCapacity) || input.OverrideReason == "" {
-					return err
-				}
-				kind, overrideDetail = "capacity_override", input.OverrideReason
-			}
-			c.AssigneeID, c.RoutingReason = input.AssigneeID, ""
-			c.Version++
-			if err := tx.Save(&c).Error; err != nil {
-				return err
-			}
-			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: kind, Detail: overrideDetail})
+			return assignInboxCase(tx, &c, user, *input.AssigneeID, input.OverrideReason)
 		case "tag":
-			var tag models.Tag
-			if err := tx.Where("organization_id = ? AND name = ?", org, input.Tag).First(&tag).Error; err != nil {
-				return err
-			}
 			var contact models.Contact
-			if err := tx.Where("organization_id = ? AND id = ?", org, c.ContactID).First(&contact).Error; err != nil {
+			if err := tx.First(&contact, "organization_id = ? AND id = ?", org, c.ContactID).Error; err != nil {
 				return err
 			}
-			for _, value := range contact.Tags {
-				if value == tag.Name {
-					return nil
-				}
-			}
-			if err := tx.Model(&contact).Update("tags", append(contact.Tags, tag.Name)).Error; err != nil {
-				return err
-			}
-			c.Version++
-			if err := tx.Save(&c).Error; err != nil {
-				return err
-			}
-			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: "tagged"})
+			return tagInboxCase(tx, &c, &contact, user, input.Tag)
 		}
 		return errInboxTransition
 	})
+}
+
+func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID, override string) error {
+	var member models.UserOrganization
+	if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
+		Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", c.OrganizationID, assignee).First(&member).Error; err != nil {
+		return err
+	}
+	if c.TeamID != nil {
+		var teamMember models.TeamMember
+		if err := tx.Where("team_id = ? AND user_id = ?", c.TeamID, assignee).First(&teamMember).Error; err != nil {
+			return err
+		}
+	}
+	kind, overrideDetail := "assigned", ""
+	if err := reserveInboxAgent(tx, *c, assignee); err != nil {
+		if !errors.Is(err, errInboxAgentAtCapacity) || override == "" {
+			return err
+		}
+		kind, overrideDetail = "capacity_override", override
+	}
+	c.AssigneeID, c.RoutingReason = &assignee, ""
+	c.Version++
+	if err := tx.Save(c).Error; err != nil {
+		return err
+	}
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: kind, Detail: overrideDetail})
+}
+
+func tagInboxCase(tx *gorm.DB, c *models.InboxCase, contact *models.Contact, user uuid.UUID, name string) error {
+	var tag models.Tag
+	if err := tx.Where("organization_id = ? AND name = ?", c.OrganizationID, name).First(&tag).Error; err != nil {
+		return err
+	}
+	for _, value := range contact.Tags {
+		if value == tag.Name {
+			return nil
+		}
+	}
+	values := append(contact.Tags, tag.Name)
+	if err := tx.Model(contact).Update("tags", values).Error; err != nil {
+		return err
+	}
+	contact.Tags = values
+	c.Version++
+	if err := tx.Save(c).Error; err != nil {
+		return err
+	}
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: "tagged"})
 }

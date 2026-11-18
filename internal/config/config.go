@@ -16,21 +16,26 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	App          AppConfig          `koanf:"app"`
-	Server       ServerConfig       `koanf:"server"`
-	Database     DatabaseConfig     `koanf:"database"`
-	Redis        RedisConfig        `koanf:"redis"`
-	JWT          JWTConfig          `koanf:"jwt"`
-	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
-	AI           AIConfig           `koanf:"ai"`
-	Storage      StorageConfig      `koanf:"storage"`
-	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
-	RateLimit    RateLimitConfig    `koanf:"rate_limit"`
-	Cookie       CookieConfig       `koanf:"cookie"`
-	Calling      CallingConfig      `koanf:"calling"`
-	TTS          TTSConfig          `koanf:"tts"`
-	Plan         PlanConfig         `koanf:"plan"`
-	Channels     ChannelsConfig     `koanf:"channels"`
+	App             AppConfig             `koanf:"app"`
+	Server          ServerConfig          `koanf:"server"`
+	Database        DatabaseConfig        `koanf:"database"`
+	Redis           RedisConfig           `koanf:"redis"`
+	JWT             JWTConfig             `koanf:"jwt"`
+	WhatsApp        WhatsAppConfig        `koanf:"whatsapp"`
+	AI              AIConfig              `koanf:"ai"`
+	Storage         StorageConfig         `koanf:"storage"`
+	DefaultAdmin    DefaultAdminConfig    `koanf:"default_admin"`
+	RateLimit       RateLimitConfig       `koanf:"rate_limit"`
+	Cookie          CookieConfig          `koanf:"cookie"`
+	Calling         CallingConfig         `koanf:"calling"`
+	TTS             TTSConfig             `koanf:"tts"`
+	Plan            PlanConfig            `koanf:"plan"`
+	Channels        ChannelsConfig        `koanf:"channels"`
+	InboxAutomation InboxAutomationConfig `koanf:"inbox_automation"`
+}
+
+type InboxAutomationConfig struct {
+	DispatchEnabled bool `koanf:"dispatch_enabled"`
 }
 
 type ChannelsConfig struct {

@@ -174,7 +174,7 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			}
 		case "inbox":
 			resource = models.ResourceChat
-			if path == "/api/inbox/workflows" && method == "PUT" || strings.HasPrefix(path, "/api/inbox/sla/policies") {
+			if (path == "/api/inbox/workflows" || path == "/api/inbox/automation") && method == "PUT" || strings.HasPrefix(path, "/api/inbox/sla/policies") {
 				resource = models.ResourceSettingsGeneral
 				if method == "DELETE" {
 					action = models.ActionWrite

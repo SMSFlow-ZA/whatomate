@@ -14,6 +14,12 @@ export interface FieldDefinition {
 }
 export interface FieldMatch { definition_id: string; value: FieldValue }
 
+export interface InboxAction { type: 'assign' | 'tag' | 'priority' | 'status' | 'note' | 'send_text' | 'send_template'; value: string; consent_confirmed?: boolean }
+export interface InboxWorkflowInput { kind: 'macro' | 'rule'; name: string; trigger: string; position: number; actions: InboxAction[]; conditions: InboxFilters; enabled?: boolean }
+export interface InboxWorkflow extends InboxWorkflowInput { id: string; enabled_at?: string }
+export interface InboxWorkflowRun { id: string; workflow_name: string; state: string; created_at: string; outcome?: string }
+export interface InboxWorkflowPreview { matches: boolean; confirmation: string; actions: InboxAction[]; send_unavailable: boolean; recipient: { name: string; phone: string }; account: string; reply?: { text: string; header?: string; footer?: string; template?: string; template_key?: string; language?: string } }
+
 export type CaseStatus = 'open' | 'pending' | 'waiting_customer' | 'snoozed' | 'resolved'
 export type CasePriority = 'low' | 'normal' | 'high' | 'urgent'
 
@@ -71,7 +77,18 @@ const conversationPath = (accountId: string, contactId: string) =>
 
 const fieldPath = (contact: string, account?: string) => (account ? conversationPath(account, contact) : '/inbox/contacts/' + encodeURIComponent(contact)) + '/fields'
 
+const workflowPath = (id: string) => '/inbox/workflow-definitions/' + encodeURIComponent(id)
+
 export const inboxService = {
+  workflowDefinitions: (kind: 'macro' | 'rule') => api.get<Envelope<{ workflows: InboxWorkflow[] }>>('/inbox/workflow-definitions', { params: {kind} }),
+  createWorkflow: (input: InboxWorkflowInput) => api.post('/inbox/workflow-definitions', input),
+  updateWorkflow: (id: string, input: InboxWorkflowInput) => api.put(workflowPath(id), input),
+  deleteWorkflow: (id: string) => api.delete(workflowPath(id)),
+  previewWorkflow: (id: string, case_id: string) => api.post<Envelope<InboxWorkflowPreview>>(workflowPath(id) + '/preview', { case_id }),
+  executeMacro: (id: string, case_id: string, run_id: string, confirmation: string) => api.post<Envelope<{ run: InboxWorkflowRun }>>(workflowPath(id) + '/execute', { case_id, run_id, confirmation }),
+  workflowRuns: (case_id?: string) => api.get<Envelope<{ runs: InboxWorkflowRun[] }>>('/inbox/workflow-runs', { params: {case_id} }),
+  automationState: () => api.get<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation'),
+  setAutomation: (enabled: boolean) => api.put<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation', { enabled }),
   teamCapacity: (team: string, account: string) => api.get<Envelope<{ agents: InboxCapacity[] }>>('/inbox/teams/' + encodeURIComponent(team) + '/capacity/' + encodeURIComponent(account)),
   setTeamCapacity: (team: string, account: string, agent_id: string, max_active: number) => api.put('/inbox/teams/' + encodeURIComponent(team) + '/capacity/' + encodeURIComponent(account), { agent_id, max_active }),
   fieldDefinitions: (scope?: FieldDefinition['scope']) => api.get<Envelope<{ definitions: FieldDefinition[] }>>('/inbox/fields', { params: { scope } }),

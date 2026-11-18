@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/inbox-workflows',
+          name: 'inbox-workflows',
+          component: () => import('@/views/settings/InboxWorkflowsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/custom-fields',
           name: 'inbox-custom-fields',
           component: () => import('@/views/settings/InboxFieldsView.vue'),

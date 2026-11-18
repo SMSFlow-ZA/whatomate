@@ -8,6 +8,7 @@ import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { inboxService, type InboxCase } from '@/services/inbox'
+import InboxMacroPicker from '@/components/chat/InboxMacroPicker.vue'
 import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
 import InboxQueues from '@/components/chat/InboxQueues.vue'
 import { useUsersStore } from '@/stores/users'
@@ -165,7 +166,7 @@ const inboxAccountId = computed<string | undefined>(() =>
   orgAccounts.value.find(account => account.name === selectedAccount.value)?.id ??
   (selectedAccount.value === queueAccount.value ? queueAccountId.value : undefined)
 )
-const inboxContactIds = computed(() => contactsStore.sortedContacts.map(contact => contact.id).join(','))
+const inboxContactIds = computed(() => [...new Set([...contactsStore.sortedContacts.map(contact => contact.id), contactsStore.currentContact?.id].filter(Boolean))].join(','))
 const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
 
 function inboxSummaryFor(contact: { id: string; whatsapp_account?: string }) {
@@ -2613,6 +2614,7 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
+          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @applied="refreshInboxSummaries" />
           <ChannelOptions v-model="deliveryOptions" :text="messageInput" />
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
