@@ -27,7 +27,11 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({ page, 
       const path = '/api/inbox/accounts/' + account.id + '/contacts/' + contact.id
       expect((await api.put(path, { status: 'open', priority: 'urgent' })).ok()).toBeTruthy()
     }
+    const profile = await api.get('/api/me')
+    expect(profile.ok()).toBeTruthy()
+    const { data: user } = await profile.json()
     await page.context().addCookies((await request.storageState()).cookies)
+    await page.addInitScript(user => localStorage.setItem('user', JSON.stringify(user)), user)
     await page.goto('/chat')
     await page.getByRole('button', { name: 'Queues', exact: true }).click()
     await page.getByRole('combobox', { name: 'Queues', exact: true }).selectOption('unassigned')
