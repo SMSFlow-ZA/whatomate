@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { agentAnalyticsService } from '@/services/api'
+import { agentAnalyticsService, teamsService } from '@/services/api'
+import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
+import { inboxService } from '@/services/inbox'
 import { useAuthStore } from '@/stores/auth'
+import { useOrganizationsStore } from '@/stores/organizations'
 import { useUsersStore } from '@/stores/users'
 import { PageHeader, ErrorState, DateRangePicker } from '@/components/shared'
 import Combobox from '@/components/oat/Combobox.vue'
@@ -60,6 +63,28 @@ interface AgentAnalyticsResponse {
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+
+const workloadTeams = ref<{ id: string; name: string }[]>([])
+const workloadTeam = ref('')
+const organizationsStore = useOrganizationsStore()
+let workloadRequest = 0
+
+async function loadWorkloadTeams() {
+  const request = ++workloadRequest
+  workloadTeams.value = []
+  workloadTeam.value = ''
+  if (!authStore.hasPermission('teams', 'read')) return
+  try {
+    if (!(await inboxService.settings()).data.data.enabled) return
+    const teams = (await teamsService.list({ limit: 100 })).data.data?.teams ?? []
+    if (request !== workloadRequest) return
+    workloadTeams.value = teams
+    workloadTeam.value = workloadTeams.value[0]?.id ?? ''
+  } catch {
+    if (request === workloadRequest) workloadTeams.value = []
+  }
+}
+watch(() => organizationsStore.selectedOrganization?.id ?? authStore.organizationId, loadWorkloadTeams, { immediate: true })
 const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
 // roles with the right permission should get the same view.
@@ -280,6 +305,15 @@ void _displayStats.value // Suppress unused warning
 
     <!-- Content -->
     <div class="flex-1 scroll-y p-4">
+      <section v-if="workloadTeams.length" class="grid gap-2 mb-4">
+        <label>
+          {{ t('inboxQueue.team') }}
+          <select v-model="workloadTeam">
+            <option v-for="team in workloadTeams" :key="team.id" :value="team.id">{{ team.name }}</option>
+          </select>
+        </label>
+        <InboxTeamCapacity v-if="workloadTeam" :team="workloadTeam" />
+      </section>
       <div class="vstack gap-4">
         <!-- Error State -->
         <ErrorState
