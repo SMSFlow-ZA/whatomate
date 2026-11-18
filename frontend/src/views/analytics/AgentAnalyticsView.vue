@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { agentAnalyticsService, teamsService } from '@/services/api'
+import { agentAnalyticsService } from '@/services/api'
+import { useTeamsStore } from '@/stores/teams'
 import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
 import { inboxService } from '@/services/inbox'
 import { useAuthStore } from '@/stores/auth'
@@ -67,6 +68,7 @@ const authStore = useAuthStore()
 const workloadTeams = ref<{ id: string; name: string }[]>([])
 const workloadTeam = ref('')
 const organizationsStore = useOrganizationsStore()
+const teamsStore = useTeamsStore()
 let workloadRequest = 0
 
 async function loadWorkloadTeams() {
@@ -76,7 +78,7 @@ async function loadWorkloadTeams() {
   if (!authStore.hasPermission('teams', 'read')) return
   try {
     if (!(await inboxService.settings()).data.data.enabled) return
-    const teams = (await teamsService.list({ limit: 100 })).data.data?.teams ?? []
+    const { teams } = await teamsStore.fetchTeams({ limit: 100 })
     if (request !== workloadRequest) return
     workloadTeams.value = teams
     workloadTeam.value = workloadTeams.value[0]?.id ?? ''
