@@ -5,6 +5,10 @@ on:
     branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027, codex/release-security-20261028, codex/managed-inbox-acceptance]
   workflow_dispatch:
     inputs:
+      musl_runtime:
+        description: Build the Alpine musl runtime for Piper and FFmpeg
+        type: boolean
+        default: false
       rebuild_native:
         description: Rebuild pinned FFmpeg/Piper native runtime from the full recipe
         type: boolean
@@ -25,6 +29,7 @@ jobs:
     timeout-minutes: 30
     env:
       IMAGE: ghcr.io/smsflow-za/whatomate:managed-${{ github.sha }}
+      EXPECTED_OS: ${{ (inputs.musl_runtime || github.ref_name == 'codex/managed-inbox-acceptance') && 'alpine' || 'debian' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -35,7 +40,7 @@ jobs:
         id: build
         with:
           context: .
-          file: ${{ inputs.rebuild_native && 'docker/Dockerfile.managed' || 'docker/Dockerfile.managed-patch' }}
+          file: ${{ (inputs.musl_runtime || github.ref_name == 'codex/managed-inbox-acceptance') && 'docker/Dockerfile.managed-musl' || inputs.rebuild_native && 'docker/Dockerfile.managed' || 'docker/Dockerfile.managed-patch' }}
           push: false
           load: true
           provenance: false
@@ -56,6 +61,18 @@ jobs:
           candidate=$(docker image inspect --format '{{.Id}}' "$IMAGE")
           printf 'CANDIDATE_ID=%s\n' "$candidate" >> "$GITHUB_ENV"
           docker image inspect "$candidate" --format '{{json .}}' > evidence/local-image.json
+          if docker run --rm --network none --read-only --entrypoint sh "$candidate" -ec '
+            test -f /usr/share/doc/whatomate-openssl/patch-fingerprint
+            sha256sum -c /usr/share/doc/whatomate-openssl/runtime-sha256 >&2
+            for package in libssl3t64 openssl openssl-provider-legacy; do
+              test "$(dpkg-query -W "$package" | cut -f2)" = "3.5.7-1~deb13u3+smsflow1"
+            done
+            cat /usr/share/doc/whatomate-openssl/patch-fingerprint
+          ' > evidence/openssl-backport.fingerprint; then
+            :
+          else
+            rm evidence/openssl-backport.fingerprint
+          fi
           docker save --output evidence/whatomate-image.tar "$IMAGE"
           container=$(docker create --network none --entrypoint /not-executed "$candidate")
           trap 'docker rm "$container" >/dev/null' EXIT
@@ -79,7 +96,7 @@ jobs:
           ./scanner/trivy image --cache-dir "$RUNNER_TEMP/trivy" --skip-db-update --skip-java-db-update --offline-scan --scanners vuln,secret --list-all-pkgs --ignorefile /dev/null --format json --output evidence/trivy.json --input evidence/whatomate-image.tar
           govulncheck -mode=binary -scan=package -format=json evidence/whatomate-binary > evidence/govulncheck.json
           python3 scripts/release_security.py go-db --evidence evidence
-          python3 scripts/release_security.py approve --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID"
+          python3 scripts/release_security.py approve --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID" --expected-os "$EXPECTED_OS"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -89,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(docker image inspect --format '{{.Id}}' "$IMAGE")" = "$CANDIDATE_ID"
-          python3 scripts/release_security.py verify --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID"
+          python3 scripts/release_security.py verify --evidence evidence --source "$GITHUB_SHA" --local-id "$CANDIDATE_ID" --expected-os "$EXPECTED_OS"
           docker push "$IMAGE"
           docker buildx imagetools inspect "$IMAGE" --raw > evidence/published-manifest.json
           docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' > evidence/published-descriptor.json
@@ -125,6 +142,7 @@ jobs:
         with:
           name: managed-security
           path: |
+            evidence/openssl-backport.fingerprint
             evidence/trivy-safe.json
             evidence/trivy-db.json
             evidence/trivy-version.json
