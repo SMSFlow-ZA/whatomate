@@ -1,0 +1,38 @@
+package handlers
+
+import (
+	"errors"
+
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
+)
+
+// latestInboxAssignment limits case-based access to the current case for one
+// contact and WhatsApp account. Previous assignees cannot use historical cases
+// to regain access after assignment changes.
+func latestInboxAssignment(db *gorm.DB, org, user uuid.UUID) *gorm.DB {
+	return db.Table("inbox_cases AS ic").
+		Where("ic.organization_id = ? AND ic.assignee_id = ? AND ic.deleted_at IS NULL", org, user).
+		Where("EXISTS (SELECT 1 FROM organizations o WHERE o.id = ic.organization_id AND o.inbox_workflows_enabled AND o.deleted_at IS NULL)").
+		Where("NOT EXISTS (SELECT 1 FROM inbox_cases newer WHERE newer.organization_id = ic.organization_id AND newer.account_id = ic.account_id AND newer.contact_id = ic.contact_id AND newer.deleted_at IS NULL AND (newer.opened_at, newer.id) > (ic.opened_at, ic.id))")
+}
+
+// findInboxChatContact grants the existing contact access first. An agent who
+// relies only on a case assignment must explicitly select the assigned account.
+func (a *App) findInboxChatContact(org, user, contactID uuid.UUID, account string) (models.Contact, bool, error) {
+	var contact models.Contact
+	err := a.scopeAssignedContact(a.DB.Where("id = ? AND organization_id = ?", contactID, org), user, org).First(&contact).Error
+	if !errors.Is(err, gorm.ErrRecordNotFound) || account == "" {
+		return contact, false, err
+	}
+	grant := latestInboxAssignment(a.DB, org, user).
+		Joins("JOIN whatsapp_accounts wa ON wa.id = ic.account_id AND wa.organization_id = ic.organization_id AND wa.deleted_at IS NULL").
+		Where("wa.name = ? AND ic.contact_id = contacts.id", account).Select("1")
+	err = a.DB.Where("contacts.id = ? AND contacts.organization_id = ? AND EXISTS (?)", contactID, org, grant).
+		First(&contact).Error
+	if err == nil {
+		contact.WhatsAppAccount = account
+	}
+	return contact, err == nil, err
+}

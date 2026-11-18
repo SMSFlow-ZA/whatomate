@@ -335,11 +335,6 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 					return err
 				}
 			}
-			// The existing contact owner grants the assignee access to the chat.
-			if err := tx.Model(&models.Contact{}).Where("id = ? AND organization_id = ?", c.ContactID, org).
-				Update("assigned_user_id", input.AssigneeID).Error; err != nil {
-				return err
-			}
 			c.AssigneeID = input.AssigneeID
 			c.Version++
 			if err := tx.Save(&c).Error; err != nil {
