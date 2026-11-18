@@ -113,7 +113,7 @@ func TestInboxRulesSelectOneSendAndDoNotReplayUnknown(t *testing.T) {
 	require.NoError(t, db.Create(&secondary).Error)
 	at := time.Now().UTC().Add(-time.Second)
 	require.NoError(t, db.Create(&models.Message{BaseModel: models.BaseModel{ID: uuid.New(), CreatedAt: at}, OrganizationID: org.ID,
-		WhatsAppAccount: account.Name, ContactID: contact.ID, Direction: models.DirectionIncoming, Channel: "whatsapp", MessageType: models.MessageTypeText}).Error)
+		WhatsAppAccount: account.Name, ContactID: contact.ID, Direction: models.DirectionIncoming, MessageType: models.MessageTypeText}).Error)
 	a.recordInboxInbound(account, contact, "one", at, nil)
 	var event models.InboxCaseActivity
 	require.NoError(t, db.First(&event, "organization_id = ? AND event_key = ?", org.ID, "one").Error)

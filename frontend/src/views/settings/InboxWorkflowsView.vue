@@ -160,11 +160,11 @@ onMounted(async () => {
         <details class="rounded-md border border-border p-3">
           <summary>{{ t('inboxRules.conditions') }}</summary>
           <div class="mt-2 grid gap-2 sm:grid-cols-2">
-            <label>{{ t('inboxQueue.account') }} <select v-model="form.conditions.account_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
-            <label>{{ t('inboxQueue.team') }} <select v-model="form.conditions.team_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="item in teams" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-            <label>{{ t('inboxQueue.assignee') }} <select v-model="form.conditions.assignee_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="u in users" :key="u.id" :value="u.id">{{ u.full_name }}</option></select></label>
-            <label>{{ t('inboxWorkflow.caseStatus') }} <select v-model="form.conditions.status"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="s in [...statuses, 'snoozed']" :key="s" :value="s">{{ t('inboxWorkflow.status.' + s) }}</option></select></label>
-            <label>{{ t('inboxWorkflow.casePriority') }} <select v-model="form.conditions.priority"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="p in priorities" :key="p" :value="p">{{ t('inboxWorkflow.priority.' + p) }}</option></select></label>
+            <label>{{ t('inboxQueue.account') }} <select v-model="form.conditions.account_id"><option :value="undefined">{{ t('common.all') }}</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
+            <label>{{ t('inboxQueue.team') }} <select v-model="form.conditions.team_id"><option :value="undefined">{{ t('common.all') }}</option><option v-for="item in teams" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+            <label>{{ t('inboxQueue.assignee') }} <select v-model="form.conditions.assignee_id"><option :value="undefined">{{ t('common.all') }}</option><option v-for="u in users" :key="u.id" :value="u.id">{{ u.full_name }}</option></select></label>
+            <label>{{ t('inboxWorkflow.caseStatus') }} <select v-model="form.conditions.status"><option :value="undefined">{{ t('common.all') }}</option><option v-for="s in [...statuses, 'snoozed']" :key="s" :value="s">{{ t('inboxWorkflow.status.' + s) }}</option></select></label>
+            <label>{{ t('inboxWorkflow.casePriority') }} <select v-model="form.conditions.priority"><option :value="undefined">{{ t('common.all') }}</option><option v-for="p in priorities" :key="p" :value="p">{{ t('inboxWorkflow.priority.' + p) }}</option></select></label>
             <label v-if="tags.length">{{ t('contacts.tags') }} <select :value="form.conditions.tags ?? []" multiple @change="form.conditions.tags = Array.from(($event.target as HTMLSelectElement).selectedOptions, item => item.value)"><option v-for="tag in tags" :key="tag.name" :value="tag.name">{{ tag.name }}</option></select></label>
           </div>
         </details>
@@ -194,7 +194,7 @@ onMounted(async () => {
           </div>
         </fieldset>
         <div class="flex flex-wrap gap-2">
-          <button type="button" :disabled="form.actions.length  class="outline">= 10" @click="form.actions.push({ type: 'note', value: '' })">{{ t('inboxRules.addAction') }}</button>
+          <button type="button" class="outline" :disabled="form.actions.length >= 10" @click="form.actions.push({ type: 'note', value: '' })">{{ t('inboxRules.addAction') }}</button>
           <button type="submit" :disabled="busy || !readyToSave">{{ t('common.save') }}</button>
           <button v-if="id" type="button" @click="select()" class="ghost">{{ t('common.cancel') }}</button>
           <button v-if="id" type="button" :disabled="busy" @click="deleting ? save(true) : deleting = true" class="ghost">{{ t(deleting ? 'inboxRules.confirmDelete' : 'common.delete') }}</button>
