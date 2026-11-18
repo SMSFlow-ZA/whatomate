@@ -136,7 +136,9 @@ func TestInboxRulesSelectOneSendAndDoNotReplayUnknown(t *testing.T) {
 	a.recordInboxInbound(account, contact, "two", time.Now().UTC(), nil)
 	require.NoError(t, resumed.runInboxWorkflowCycle(context.Background()))
 	require.NoError(t, resumed.runInboxWorkflowCycle(context.Background()))
-	require.EqualValues(t, 1, calls.Load())
+	var outcomes []struct{ State, Outcome string }
+	require.NoError(t, db.Model(&models.InboxWorkflowRun{}).Select("state", "outcome").Where("organization_id = ?", org.ID).Order("created_at,id").Find(&outcomes).Error)
+	require.EqualValues(t, 1, calls.Load(), "workflow outcomes: %v", outcomes)
 	var sent int64
 	require.NoError(t, db.Model(&models.InboxWorkflowRun{}).Where("organization_id = ? AND state = ?", org.ID, inboxRunSent).Count(&sent).Error)
 	require.EqualValues(t, 1, sent)

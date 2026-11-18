@@ -434,7 +434,7 @@ func (a *App) recordInboxInbound(account *models.WhatsAppAccount, contact *model
 				return err
 			}
 		}
-		return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, Kind: kind, FromStatus: from, ToStatus: c.Status})
+		return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, OccurredAt: &received, Kind: kind, FromStatus: from, ToStatus: c.Status})
 	})
 	if err != nil {
 		a.Log.Error("Could not record inbox activity", "contact_id", contact.ID, "account_id", account.ID, "error", err)
