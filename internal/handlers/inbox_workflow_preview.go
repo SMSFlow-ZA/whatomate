@@ -61,7 +61,7 @@ func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.Wha
 	switch action.Type {
 	case "send_text":
 		var inbound models.Message
-		err := db.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ? AND COALESCE(channel, '') IN ('', 'whatsapp')",
+		err := db.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ?",
 			c.OrganizationID, c.ContactID, account.Name, models.DirectionIncoming).Order("created_at DESC, id DESC").First(&inbound).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return inboxReplyPreview{}, errInboxSendIneligible
