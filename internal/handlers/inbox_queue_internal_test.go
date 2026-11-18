@@ -100,7 +100,7 @@ func TestInboxAssignmentGrantsOnlyTheSelectedAccount(t *testing.T) {
 
 	for _, name := range []string{account.Name, other.Name} {
 		require.NoError(t, db.Create(&models.Message{
-			OrganizationID: org.ID, ContactID: contact.ID, WhatsAppAccount: name, Channel: "whatsapp",
+			OrganizationID: org.ID, ContactID: contact.ID, WhatsAppAccount: name,
 			Direction: models.DirectionIncoming, MessageType: models.MessageTypeText, Content: "fixture " + name,
 		}).Error)
 	}
