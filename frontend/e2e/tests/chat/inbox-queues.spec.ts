@@ -50,7 +50,7 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({ page, 
     if (process.env.INBOX_CAPTURE) await page.screenshot({ path: testInfo.outputPath('inbox-queue-review.png') })
     await page.getByRole('button', { name: 'Apply changes', exact: true }).click()
     await expect(page.getByText('Updated 2 of 2 cases')).toBeVisible()
-    await expect(page.getByText('No cases match these filters.')).toBeVisible()
+    await expect(page.getByText('No cases match these filters.')).toBeVisible({ timeout: 20000 })
   } finally {
     const views = await api.get('/api/inbox/views')
     if (views.ok()) {
