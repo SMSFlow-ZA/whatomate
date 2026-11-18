@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { inboxService, type InboxCase } from '@/services/inbox'
 import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
+import InboxQueues from '@/components/chat/InboxQueues.vue'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
@@ -122,6 +123,8 @@ const isBusinessCallingEnabled = computed(() =>
 
 const organizationsStore = useOrganizationsStore()
 const inboxEnabled = ref(false)
+const showInboxQueues = ref(false)
+const queueAccount = computed(() => typeof route.query.inbox_account === 'string' ? route.query.inbox_account : undefined)
 const inboxSummaries = ref<Record<string, InboxCase>>({})
 const inboxOrg = computed(() => organizationsStore.selectedOrganization?.id || authStore.organizationId)
 const inboxAccountId = computed<string | undefined>(() =>
@@ -586,7 +589,7 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-watch(contactId, async (newId) => {
+watch([contactId, queueAccount], async ([newId]) => {
   // On phones a side panel replaces the thread; start the next contact on the thread.
   if (isNarrow.value) {
     isInfoPanelOpen.value = false
@@ -626,7 +629,8 @@ async function selectContact(id: string) {
     contactsStore.setAccountFilter(null)
 
     contactsStore.setCurrentContact(contact)
-    await contactsStore.fetchMessages(id)
+    const preferredAccount = orgAccounts.value.find(account => account.name === queueAccount.value)?.name
+    await contactsStore.fetchMessages(id, preferredAccount ? { account: preferredAccount } : undefined)
 
     // Discover distinct accounts from the unfiltered message set
     const accounts = new Set<string>()
@@ -636,7 +640,10 @@ async function selectContact(id: string) {
     contactAccounts.value = Array.from(accounts).sort()
 
     // Auto-select account and filter client-side (avoids a second fetch)
-    if (orgAccounts.value.length > 1) {
+    if (preferredAccount) {
+      selectedAccount.value = preferredAccount
+      contactsStore.setAccountFilter(preferredAccount)
+    } else if (orgAccounts.value.length > 1) {
       // Find account of the most recent incoming message
       for (let i = contactsStore.messages.length - 1; i >= 0; i--) {
         const msg = contactsStore.messages[i]
@@ -1726,6 +1733,22 @@ async function sendMediaMessage() {
   <div class="flex h-full min-h-0 gap-4 p-4">
     <!-- Contacts List -->
     <article v-show="!isNarrow || !contactsStore.currentContact" data-testid="contacts" class="card p-4 flex flex-col min-h-0 gap-2 chat-col">
+      <div v-if="inboxEnabled" class="flex gap-2">
+        <button type="button" class="small" :class="showInboxQueues ? 'ghost' : 'outline'" :aria-pressed="!showInboxQueues" @click="showInboxQueues = false">
+          {{ $t('inboxQueue.contacts') }}
+        </button>
+        <button type="button" class="small" :class="showInboxQueues ? 'outline' : 'ghost'" :aria-pressed="showInboxQueues" @click="showInboxQueues = true">
+          {{ $t('inboxQueue.title') }}
+        </button>
+      </div>
+      <InboxQueues
+        v-if="inboxEnabled"
+        :key="inboxOrg"
+        :active="showInboxQueues"
+        @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name } })"
+        @changed="refreshInboxSummaries"
+      />
+      <template v-if="!inboxEnabled || !showInboxQueues">
       <!-- Search Header -->
       <div class="vstack gap-2 shrink-0">
         <div class="flex items-center gap-1">
@@ -1852,6 +1875,7 @@ async function sendMediaMessage() {
           <small>{{ $t('chat.noContacts') }}</small>
         </div>
       </nav>
+      </template>
     </article>
 
     <!-- Chat Area -->
