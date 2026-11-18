@@ -177,6 +177,11 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 					return r
 				}
 			}
+		case "inbox":
+			resource = models.ResourceChat
+			if path == "/api/inbox/workflows" && method == "PUT" {
+				resource = models.ResourceSettingsGeneral
+			}
 		case "messages", "media":
 			resource = models.ResourceChat
 		case "contacts":

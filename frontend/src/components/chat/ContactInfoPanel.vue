@@ -279,6 +279,7 @@ async function updateContactTags(tags: string[]) {
           </div>
         </div>
 
+        <slot name="case-history" />
         <!-- Tags Section (always shown) -->
         <div class="pb-4">
           <div class="flex items-center justify-between py-2">

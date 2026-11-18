@@ -302,6 +302,7 @@ func runServer(args []string) {
 	slaProcessor := handlers.NewSLAProcessor(app, time.Minute)
 	slaCtx, slaCancel := context.WithCancel(context.Background())
 	go slaProcessor.Start(slaCtx)
+	go app.RunInboxSnoozes(slaCtx, time.Minute)
 	lo.Info("SLA processor started")
 
 	// Start embedded workers
@@ -683,6 +684,18 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/import", app.ImportData)
 	g.GET("/api/export/{table}/config", app.GetExportConfig)
 	g.GET("/api/import/{table}/config", app.GetImportConfig)
+
+	// Inbox workflows
+	g.GET("/api/inbox/workflows", app.GetInboxWorkflowSettings)
+	g.PUT("/api/inbox/workflows", app.UpdateInboxWorkflowSettings)
+	g.GET("/api/inbox/cases", app.ListInboxCaseSummaries)
+	g.GET("/api/inbox/queue", app.ListInboxQueue)
+	g.GET("/api/inbox/views", app.ListInboxSavedViews)
+	g.POST("/api/inbox/views", app.CreateInboxSavedView)
+	g.DELETE("/api/inbox/views/{id}", app.DeleteInboxSavedView)
+	g.POST("/api/inbox/cases/bulk", app.BulkUpdateInboxCases)
+	g.GET("/api/inbox/accounts/{account_id}/contacts/{id}", app.GetInboxConversation)
+	g.PUT("/api/inbox/accounts/{account_id}/contacts/{id}", app.UpdateInboxConversation)
 
 	// Tags
 	g.GET("/api/tags", app.ListTags)
