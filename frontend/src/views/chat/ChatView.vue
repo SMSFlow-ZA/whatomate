@@ -157,11 +157,13 @@ const isBusinessCallingEnabled = computed(() =>
 const organizationsStore = useOrganizationsStore()
 const inboxEnabled = ref(false)
 const showInboxQueues = ref(false)
+const queueAccountId = computed(() => typeof route.query.inbox_account_id === 'string' ? route.query.inbox_account_id : undefined)
 const queueAccount = computed(() => typeof route.query.inbox_account === 'string' ? route.query.inbox_account : undefined)
 const inboxSummaries = ref<Record<string, InboxCase>>({})
 const inboxOrg = computed(() => organizationsStore.selectedOrganization?.id || authStore.organizationId)
 const inboxAccountId = computed<string | undefined>(() =>
-  orgAccounts.value.find(account => account.name === selectedAccount.value)?.id
+  orgAccounts.value.find(account => account.name === selectedAccount.value)?.id ??
+  (selectedAccount.value === queueAccount.value ? queueAccountId.value : undefined)
 )
 const inboxContactIds = computed(() => contactsStore.sortedContacts.map(contact => contact.id).join(','))
 const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
@@ -652,10 +654,10 @@ watch([contactId, queueAccount], async ([newId]) => {
 async function selectContact(id: string) {
   // Direct deep links to /chat/:id may target a contact that isn't in the
   // currently-loaded (paginated) list — fall back to fetching it directly.
-  let contact = contactsStore.contacts.find(c => c.id === id)
-  if (!contact) {
-    contact = await contactsStore.fetchContact(id)
-  }
+  const preferredAccount = queueAccount.value
+  const contact = preferredAccount
+    ? await contactsStore.fetchContact(id, preferredAccount)
+    : contactsStore.contacts.find(c => c.id === id) ?? await contactsStore.fetchContact(id)
   if (contact) {
     // Reset unread pill — fetchMessages will mark everything read on the server
     newMessagesCount.value = 0
@@ -671,7 +673,6 @@ async function selectContact(id: string) {
     contactsStore.setAccountFilter(null)
 
     contactsStore.setCurrentContact(contact)
-    const preferredAccount = orgAccounts.value.find(account => account.name === queueAccount.value)?.name
     await contactsStore.fetchMessages(id, preferredAccount ? { account: preferredAccount } : undefined)
 
     // Discover distinct accounts from the unfiltered message set
@@ -1817,7 +1818,7 @@ async function sendMediaMessage() {
         v-if="inboxEnabled"
         :key="inboxOrg"
         :active="showInboxQueues"
-        @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name } })"
+        @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id } })"
         @changed="refreshInboxSummaries"
       />
       <template v-if="!inboxEnabled || !showInboxQueues">
