@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useTeamsStore } from '@/stores/teams'
 import { toast } from '@/lib/toast'
-import { accountsService, tagsService, teamsService, templatesService, usersService } from '@/services/api'
+import { accountsService, tagsService, templatesService, usersService } from '@/services/api'
 import { inboxService, type InboxAction, type InboxWorkflow, type InboxWorkflowInput, type InboxWorkflowPreview, type InboxWorkflowRun, type QueueCase } from '@/services/inbox'
 import InboxWorkflowPreviewPanel from '@/components/chat/InboxWorkflowPreview.vue'
 
 const { t } = useI18n()
+const teamsStore = useTeamsStore()
 const mode = ref<'macro' | 'rule'>('rule')
 const list = ref<InboxWorkflow[]>([])
 const runs = ref<InboxWorkflowRun[]>([])
@@ -112,7 +114,7 @@ onMounted(async () => {
   await load()
   if (!enabled.value) return
   void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsService.list().then(r => { teams.value = r.data.teams ?? [] }).catch(() => {})
+  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => {})
   void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => {})
   void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => {})
   void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => {})
