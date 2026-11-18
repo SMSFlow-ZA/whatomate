@@ -18,8 +18,9 @@ import (
 
 type inboxQueueRow struct {
 	models.InboxCase
-	AccountName string `json:"account_name"`
-	ContactName string `json:"contact_name"`
+	AccountName string            `json:"account_name"`
+	SLA         *inboxSLASnapshot `gorm:"-" json:"sla,omitempty"`
+	ContactName string            `json:"contact_name"`
 }
 
 func validateInboxFilter(f models.InboxQueueFilter) bool {
@@ -120,6 +121,14 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
+	rows, hasMore, err := a.prepareInboxRows(org, rows)
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": hasMore})
+}
+
+func (a *App) prepareInboxRows(org uuid.UUID, rows []inboxQueueRow) ([]inboxQueueRow, bool, error) {
 	// Match the contact service's phone masking rules for numeric profile names.
 	if a.ShouldMaskPhoneNumbers(org) {
 		for i := range rows {
@@ -130,7 +139,18 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if hasMore {
 		rows = rows[:50]
 	}
-	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": hasMore})
+	base := make([]models.InboxCase, len(rows))
+	for i := range rows {
+		base[i] = rows[i].InboxCase
+	}
+	snapshots, err := a.inboxSLASnapshots(org, base, time.Now().UTC())
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range rows {
+		rows[i].SLA = snapshots[rows[i].ID]
+	}
+	return rows, hasMore, nil
 }
 
 func parseInboxQueuePage(args *fasthttp.Args) int {
