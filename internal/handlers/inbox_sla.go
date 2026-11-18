@@ -235,7 +235,7 @@ func (a *App) GetInboxSLAReport(r *fastglue.Request) error {
 			q = q.Where("inbox_cases."+filter+" = ?", id)
 		}
 	}
-	var rows []inboxQueueRow
+	rows := []inboxQueueRow{}
 	if err := q.Select("inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name").
 		Order("inbox_cases.opened_at, inbox_cases.id").Offset(parseInboxQueuePage(r.RequestCtx.QueryArgs())).Limit(51).Scan(&rows).Error; err != nil {
 		return a.inboxError(r, err)
