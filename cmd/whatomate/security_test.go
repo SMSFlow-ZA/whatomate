@@ -123,7 +123,7 @@ func TestSecurityRouter_AllFamiliesDenyMissingPermissions(t *testing.T) {
 	role := testutil.CreateTestRole(t, app.DB, org.ID, "restricted", nil)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID), testutil.WithPassword("security-password-123"))
 	login := securityLogin(t, app, user)
-	for _, path := range []string{"users", "accounts", "templates", "flows", "campaigns", "chatbot/settings", "chatbot/keywords", "chatbot/flows", "chatbot/ai-contexts", "chatbot/sessions", "chatbot/transfers", "teams", "audit-logs", "canned-responses", "analytics/dashboard", "analytics/agents", "widgets", "org/settings", "organizations", "tags", "ivr-flows", "call-logs", "call-transfers", "calls/ice-servers", "catalogs", "products/00000000-0000-0000-0000-000000000001", "contacts", "messages", "api-keys", "webhooks", "roles", "permissions", "custom-actions", "settings/sso", "unknown-family"} {
+	for _, path := range []string{"users", "accounts", "templates", "flows", "campaigns", "chatbot/settings", "chatbot/keywords", "chatbot/flows", "chatbot/ai-contexts", "chatbot/sessions", "chatbot/transfers", "teams", "audit-logs", "canned-responses", "analytics/dashboard", "analytics/agents", "widgets", "org/settings", "organizations", "tags", "ivr-flows", "call-logs", "call-transfers", "calls/ice-servers", "catalogs", "products/00000000-0000-0000-0000-000000000001", "contacts", "messages", "inbox/workflows", "inbox/queue", "inbox/views", "api-keys", "webhooks", "roles", "permissions", "custom-actions", "settings/sso", "unknown-family"} {
 		for _, method := range []string{"GET", "POST"} {
 			t.Run(method+path, func(t *testing.T) {
 				ctx := &fasthttp.RequestCtx{}

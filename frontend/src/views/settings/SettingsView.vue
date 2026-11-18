@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
+import InboxWorkflowSetting from '@/components/settings/InboxWorkflowSetting.vue'
 import { toast } from 'vue-sonner'
 import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music } from 'lucide-vue-next'
 import { usersService, organizationService } from '@/services/api'
@@ -29,6 +30,7 @@ const orgID = computed(
   () => localStorage.getItem('selected_organization_id') || authStore.organizationId,
 )
 const userID = computed(() => authStore.user?.id || '')
+const canWriteGeneral = computed(() => authStore.hasPermission('settings.general', 'write'))
 const canWriteAccounts = computed(() => authStore.hasPermission('accounts', 'write'))
 
 const isSubmitting = ref(false)
@@ -341,6 +343,7 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                   </Button>
                 </div>
               </div>
+              <InboxWorkflowSetting v-if="canWriteGeneral" />
             </div>
 
             <!-- Meta App Credentials Card (Gated on canWriteAccounts) -->
