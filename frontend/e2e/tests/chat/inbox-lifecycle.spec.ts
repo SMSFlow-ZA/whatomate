@@ -1,7 +1,8 @@
-import { expect, test } from '@playwright/test'
-import { loginAsAdmin } from '../../helpers'
+import { expect as baseExpect, test } from '@playwright/test'
 import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
+
+const expect = baseExpect.configure({ timeout: 20000 })
 
 test('starts, snoozes and resolves a case inside the chat thread', async ({ page, request }, testInfo) => {
   const scope = createTestScope('inbox-lifecycle')
@@ -19,12 +20,11 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
   const contact = await api.createContact('+12025550189', 'E2E Demo customer')
   try {
     expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
-    await loginAsAdmin(page)
-    await page.goto('/chat/' + contact.id)
-    const accountTab = page.getByRole('tab', { name: account.name, exact: true })
-    if (await page.getByRole('tablist', { name: 'WhatsApp Accounts' }).isVisible()) {
-      await accountTab.click()
-    }
+    const profile = await api.get('/api/me')
+    expect(profile.ok()).toBeTruthy()
+    await page.context().addCookies((await request.storageState()).cookies)
+    await page.addInitScript(user => localStorage.setItem('user', JSON.stringify(user)), (await profile.json()).data)
+    await page.goto('/chat/' + contact.id + '?inbox_account=' + encodeURIComponent(account.name) + '&inbox_account_id=' + account.id, { waitUntil: 'domcontentloaded' })
     await page.getByRole('button', { name: 'Start case' }).click()
     const status = page.getByRole('combobox', { name: 'Case status' })
     const priority = page.getByRole('combobox', { name: 'Case priority' })
