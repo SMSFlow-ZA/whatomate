@@ -86,8 +86,7 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
     await expect(page.getByText('This case matches the workflow.')).toBeVisible()
     await page.getByRole('button', { name: 'Apply macro' }).click()
     await expect.poll(async () => (await (await api.get(thread)).json()).data.case?.sla?.resolution?.status).toBe('paused')
-    await page.goto(chat, { waitUntil: 'domcontentloaded' })
-    await expect(page.getByLabel('Inbox workflow').getByText(/Resolution · Paused/)).toBeVisible()
+    await expect(page.getByLabel('Inbox workflow').getByText(/Resolution · Paused/)).toBeVisible({ timeout: 12000 })
 
     const current = (await (await api.get(thread)).json()).data.case
     expect((await api.put(thread, { case_id: current.id, version: current.version, status: 'resolved' })).status()).toBe(422)
