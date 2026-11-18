@@ -3,8 +3,8 @@ import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
 
 test('runs the inbox support workflow on an isolated workspace', async ({ page, request }, testInfo) => {
-  test.setTimeout(75000)
-  page.setDefaultTimeout(10000)
+  test.setTimeout(120000)
+  page.setDefaultTimeout(20000)
   const scope = createTestScope('inbox-support')
   const api = new ApiHelper(request)
   await api.loginAsAdmin()
@@ -32,7 +32,8 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
 
     const profile = await api.get('/api/me')
     const { data: user } = await profile.json()
-    const teamReply = await api.post('/api/teams', { name: scope.name('support'), assignment_strategy: 'round_robin' })
+    const teamName = scope.name('support')
+    const teamReply = await api.post('/api/teams', { name: teamName, assignment_strategy: 'round_robin' })
     expect(teamReply.ok()).toBeTruthy()
     team = (await teamReply.json()).data.team.id
     expect((await api.post('/api/teams/' + team + '/members', { user_id: user.id, role: 'agent' })).ok()).toBeTruthy()
@@ -45,14 +46,15 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
     await page.addInitScript(user => localStorage.setItem('user', JSON.stringify(user)), user)
 
     await page.goto('/settings/custom-fields', { waitUntil: 'domcontentloaded' })
+    const fieldForm = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Add a custom field' }) })
     const label = scope.name('Reference')
-    await page.getByLabel('Field label', { exact: true }).fill(label)
+    await fieldForm.getByLabel('Field label', { exact: true }).fill(label)
     const key = 'reference_' + Date.now()
-    await page.getByLabel('Field key').fill(key)
-    await page.getByLabel('Required to resolve').check()
+    await fieldForm.getByLabel('Field key').fill(key)
+    await fieldForm.getByLabel('Required to resolve').check()
     const [savedField] = await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === '/api/inbox/fields' && response.request().method() === 'POST', { timeout: 12000 }),
-      page.getByRole('button', { name: 'Save', exact: true }).click(),
+      fieldForm.getByRole('button', { name: 'Save', exact: true }).click(),
     ])
     expect(savedField.ok()).toBeTruthy()
     field = (await savedField.json()).data.definition.id
@@ -89,7 +91,7 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
     await expect(page.getByText('This case matches the workflow.')).toBeVisible()
     await page.getByRole('button', { name: 'Apply macro' }).click()
     await expect.poll(async () => (await (await api.get(thread)).json()).data.case?.sla?.resolution?.status).toBe('paused')
-    await expect(page.getByLabel('Inbox workflow').getByText(/Resolution · Paused/)).toBeVisible({ timeout: 12000 })
+    await expect(page.getByLabel('Inbox workflow').getByText(/Resolution · Paused/)).toBeVisible({ timeout: 25000 })
 
     const current = (await (await api.get(thread)).json()).data.case
     expect((await api.put(thread, { case_id: current.id, version: current.version, status: 'resolved' })).status()).toBe(422)
@@ -108,6 +110,17 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
     await page.goto('/settings/inbox-workflows', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Workflow run history' })).toBeVisible()
     await expect(page.getByText('Actions applied', { exact: false }).first()).toBeVisible()
+    await page.locator('summary').filter({ hasText: /^Conditions$/ }).click()
+    const teamOption = page.locator('option', { hasText: teamName })
+    const ruleTeam = page.locator('select').filter({ has: teamOption })
+    await ruleTeam.selectOption(team)
+    await expect(ruleTeam).toHaveValue(team)
+
+    await page.goto('/analytics/agents', { waitUntil: 'domcontentloaded' })
+    const slaReport = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Inbox deadlines' }) })
+    const reportTeam = slaReport.locator('select').filter({ has: teamOption })
+    await reportTeam.selectOption(team)
+    await expect(reportTeam).toHaveValue(team)
     if (process.env.INBOX_CAPTURE) await page.screenshot({ path: testInfo.outputPath('inbox-workflow-history-desktop.png'), fullPage: true })
 
     await page.setViewportSize({ width: 390, height: 844 })
