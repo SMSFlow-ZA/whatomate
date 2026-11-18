@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { loginAsAdmin } from '../../helpers'
 import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
 
@@ -19,7 +18,7 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
   const contact = await api.createContact(scope.phone(), scope.name('customer'))
   try {
     expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
-    await loginAsAdmin(page)
+    await page.context().addCookies((await request.storageState()).cookies)
     await page.goto('/chat/' + contact.id + '?inbox_account=' + encodeURIComponent(account.name))
     await page.getByRole('button', { name: 'Start case' }).click()
     const status = page.getByRole('combobox', { name: 'Case status' })
