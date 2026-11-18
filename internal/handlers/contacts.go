@@ -257,18 +257,18 @@ func (a *App) GetContact(r *fastglue.Request) error {
 		return nil
 	}
 
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-
-	// Users without contacts:read permission can only access their assigned contacts
-	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
-
-	if err := query.First(&contact).Error; err != nil {
+	account := string(r.RequestCtx.QueryArgs().Peek("account"))
+	contact, caseOnly, err := a.findInboxChatContact(orgID, userID, contactID, account)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
 	response := a.buildContactResponse(&contact, orgID)
+	if caseOnly {
+		response.Metadata = nil
+		response.LastMessageAt, response.LastMessagePreview, response.UnreadCount = nil, "", 0
+		response.AssignedUserID = &userID
+	}
 
 	return r.SendEnvelope(response)
 }
@@ -286,13 +286,12 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		return nil
 	}
 
+	accountFilter := string(r.RequestCtx.QueryArgs().Peek("account"))
 	hasContactsReadPermission := a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID)
 
 	// Verify contact belongs to org (and to user if no contacts:read permission)
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	contact, caseOnly, err := a.findInboxChatContact(orgID, userID, contactID, accountFilter)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
@@ -305,11 +304,17 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	// Build base query
-	msgQuery := a.DB.Where("contact_id = ?", contactID)
+	msgQuery := a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID)
+	replyScope := func(q *gorm.DB) *gorm.DB { return q }
+	if caseOnly {
+		msgQuery = msgQuery.Where("whats_app_account = ?", accountFilter)
+		replyScope = func(q *gorm.DB) *gorm.DB {
+			return q.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ?", orgID, contactID, accountFilter)
+		}
+	}
 
 	// Filter by WhatsApp account if specified
-	accountFilter := string(r.RequestCtx.QueryArgs().Peek("account"))
-	if accountFilter != "" {
+	if accountFilter != "" && !caseOnly {
 		msgQuery = msgQuery.Where("whats_app_account = ?", accountFilter)
 	}
 
@@ -320,8 +325,11 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 			if settings.AgentAssignment.CurrentConversationOnly {
 				// Find the most recent session for this contact
 				var session models.ChatbotSession
-				if err := a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID).
-					Order("started_at DESC").First(&session).Error; err == nil {
+				sessions := a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID)
+				if caseOnly {
+					sessions = sessions.Where("whats_app_account = ?", accountFilter)
+				}
+				if err := sessions.Order("started_at DESC").First(&session).Error; err == nil {
 					// Filter messages to only those from this session onwards
 					msgQuery = msgQuery.Where("created_at >= ?", session.StartedAt)
 				}
@@ -339,13 +347,13 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		if err == nil {
 			// Get the created_at of the before_id message
 			var beforeMsg models.Message
-			if err := a.DB.Where("id = ?", beforeID).First(&beforeMsg).Error; err == nil {
+			if err := replyScope(a.DB).Where("id = ? AND organization_id = ? AND contact_id = ?", beforeID, orgID, contactID).First(&beforeMsg).Error; err == nil {
 				msgQuery = msgQuery.Where("created_at < ?", beforeMsg.CreatedAt)
 			}
 		}
 		// For loading older messages, order DESC and limit, then reverse
 		var messages []models.Message
-		if err := msgQuery.Preload("ReplyToMessage").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		if err := msgQuery.Preload("ReplyToMessage", replyScope).Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
 			a.Log.Error("Failed to list messages", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 		}
@@ -381,13 +389,15 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	var messages []models.Message
-	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage", replyScope).Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
 
 	// Mark messages as read
-	a.markMessagesAsRead(orgID, contactID, &contact)
+	if !caseOnly {
+		a.markMessagesAsRead(orgID, contactID, &contact)
+	}
 
 	response := a.buildMessagesResponse(messages)
 	return r.SendEnvelope(map[string]any{
@@ -589,10 +599,8 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	}
 
 	// Get contact (users without full read permission can only message their assigned contacts)
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	contact, _, err := a.findInboxChatContact(orgID, userID, contactID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
@@ -612,7 +620,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		replyToID, err := uuid.Parse(req.ReplyToMessageID)
 		if err == nil {
 			var replyTo models.Message
-			if err := a.DB.Where("id = ? AND contact_id = ?", replyToID, contactID).First(&replyTo).Error; err == nil {
+			if err := a.DB.Where("id = ? AND contact_id = ? AND organization_id = ? AND whats_app_account = ?", replyToID, contactID, orgID, account.Name).First(&replyTo).Error; err == nil {
 				replyToMessage = &replyTo
 			}
 		}
@@ -842,10 +850,8 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	}
 
 	// Get contact (users without full read permission can only message their assigned contacts)
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	contact, _, err := a.findInboxChatContact(orgID, userID, contactID, formWhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
@@ -982,18 +988,15 @@ func (a *App) SendReaction(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
 
-	// Get contact (users without full read permission can only react to messages in their assigned contacts)
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
-	}
-
 	// Get message
 	var message models.Message
-	if err := a.DB.Where("id = ? AND contact_id = ?", messageID, contactID).First(&message).Error; err != nil {
+	if err := a.DB.Where("id = ? AND contact_id = ? AND organization_id = ?", messageID, contactID, orgID).First(&message).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Message not found", nil, "")
+	}
+
+	contact, _, err := a.findInboxChatContact(orgID, userID, contactID, message.WhatsAppAccount)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
 	// Get WhatsApp account from the message being reacted to (not from contact, which may be stale)
