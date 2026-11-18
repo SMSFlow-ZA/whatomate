@@ -76,6 +76,8 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxSavedView", &models.InboxSavedView{}},
 		{"InboxWorkflow", &models.InboxWorkflow{}},
 		{"InboxWorkflowRun", &models.InboxWorkflowRun{}},
+		{"InboxFieldDefinition", &models.InboxFieldDefinition{}},
+		{"InboxFieldValue", &models.InboxFieldValue{}},
 		{"Template", &models.Template{}},
 		{"WhatsAppFlow", &models.WhatsAppFlow{}},
 

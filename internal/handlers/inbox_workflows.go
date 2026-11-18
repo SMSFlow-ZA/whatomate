@@ -127,6 +127,9 @@ func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
 	if !validInboxWorkflow(w) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid inbox workflow", nil, "")
 	}
+	if err := validateInboxFieldMatchers(a.DB, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+		return a.inboxError(r, errInboxTransition)
+	}
 	if err := a.DB.Create(&w).Error; err != nil {
 		return a.inboxError(r, err)
 	}
@@ -156,7 +159,7 @@ func (a *App) DeleteInboxWorkflow(r *fastglue.Request) error {
 }
 
 func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
-	org, _, ok := a.inboxFeatureAuth(r, models.ActionWrite)
+	org, user, ok := a.inboxFeatureAuth(r, models.ActionWrite)
 	if !ok {
 		return nil
 	}
@@ -179,6 +182,9 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 		w.Name, w.Trigger, w.Position = strings.TrimSpace(input.Name), input.Trigger, input.Position
 		w.Actions, w.Conditions = input.Actions, input.Conditions
 		if input.Kind != w.Kind || !validInboxWorkflow(w) {
+			return errInboxTransition
+		}
+		if err := validateInboxFieldMatchers(tx, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 			return errInboxTransition
 		}
 		w.EnabledAt = nil

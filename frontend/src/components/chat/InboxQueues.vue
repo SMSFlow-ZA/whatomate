@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxFieldMatchers from './InboxFieldMatchers.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsService, tagsService, teamsService, usersService } from '@/services/api'
@@ -169,6 +170,7 @@ async function applyBulk() {
           <option :value="undefined">{{ t('inboxQueue.allPriorities') }}</option>
           <option v-for="priority in priorities" :key="priority" :value="priority">{{ t('inboxWorkflow.priority.' + priority) }}</option>
         </select>
+        <InboxFieldMatchers :model-value="filters.fields ?? []" @update:model-value="filters.fields = $event" />
         <fieldset v-if="tags.length">
           <legend>{{ t('contacts.tags') }}</legend>
           <label v-for="tag in tags" :key="tag.name">

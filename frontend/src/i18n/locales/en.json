@@ -1,4 +1,36 @@
 {
+  "inboxFields": {
+    "title": "Custom fields",
+    "add": "Add a custom field",
+    "label": "Field label",
+    "key": "Field key",
+    "appliesTo": "Applies to",
+    "type": "Field type",
+    "choices": "Choices, one per line",
+    "required": "Required to resolve",
+    "archived": "Archived",
+    "archive": "Archive field",
+    "archiveConfirm": "Archive this field and keep its recorded values?",
+    "enableFirst": "Enable inbox workflows in General settings to manage custom fields.",
+    "loadError": "Could not load custom fields.",
+    "saveError": "Could not save this custom field.",
+    "scope": {
+      "case": "Case",
+      "contact": "Contact"
+    },
+    "kind": {
+      "text": "Text",
+      "number": "Number",
+      "date": "Date",
+      "boolean": "Yes or no",
+      "select": "Single select"
+    },
+    "matches": "Custom field matches",
+    "unavailable": "Unavailable field",
+    "choose": "Choose a custom field",
+    "addMatch": "Add match",
+    "missing": "Complete the required custom fields before resolving this case."
+  },
   "inboxRules": {
     "title": "Inbox workflows",
     "macros": "Macros",
@@ -134,7 +166,8 @@
       "unavailable": "Unavailable",
       "stale": "Changed since selection",
       "invalid": "Invalid action",
-      "failed": "Failed"
+      "failed": "Failed",
+      "required_fields": "Required fields are missing"
     }
   },
   "inboxWorkflow": {

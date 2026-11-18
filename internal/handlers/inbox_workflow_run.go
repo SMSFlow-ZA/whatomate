@@ -45,6 +45,19 @@ func workflowDigest(value any) string {
 
 func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, user uuid.UUID, now time.Time) (inboxWorkflowPreview, error) {
 	out := inboxWorkflowPreview{Matches: workflowMatchesCase(w.Conditions, c, contact)}
+	if out.Matches && len(w.Conditions.Fields) > 0 {
+		var matches int64
+		q, err := queryInboxFieldMatchers(tx.Model(&models.InboxCase{}).
+			Where("inbox_cases.id = ? AND inbox_cases.organization_id = ?", c.ID, c.OrganizationID),
+			c.OrganizationID, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, c.OrganizationID))
+		if err != nil {
+			return out, err
+		}
+		if err := q.Count(&matches).Error; err != nil {
+			return out, err
+		}
+		out.Matches = matches == 1
+	}
 
 	for _, action := range w.Actions {
 		if action.Type != "send_text" && action.Type != "send_template" {

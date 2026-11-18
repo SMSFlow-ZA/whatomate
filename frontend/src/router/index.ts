@@ -171,6 +171,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/custom-fields',
+          name: 'inbox-custom-fields',
+          component: () => import('@/views/settings/InboxFieldsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
           component: () => import('@/views/settings/ChatbotSettingsView.vue'),

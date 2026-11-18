@@ -263,6 +263,11 @@ func (input inboxCaseUpdate) valid(now time.Time) bool {
 func applyInboxTransition(tx *gorm.DB, c *models.InboxCase, input inboxCaseUpdate, actor *uuid.UUID, now time.Time, kind string) error {
 	event := models.InboxCaseActivity{ActorID: actor, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
 	if input.Status != "" {
+		if input.Status == models.InboxCaseResolved && c.Status != models.InboxCaseResolved {
+			if err := checkInboxRequiredFields(tx, *c); err != nil {
+				return err
+			}
+		}
 		if input.Status != c.Status {
 			c.StatusChangedAt = now
 		}
@@ -362,6 +367,8 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
 	case errors.Is(err, errInboxSendIneligible):
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
+	case errors.Is(err, errRequiredInboxFields):
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errRequiredInboxFields.Error(), nil, "required_inbox_fields")
 	case errors.Is(err, errInboxTransition):
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxTransition.Error(), nil, "")
 	default:

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxFieldPanel from './InboxFieldPanel.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@/lib/toast'
@@ -66,6 +67,8 @@ async function update(input: { status?: CaseStatus; priority?: CasePriority; sno
     if (isHttpError(error) && error.response?.status === 409) {
       toast.error(t('inboxWorkflow.conflict'))
       await load()
+    } else if (isAxiosError(error) && error.response?.status === 422) {
+      toast.error(t('inboxFields.missing'))
     } else {
       toast.error(t('inboxWorkflow.updateError'))
     }
@@ -147,9 +150,10 @@ function saveSnooze() {
       </time>
 
     </template>
-    <button v-else-if="canWrite" type="button" class="outline small" :disabled="busy" @click="update({ status: 'open' })">
+    <button v-else-if="canWrite && !history" type="button" class="outline small" :disabled="busy" @click="update({ status: 'open' })">
       {{ t('inboxWorkflow.startCase') }}
     </button>
+    <InboxFieldPanel v-if="history && current" class="basis-full" :contact="contactId" :account="accountId" :case-id="current.id" :can-write="canWrite" />
     <form v-if="snoozing" class="flex flex-wrap items-center gap-2" @submit.prevent="saveSnooze">
       <label class="flex flex-wrap items-center gap-2">
         {{ t('inboxWorkflow.snoozeUntil') }}
