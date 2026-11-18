@@ -50,10 +50,13 @@ test('runs the inbox support workflow on an isolated workspace', async ({ page, 
     const key = 'reference_' + Date.now()
     await page.getByLabel('Field key').fill(key)
     await page.getByLabel('Required to resolve').check()
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByText(key, { exact: false })).toBeVisible()
-    const fieldReply = await api.get('/api/inbox/fields')
-    field = (await fieldReply.json()).data.definitions.find((item: { key: string }) => item.key === key).id
+    const [savedField] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === '/api/inbox/fields' && response.request().method() === 'POST', { timeout: 12000 }),
+      page.getByRole('button', { name: 'Save', exact: true }).click(),
+    ])
+    expect(savedField.ok()).toBeTruthy()
+    field = (await savedField.json()).data.definition.id
+    await expect(page.getByText(key, { exact: false })).toBeVisible({ timeout: 15000 })
 
     const rule = {
       name: scope.name('triage'), kind: 'rule', trigger: 'case_opened', position: 1,
