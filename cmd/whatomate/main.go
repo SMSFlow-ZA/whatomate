@@ -647,6 +647,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/inbox/views", app.CreateInboxSavedView)
 	g.DELETE("/api/inbox/views/{id}", app.DeleteInboxSavedView)
 	g.POST("/api/inbox/cases/bulk", app.BulkUpdateInboxCases)
+	g.GET("/api/inbox/workflow-definitions", app.ListInboxWorkflows)
+	g.POST("/api/inbox/workflow-definitions", app.CreateInboxWorkflow)
+	g.DELETE("/api/inbox/workflow-definitions/{id}", app.DeleteInboxWorkflow)
+	g.POST("/api/inbox/workflow-definitions/{id}/preview", app.PreviewInboxWorkflow)
 	g.GET("/api/inbox/accounts/{account_id}/contacts/{id}", app.GetInboxConversation)
 	g.PUT("/api/inbox/accounts/{account_id}/contacts/{id}", app.UpdateInboxConversation)
 
