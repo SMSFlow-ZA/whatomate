@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -52,4 +53,22 @@ func TestInboxSLAExactDeadlineCountsAsMet(t *testing.T) {
 	deadline := from.Add(time.Hour)
 	got := measureInboxTarget(inboxsla.ElapsedClock(), from, &deadline, deadline, 60, nil)
 	require.Equal(t, "met", got.Status)
+}
+
+func TestInboxSLAReportReturnsEmptyListBeforePoliciesAreSet(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	app := &App{DB: db, Log: testutil.NopLogger()}
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestUser(t, db, org.ID, testutil.WithSuperAdmin())
+	require.NoError(t, db.Model(org).Update("inbox_workflows_enabled", true).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	require.NoError(t, app.GetInboxSLAReport(req))
+	require.Equal(t, 200, testutil.GetResponseStatusCode(req))
+	var data struct {
+		Cases json.RawMessage `json:"cases"`
+	}
+	testutil.ParseEnvelopeResponse(t, req, &data)
+	require.JSONEq(t, "[]", string(data.Cases))
 }

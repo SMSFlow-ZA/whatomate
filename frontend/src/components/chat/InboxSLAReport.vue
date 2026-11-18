@@ -26,7 +26,7 @@ async function load() {
   try {
     const { data } = await inboxService.slaReport(account.value, team.value, offset.value)
     if (request !== sequence) return
-    rows.value = data.data.cases
+    rows.value = data.data.cases ?? []
     hasMore.value = data.data.has_more
     failed.value = false
   } catch { if (request === sequence) failed.value = true }
