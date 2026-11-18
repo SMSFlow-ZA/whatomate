@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/custom-fields',
+          name: 'inbox-custom-fields',
+          component: () => import('@/views/settings/InboxFieldsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/channels',
           name: 'channels',
           component: () => import('@/views/settings/ChannelsView.vue'),

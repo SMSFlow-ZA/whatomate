@@ -13,6 +13,7 @@ import { getTagColorClass } from '@/lib/constants'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
+import InboxFieldPanel from '@/components/chat/InboxFieldPanel.vue'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -414,6 +415,7 @@ onMounted(async () => {
         </CardContent>
       </Card>
 
+      <InboxFieldPanel v-if="contact" :contact="contact.id" :can-write="canWrite" />
       <AuditLogPanel
         v-if="contact"
         resource-type="contact"

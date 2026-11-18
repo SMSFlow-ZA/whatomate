@@ -140,6 +140,7 @@ export const navigationSections: NavSection[] = [
         childPermissions: ['settings.general', 'settings.branding', 'settings.channels', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs'],
         children: [
           { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
+          { name: 'inboxFields.title', path: '/settings/custom-fields', icon: Settings, permission: 'settings.general' },
           { name: 'nav.channels', path: '/settings/channels', icon: Settings, permission: 'settings.channels' },
           { name: 'nav.branding', path: '/settings/branding', icon: Settings, permission: 'settings.branding' },
           { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
