@@ -18,8 +18,8 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({ page, 
   })
   const names = ['E2E Example customer A', 'E2E Example customer B']
   const contacts = [
-    await api.createContact('+12025550190', names[0]),
-    await api.createContact('+12025550191', names[1]),
+    await api.createContact(scope.phone(), names[0]),
+    await api.createContact(scope.phone(), names[1]),
   ]
   const viewName = scope.name('saved')
   try {
@@ -28,10 +28,16 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({ page, 
       const path = '/api/inbox/accounts/' + account.id + '/contacts/' + contact.id
       expect((await api.put(path, { status: 'open', priority: 'urgent' })).ok()).toBeTruthy()
     }
-    await loginAsAdmin(page)
+    const profile = await api.get('/api/me')
+    expect(profile.ok()).toBeTruthy()
+    await page.context().addCookies((await request.storageState()).cookies)
+    await page.addInitScript(user => { localStorage.setItem('user', JSON.stringify(user)) }, (await profile.json()).data)
     await page.goto('/chat')
     await page.getByRole('button', { name: 'Queues', exact: true }).click()
     await page.getByRole('combobox', { name: 'Queues', exact: true }).selectOption('unassigned')
+    await page.locator('summary').filter({ hasText: /^Filters$/ }).click()
+    await page.getByRole('combobox', { name: 'WhatsApp account' }).selectOption(account.id)
+    await page.locator('summary').filter({ hasText: /^Filters$/ }).click()
     await page.locator('summary').filter({ hasText: 'Saved views' }).click()
     await page.getByRole('textbox', { name: 'View name' }).fill(viewName)
     await page.getByRole('button', { name: 'Save view', exact: true }).click()

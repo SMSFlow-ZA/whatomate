@@ -235,7 +235,8 @@ async function applyBulk() {
         <button type="button" class="ghost flex-1 min-w-0 text-start" @click="emit('open', row)">
           <span class="vstack min-w-0">
             <strong class="truncate">{{ row.contact_name || t('inboxQueue.unnamed') }}</strong>
-            <small class="text-light">{{ row.account_name }} · {{ t('inboxWorkflow.status.' + row.status) }} · {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
+            <small class="text-light truncate">{{ row.account_name }}</small>
+            <small>{{ t('inboxWorkflow.status.' + row.status) }} · {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
             <small v-if="results[row.id]">{{ t('inboxQueue.result.' + results[row.id]) }}</small>
           </span>
         </button>
