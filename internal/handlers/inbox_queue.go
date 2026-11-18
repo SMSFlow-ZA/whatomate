@@ -241,10 +241,11 @@ type bulkInboxItem struct {
 }
 
 type bulkInboxRequest struct {
-	Items      []bulkInboxItem `json:"items"`
-	Action     string          `json:"action"`
-	Tag        string          `json:"tag"`
-	AssigneeID *uuid.UUID      `json:"assignee_id"`
+	Items          []bulkInboxItem `json:"items"`
+	Action         string          `json:"action"`
+	Tag            string          `json:"tag"`
+	OverrideReason string          `json:"override_reason,omitempty"`
+	AssigneeID     *uuid.UUID      `json:"assignee_id"`
 }
 
 func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
@@ -264,6 +265,10 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 		if !a.HasPermission(user, models.ResourceContacts, models.ActionWrite, org) {
 			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		}
+		input.OverrideReason = strings.TrimSpace(input.OverrideReason)
+		if len(input.OverrideReason) > 500 || (input.OverrideReason != "" && (input.Action != "assign" || !a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org))) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "A permitted supervisor and reason are required for a capacity override", nil, "")
+		}
 	case "resolve":
 	default:
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid bulk action", nil, "")
@@ -279,6 +284,8 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 			state = "stale"
 		case errors.Is(err, errInboxTransition):
 			state = "invalid"
+		case errors.Is(err, errInboxAgentAtCapacity):
+			state = "capacity"
 		case err != nil:
 			state = "failed"
 			a.Log.Error("Inbox bulk action failed", "case_id", item.ID, "error", err)
@@ -335,12 +342,19 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 					return err
 				}
 			}
-			c.AssigneeID = input.AssigneeID
+			kind, overrideDetail := "assigned", ""
+			if err := reserveInboxAgent(tx, c, *input.AssigneeID); err != nil {
+				if !errors.Is(err, errInboxAgentAtCapacity) || input.OverrideReason == "" {
+					return err
+				}
+				kind, overrideDetail = "capacity_override", input.OverrideReason
+			}
+			c.AssigneeID, c.RoutingReason = input.AssigneeID, ""
 			c.Version++
 			if err := tx.Save(&c).Error; err != nil {
 				return err
 			}
-			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: "assigned"})
+			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: kind, Detail: overrideDetail})
 		case "tag":
 			var tag models.Tag
 			if err := tx.Where("organization_id = ? AND name = ?", org, input.Tag).First(&tag).Error; err != nil {

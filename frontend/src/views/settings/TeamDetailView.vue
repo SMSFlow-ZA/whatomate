@@ -13,6 +13,7 @@ import { debounce } from '@/lib/utils'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
+import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import Modal from '@/components/oat/Modal.vue'
@@ -337,6 +338,7 @@ onMounted(async () => {
     </article>
 
     <!-- Activity Log -->
+    <InboxTeamCapacity v-if="team && !isNew" :team="team.id" :can-write="canWrite" />
     <AuditLogPanel
       v-if="team && !isNew"
       resource-type="team"

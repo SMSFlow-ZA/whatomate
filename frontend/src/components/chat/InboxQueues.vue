@@ -34,6 +34,7 @@ const viewTeam = ref('')
 const activeView = ref('')
 const action = ref<BulkInboxAction>('resolve')
 const actionValue = ref('')
+const overrideReason = ref('')
 const reviewing = ref(false)
 const queues: InboxQueue[] = ['', 'mine', 'unassigned', 'awaiting_reply', 'follow_ups']
 const statuses: CaseStatus[] = ['open', 'pending', 'waiting_customer', 'snoozed', 'resolved']
@@ -129,10 +130,11 @@ async function applyBulk() {
   saving.value = true
   try {
     const selection = selectedCases.value.map(row => ({ id: row.id, version: row.version }))
-    const { data } = await inboxService.bulk(action.value, selection, actionValue.value)
+    const { data } = await inboxService.bulk(action.value, selection, actionValue.value, action.value === 'assign' ? overrideReason.value.trim() || undefined : undefined)
     results.value = Object.fromEntries(data.data.results.map(item => [item.id, item.result]))
     resultContacts.value = Object.fromEntries(selectedCases.value.map(row => [row.id, row.contact_name || t('inboxQueue.unnamed')]))
     reviewing.value = false
+    overrideReason.value = ''
     selected.value = []
     emit('changed')
     await refresh()
@@ -212,6 +214,7 @@ async function applyBulk() {
       <button v-if="!reviewing" type="button" class="small outline" :disabled="!actionReady" @click="reviewing = true">{{ t('inboxQueue.review') }}</button>
       <template v-else>
         <p>{{ t('inboxQueue.confirmCount', { count: selectedCases.length }) }}</p>
+        <label v-if="action === 'assign' && auth.hasPermission('teams', 'write')">{{ t('inboxCapacity.override') }}<input v-model="overrideReason" maxlength="500" class="block w-full" /></label>
         <button type="button" class="small" :disabled="saving || !actionReady" @click="applyBulk">{{ t('inboxQueue.apply') }}</button>
         <button type="button" class="small ghost" @click="reviewing = false">{{ t('common.cancel') }}</button>
       </template>
@@ -237,6 +240,7 @@ async function applyBulk() {
             <strong class="truncate">{{ row.contact_name || t('inboxQueue.unnamed') }}</strong>
             <small class="text-light truncate">{{ row.account_name }}</small>
             <small>{{ t('inboxWorkflow.status.' + row.status) }} · {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
+            <small v-if="!row.assignee_id && row.routing_reason">{{ t('inboxCapacity.reason.' + row.routing_reason) }}</small>
             <small v-if="results[row.id]">{{ t('inboxQueue.result.' + results[row.id]) }}</small>
           </span>
         </button>

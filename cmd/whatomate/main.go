@@ -281,6 +281,7 @@ func runServer(args []string) {
 	slaCtx, slaCancel := context.WithCancel(context.Background())
 	go slaProcessor.Start(slaCtx)
 	go app.RunInboxSnoozes(slaCtx, time.Minute)
+	go app.RunInboxOverflow(slaCtx, 15*time.Second)
 	lo.Info("SLA processor started")
 
 	// Start embedded workers
@@ -643,6 +644,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/inbox/workflows", app.UpdateInboxWorkflowSettings)
 	g.GET("/api/inbox/cases", app.ListInboxCaseSummaries)
 	g.GET("/api/inbox/queue", app.ListInboxQueue)
+	g.GET("/api/inbox/teams/{team_id}/capacity/{account_id}", app.GetInboxTeamCapacity)
+	g.PUT("/api/inbox/teams/{team_id}/capacity/{account_id}", app.SetInboxTeamCapacity)
 	g.GET("/api/inbox/views", app.ListInboxSavedViews)
 	g.POST("/api/inbox/views", app.CreateInboxSavedView)
 	g.DELETE("/api/inbox/views/{id}", app.DeleteInboxSavedView)

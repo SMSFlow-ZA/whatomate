@@ -3,7 +3,9 @@ import { api } from '@/services/api'
 export type CaseStatus = 'open' | 'pending' | 'waiting_customer' | 'snoozed' | 'resolved'
 export type CasePriority = 'low' | 'normal' | 'high' | 'urgent'
 
+export interface InboxCapacity { agent_id: string; name: string; max_active: number; active: number; available: boolean }
 export interface InboxCase {
+  routing_reason?: string
   id: string
   contact_id: string
   account_id: string
@@ -16,6 +18,7 @@ export interface InboxCase {
 }
 
 export interface CaseActivity {
+  detail?: string
   id: string
   case_id: string
   kind: string
@@ -39,6 +42,8 @@ const conversationPath = (accountId: string, contactId: string) =>
   '/inbox/accounts/' + encodeURIComponent(accountId) + '/contacts/' + encodeURIComponent(contactId)
 
 export const inboxService = {
+  teamCapacity: (team: string, account: string) => api.get<Envelope<{ agents: InboxCapacity[] }>>('/inbox/teams/' + encodeURIComponent(team) + '/capacity/' + encodeURIComponent(account)),
+  setTeamCapacity: (team: string, account: string, agent_id: string, max_active: number) => api.put('/inbox/teams/' + encodeURIComponent(team) + '/capacity/' + encodeURIComponent(account), { agent_id, max_active }),
   settings: () => api.get<Envelope<{ enabled: boolean }>>('/inbox/workflows'),
   queue: (filters: InboxFilters, offset = 0) =>
     api.get<Envelope<{ cases: QueueCase[]; has_more: boolean }>>('/inbox/queue', {
@@ -48,10 +53,10 @@ export const inboxService = {
   saveView: (name: string, filters: InboxFilters, team_id?: string) =>
     api.post<Envelope<{ view: SavedInboxView }>>('/inbox/views', { name, filters, team_id }),
   deleteView: (id: string) => api.delete('/inbox/views/' + encodeURIComponent(id)),
-  bulk: (action: BulkInboxAction, items: { id: string; version: number }[], value?: string) =>
+  bulk: (action: BulkInboxAction, items: { id: string; version: number }[], value?: string, override_reason?: string) =>
     api.post<Envelope<{ results: { id: string; result: BulkInboxResult }[] }>>('/inbox/cases/bulk', {
       action, items, tag: action === 'tag' ? value : undefined,
-      assignee_id: action === 'assign' ? value : undefined
+      assignee_id: action === 'assign' ? value : undefined, override_reason
     }),
   setEnabled: (enabled: boolean) => api.put<Envelope<{ enabled: boolean }>>('/inbox/workflows', { enabled }),
   summaries: (contacts: string[]) => api.get<Envelope<{ cases: InboxCase[] }>>('/inbox/cases', { params: { contacts: contacts.join(',') } }),
@@ -63,7 +68,7 @@ export const inboxService = {
 
 export type InboxQueue = '' | 'mine' | 'unassigned' | 'awaiting_reply' | 'follow_ups'
 export type BulkInboxAction = 'assign' | 'tag' | 'resolve'
-export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed'
+export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed' | 'capacity'
 
 export interface InboxFilters {
   queue?: InboxQueue

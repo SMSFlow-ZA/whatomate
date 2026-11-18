@@ -33,6 +33,7 @@ type InboxCase struct {
 	AccountID         uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:2" json:"account_id"`
 	ContactID         uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:3" json:"contact_id"`
 	TeamID            *uuid.UUID        `gorm:"type:uuid;index" json:"team_id,omitempty"`
+	RoutingReason     string            `gorm:"size:24;not null;default:''" json:"routing_reason,omitempty"`
 	AssigneeID        *uuid.UUID        `gorm:"type:uuid;index" json:"assignee_id,omitempty"`
 	Status            InboxCaseStatus   `gorm:"size:24;not null" json:"status"`
 	Priority          InboxCasePriority `gorm:"size:12;not null" json:"priority"`
@@ -52,6 +53,7 @@ type InboxCaseActivity struct {
 	AccountID      uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:2" json:"-"`
 	CaseID         uuid.UUID         `gorm:"type:uuid;not null;index" json:"case_id"`
 	EventKey       *string           `gorm:"size:255;uniqueIndex:idx_inbox_event,priority:3" json:"-"`
+	Detail         string            `gorm:"size:500" json:"detail,omitempty"`
 	ActorID        *uuid.UUID        `gorm:"type:uuid" json:"actor_id,omitempty"`
 	Kind           string            `gorm:"size:32;not null" json:"kind"`
 	FromStatus     InboxCaseStatus   `gorm:"size:24" json:"from_status,omitempty"`
