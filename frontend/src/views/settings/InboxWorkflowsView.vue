@@ -58,7 +58,7 @@ function select(w?: InboxWorkflow) {
   deleting.value = false
   if (w) {
     form.value = { kind: w.kind, name: w.name, trigger: w.trigger ?? '', position: w.position, actions: w.actions.map(action => ({ ...action })),
-      conditions: { ...w.conditions, tags: [...(w.conditions.tags ?? [])], fields: [...(w.conditions.fields ?? [])] }, enabled: !!w.enabled_at }
+      conditions: { ...w.conditions, tags: [...(w.conditions.tags ?? [])] }, enabled: !!w.enabled_at }
   } else form.value = fresh()
 }
 async function changeMode(next: typeof mode.value) {
