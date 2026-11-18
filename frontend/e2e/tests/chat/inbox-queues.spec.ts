@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { loginAsAdmin } from '../../helpers'
 import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
 
@@ -28,7 +27,7 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({ page, 
       const path = '/api/inbox/accounts/' + account.id + '/contacts/' + contact.id
       expect((await api.put(path, { status: 'open', priority: 'urgent' })).ok()).toBeTruthy()
     }
-    await loginAsAdmin(page)
+    await page.context().addCookies((await request.storageState()).cookies)
     await page.goto('/chat')
     await page.getByRole('button', { name: 'Queues', exact: true }).click()
     await page.getByRole('combobox', { name: 'Queues', exact: true }).selectOption('unassigned')
