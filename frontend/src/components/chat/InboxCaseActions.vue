@@ -114,6 +114,7 @@ function saveSnooze() {
         <li v-for="item in activity" :key="item.id">
           <time :datetime="item.created_at">{{ format(item.created_at) }}</time>
           {{ t('inboxWorkflow.event.' + item.kind) }}
+          <span v-if="item.detail"> · {{ item.detail }}</span>
           <span v-if="item.to_status && item.to_status !== item.from_status"> · {{ t('inboxWorkflow.status.' + item.to_status) }}</span>
           <span v-if="item.to_priority && item.to_priority !== item.from_priority"> · {{ t('inboxWorkflow.priority.' + item.to_priority) }}</span>
         </li>

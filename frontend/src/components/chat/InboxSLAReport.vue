@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { accountsService, teamsService } from '@/services/api'
 import { inboxService, type QueueCase } from '@/services/inbox'
+import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
 
 const { t } = useI18n()
@@ -51,6 +52,7 @@ onUnmounted(() => clearInterval(timer))
       <label>{{ t('inboxQueue.team') }} <select v-model="team" class="rounded border border-input bg-background p-1"><option value="">{{ t('inboxSla.any') }}</option><option v-for="entry in teams" :key="entry.id" :value="entry.id">{{ entry.name }}</option></select></label>
       <label><input v-model="all" type="checkbox" /> {{ t('inboxSla.allCases') }}</label>
     </div>
+    <InboxTeamCapacity v-if="team && account" class="mt-3" :team="team" :account="account" />
     <p v-if="failed" class="mt-3" role="alert">{{ t('inboxSla.loadError') }}</p>
     <p v-else-if="!visible.length" class="mt-3 text-sm text-muted-foreground">{{ t('inboxSla.empty') }}</p>
     <ul v-else class="mt-3 divide-y divide-border">
