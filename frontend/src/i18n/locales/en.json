@@ -2754,5 +2754,8 @@
       "image": "Image",
       "footerButton": "Footer Button"
     }
+  },
+  "inboxUX": {
+    "caseHistoryEmpty": "Case changes will appear here."
   }
 }
