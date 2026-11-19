@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/inbox-workflows',
+          name: 'inbox-workflows',
+          component: () => import('@/views/settings/InboxWorkflowsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
           component: () => import('@/views/settings/ChatbotSettingsView.vue'),
@@ -238,6 +244,13 @@ const router = createRouter({
           name: 'role-detail',
           component: () => import('@/views/settings/RoleDetailView.vue'),
           meta: { permission: 'roles' }
+        },
+        {
+          path: 'settings/inbox-response-targets',
+          name: 'inbox-response-targets',
+          component: () => import('@/views/settings/InboxResponseTargetsView.vue'),
+          meta: { permission: 'accounts' },
+          beforeEnter: () => useAuthStore().hasPermission('accounts', 'write') || { path: '/settings' },
         },
         {
           path: 'settings/teams',

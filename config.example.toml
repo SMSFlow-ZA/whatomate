@@ -142,3 +142,6 @@ udp_port_max = 10100          # WebRTC UDP port range end
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+[inbox_automation]
+# Set true after WhatsApp reply dispatch has been commissioned. Keep false in restored copies until queued work is reconciled.
+dispatch_enabled = false

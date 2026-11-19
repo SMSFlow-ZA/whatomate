@@ -58,6 +58,18 @@ func appendInboxActivity(tx *gorm.DB, c models.InboxCase, event models.InboxCase
 	event.OrganizationID = c.OrganizationID
 	event.AccountID = c.AccountID
 	event.CaseID = c.ID
+	switch {
+	case event.Kind == "opened" && event.EventKey == nil, event.Kind == "reopened":
+		event.WorkflowTrigger = "case_opened"
+	case event.Kind == "opened" && strings.HasPrefix(*event.EventKey, "handoff:"):
+		event.WorkflowTrigger = "case_opened"
+	case event.Kind == "opened":
+		event.WorkflowTrigger = "entry_message"
+	case event.Kind == "incoming_message" && event.OccurredAt != nil, event.Kind == "customer_replied":
+		event.WorkflowTrigger = "incoming_message"
+	case event.Kind == "updated" && event.ActorID != nil && event.FromStatus != event.ToStatus:
+		event.WorkflowTrigger = "status_changed"
+	}
 	return tx.Create(&event).Error
 }
 
@@ -217,7 +229,11 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 	if c.AssigneeID != nil && *c.AssigneeID != user && !a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) {
 		return a.inboxError(r, gorm.ErrRecordNotFound)
 	}
-	return r.SendEnvelope(map[string]any{"case": c, "activity": activities})
+	sla, err := a.inboxSLASnapshots(t.org, []models.InboxCase{c}, time.Now().UTC())
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"case": inboxSLACase{InboxCase: c, SLA: sla[c.ID]}, "activity": activities})
 }
 
 type inboxCaseUpdate struct {
@@ -249,7 +265,7 @@ func (input inboxCaseUpdate) valid(now time.Time) bool {
 }
 
 func applyInboxTransition(tx *gorm.DB, c *models.InboxCase, input inboxCaseUpdate, actor *uuid.UUID, now time.Time, kind string) error {
-	event := models.InboxCaseActivity{ActorID: actor, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
+	event := models.InboxCaseActivity{ActorID: actor, OccurredAt: &now, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
 	if input.Status != "" {
 		if input.Status != c.Status {
 			c.StatusChangedAt = now
@@ -356,6 +372,8 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, errInboxDisabled.Error(), nil, "")
 	case errors.Is(err, errInboxConflict):
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
+	case errors.Is(err, errInboxSendIneligible):
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
 	case errors.Is(err, errInboxTransition):
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxTransition.Error(), nil, "")
 	default:
@@ -429,12 +447,15 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 				}
 				kind = "customer_replied"
 			}
+			if c.LastHumanReplyAt != nil && received.After(*c.LastHumanReplyAt) && (c.NextReplyFrom == nil || received.Before(*c.NextReplyFrom)) {
+				c.NextReplyFrom = &received
+			}
 			c.Version++
 			if err := tx.Save(&c).Error; err != nil {
 				return err
 			}
 		}
-		return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, Kind: kind, FromStatus: from, ToStatus: c.Status})
+		return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, OccurredAt: &received, Kind: kind, FromStatus: from, ToStatus: c.Status})
 	})
 	if err != nil {
 		a.Log.Error("Could not record inbox activity", "contact_id", contact.ID, "account_id", account.ID, "error", err)
@@ -542,6 +563,9 @@ func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *mo
 			c.FirstHumanReplyAt = &at
 		}
 		c.LastHumanReplyAt = &at
+		if c.NextReplyFrom != nil && !c.NextReplyFrom.After(at) {
+			c.NextReplyFrom = nil
+		}
 		c.Version++
 		if err := tx.Save(&c).Error; err != nil {
 			return err

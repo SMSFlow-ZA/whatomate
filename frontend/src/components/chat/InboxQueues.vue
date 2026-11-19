@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import {
   Filter,
   Save as Bookmark,
@@ -642,6 +643,7 @@ async function applyBulk() {
               t('inboxQueue.result.' + results[row.id])
             }}</small>
             <span v-if="row.routing_reason" class="inbox-caption">{{ t('inboxCapacity.reason.'+row.routing_reason) }}</span>
+            <InboxSLAIndicators v-if="row.sla" :sla="row.sla" />
           </button>
         </li>
       </ul>

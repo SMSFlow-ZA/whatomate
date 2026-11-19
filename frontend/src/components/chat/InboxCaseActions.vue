@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -281,6 +282,7 @@ function saveSnooze() {
     >
       {{ t('inboxWorkflow.startCase') }}
     </button>
+    <InboxSLAIndicators v-if="current?.sla && !history" :sla="current.sla" />
     <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
       <label class="inbox-label"
         >{{ t('inboxWorkflow.snoozeUntil')

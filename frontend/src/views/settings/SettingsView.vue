@@ -375,6 +375,7 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
               <small data-hint>{{ $t('settings.maskPhoneNumbersDesc') }}</small>
             </label>
             <InboxWorkflowSetting v-if="canWriteGeneral" />
+              <RouterLink v-if="canWriteGeneral && canWriteAccounts" to="/settings/inbox-response-targets">{{ $t('inboxUX.manageTargets') }}</RouterLink>
             <div v-if="canWriteGeneral" class="hstack justify-end">
               <button type="button" class="outline small" :aria-busy="isSubmitting" :disabled="isSubmitting" @click="saveGeneralSettings">
                 {{ $t('settings.save') }}
