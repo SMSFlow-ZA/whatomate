@@ -115,6 +115,18 @@ func (h *Hub) unregisterClient(client *Client) {
 
 // broadcastMessage sends a message to all relevant clients
 func (h *Hub) broadcastMessage(msg BroadcastMessage) {
+	// Authorization may query storage. Never hold the client-map mutex while it
+	// runs, and reacquire it before sending so disconnect cannot close a channel.
+	if msg.Authorize != nil {
+		for _, user := range h.OnlineUserIDs(msg.OrgID) {
+			if (msg.UserID == uuid.Nil || msg.UserID == user) && msg.Authorize(user) {
+				target := msg
+				target.UserID, target.Authorize = user, nil
+				h.broadcastMessage(target)
+			}
+		}
+		return
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 

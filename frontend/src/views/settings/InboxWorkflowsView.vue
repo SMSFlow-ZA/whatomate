@@ -19,6 +19,7 @@ const switchState = ref({ enabled: false, dispatch_available: false })
 const busy = ref(false)
 const ready = ref(false)
 const failed = ref(false)
+const lookupFailed = ref(false)
 const caseId = ref('')
 const cases = ref<QueueCase[]>([])
 const dryRunId = ref('')
@@ -111,18 +112,25 @@ function move(index: number, delta: number) {
   const [item] = items.splice(index, 1)
   items.splice(other, 0, item)
 }
+function loadLookups() {
+  lookupFailed.value = false
+  void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => { lookupFailed.value = true })
+  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => { lookupFailed.value = true })
+  void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => { lookupFailed.value = true })
+  void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => { lookupFailed.value = true })
+  void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => { lookupFailed.value = true })
+}
 onMounted(async () => {
   await load()
   if (!enabled.value) return
-  void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => {})
-  void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => {})
-  void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => {})
-  void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => {})
+  loadLookups()
 })
 </script>
 
 <template>
+  <p v-if="lookupFailed" role="alert">{{ t('inboxQueue.loadFiltersError') }}
+    <button type="button" @click="loadLookups">{{ t('common.retry') }}</button>
+  </p>
   <main class="mx-auto grid max-w-5xl gap-4 p-4">
     <h1 class="text-xl font-semibold">{{ t('inboxRules.title') }}</h1>
     <p v-if="failed" role="alert">{{ t('inboxRules.loadError') }}</p>
