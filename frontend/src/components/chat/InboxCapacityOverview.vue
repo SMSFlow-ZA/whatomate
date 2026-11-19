@@ -54,6 +54,7 @@ onMounted(load)
       v-else-if="selected"
       :key="selected"
       :team="selected"
+      embedded
       :can-write="auth.hasPermission('teams', 'write')"
     />
     <p v-else class="inbox-caption">{{ t('inboxUX.chooseTeam') }}</p>

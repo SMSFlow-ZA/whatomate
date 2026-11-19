@@ -10,6 +10,7 @@ const props = defineProps<{
   team: string
   account?: string
   canWrite?: boolean
+  embedded?: boolean
 }>()
 const { t } = useI18n()
 const account = ref(props.account ?? '')
@@ -84,8 +85,8 @@ onMounted(async () => {
     :aria-label="t('inboxCapacity.title')"
   >
     <div class="inbox-subsection">
-      <h3 class="inbox-section-heading">{{ t('inboxCapacity.title') }}</h3>
-      <p class="inbox-caption mt-1">{{ t('inboxUX.capacityDescription') }}</p>
+      <h3 v-if="!embedded" class="inbox-section-heading">{{ t('inboxCapacity.title') }}</h3>
+      <p v-if="!embedded" class="inbox-caption mt-1">{{ t('inboxUX.capacityDescription') }}</p>
       <label
         v-if="props.account === undefined"
         class="inbox-label mt-4 max-w-sm"
