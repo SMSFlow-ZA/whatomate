@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { ApiHelper } from '../../helpers/api'
+import { createInboxTestContext } from '../../helpers/inbox'
 import { createTestScope } from '../../framework'
 
 test('reviews disabled rules and manual macros without enabling automatic replies', async ({ page, request }) => {
   page.setDefaultTimeout(15000)
-  const api = new ApiHelper(request)
   const scope = createTestScope('inbox-macros')
-  await api.loginAsAdmin()
+  const { api } = await createInboxTestContext(request, scope)
   const enabledBefore = (await (await api.get('/api/inbox/workflows')).json()).data.enabled
   const account = await api.createWhatsAppAccount({ name: scope.name('support'), phone_id: scope.phone().replace(/\D/g, ''), business_id: '100000000008', access_token: 'synthetic-no-send' })
   const contact = await api.createContact('+12025550195', scope.name('customer'))
