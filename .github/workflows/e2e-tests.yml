@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -102,6 +101,15 @@ jobs:
       # Build frontend FIRST so it can be embedded in the backend
       - name: Install frontend dependencies
         run: cd frontend && npm ci
+
+      - name: Check frontend types
+        run: cd frontend && npm run typecheck
+
+      - name: Check native frontend styles
+        run: cd frontend && node scripts/oat-check.mjs src
+
+      - name: Run frontend unit tests
+        run: cd frontend && npm run test:unit
 
       - name: Build frontend
         run: cd frontend && npm run build
