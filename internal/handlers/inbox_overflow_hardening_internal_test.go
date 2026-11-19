@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestInboxHardeningOverflowStarvesLaterTeam(t *testing.T) {
+func TestInboxHardeningOverflowContinuesToAvailableTeam(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)
