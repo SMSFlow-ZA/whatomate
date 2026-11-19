@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useContactsStore, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
+import { useOrganizationsStore } from '@/stores/organizations'
+import { inboxService, type InboxCase } from '@/services/inbox'
+import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
@@ -116,6 +119,76 @@ const orgAccounts = ref<any[]>([])
 const isBusinessCallingEnabled = computed(() =>
   orgAccounts.value.find(account => account.name === selectedAccount.value)?.business_calling_enabled === true
 )
+
+const organizationsStore = useOrganizationsStore()
+const inboxEnabled = ref(false)
+const inboxSummaries = ref<Record<string, InboxCase>>({})
+const inboxOrg = computed(() => organizationsStore.selectedOrganization?.id || authStore.organizationId)
+const inboxAccountId = computed<string | undefined>(() =>
+  orgAccounts.value.find(account => account.name === selectedAccount.value)?.id
+)
+const inboxContactIds = computed(() => contactsStore.sortedContacts.map(contact => contact.id).join(','))
+const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
+
+function inboxSummaryFor(contact: { id: string; whatsapp_account?: string }) {
+  const accountId = orgAccounts.value.find(account => account.name === contact.whatsapp_account)?.id ??
+    (orgAccounts.value.length === 1 ? orgAccounts.value[0].id : undefined)
+  return accountId ? inboxSummaries.value[inboxCaseKey(contact.id, accountId)] : undefined
+}
+
+function updateInboxSummary(value: InboxCase) {
+  inboxSummaries.value[inboxCaseKey(value.contact_id, value.account_id)] = value
+}
+
+let inboxSettingsRequest = 0
+let inboxSummaryRequest = 0
+async function refreshInboxSettings() {
+  const request = ++inboxSettingsRequest
+  try {
+    const { data } = await inboxService.settings()
+    if (request === inboxSettingsRequest) inboxEnabled.value = data.data.enabled
+  } catch {
+    if (request === inboxSettingsRequest) inboxEnabled.value = false
+  }
+}
+
+async function refreshInboxSummaries() {
+  const request = ++inboxSummaryRequest
+  const ids = inboxContactIds.value.split(',').filter(Boolean)
+  if (!inboxEnabled.value || !ids.length) {
+    inboxSummaries.value = {}
+    return
+  }
+  try {
+    const pages = []
+    for (let start = 0; start < ids.length; start += 100) {
+      pages.push(inboxService.summaries(ids.slice(start, start + 100)))
+    }
+    const next: Record<string, InboxCase> = {}
+    for (const page of await Promise.all(pages)) {
+      for (const item of page.data.data.cases) {
+        const key = inboxCaseKey(item.contact_id, item.account_id)
+        const previous = inboxSummaries.value[key]
+        next[key] = previous?.id === item.id && previous.version > item.version ? previous : item
+      }
+    }
+    if (request === inboxSummaryRequest) inboxSummaries.value = next
+  } catch {
+    // Keep the last successful summaries until the thread is refreshed.
+  }
+}
+
+watch(inboxOrg, () => {
+  inboxEnabled.value = false
+  inboxSummaries.value = {}
+  void refreshInboxSettings()
+}, { immediate: true })
+watch([inboxEnabled, inboxContactIds], () => { void refreshInboxSummaries() })
+const inboxRefresh = setInterval(() => {
+  if (document.visibilityState !== 'visible') return
+  void refreshInboxSettings()
+  void refreshInboxSummaries()
+}, 20_000)
 
 // File upload state
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -464,6 +537,9 @@ function onUserActive() {
 }
 
 onUnmounted(() => {
+  clearInterval(inboxRefresh)
+  inboxSettingsRequest++
+  inboxSummaryRequest++
   wsService.setCurrentContact(null)
   // Clear current contact when leaving chat view so notifications work on other pages
   contactsStore.setCurrentContact(null)
@@ -584,6 +660,8 @@ async function selectContact(id: string) {
       selectedAccount.value = contactAccounts.value[0]
     } else if (contact.whatsapp_account) {
       selectedAccount.value = contact.whatsapp_account
+    } else if (orgAccounts.value.length === 1) {
+      selectedAccount.value = orgAccounts.value[0].name
     }
 
     // Tell WebSocket server which contact we're viewing
@@ -1753,6 +1831,10 @@ async function sendMediaMessage() {
                 </span>
                 <span class="flex items-center justify-between gap-2">
                   <small class="text-light truncate">{{ contact.phone_number }}</small>
+                  <span v-if="inboxEnabled && inboxSummaryFor(contact)" class="badge">
+                    {{ $t('inboxWorkflow.status.' + inboxSummaryFor(contact)?.status) }}
+                    · {{ $t('inboxWorkflow.priority.' + inboxSummaryFor(contact)?.priority) }}
+                  </span>
                   <span v-if="contact.unread_count > 0" class="badge" data-variant="success">{{ contact.unread_count }}</span>
                 </span>
               </span>
@@ -1961,6 +2043,16 @@ async function sendMediaMessage() {
             </ot-dropdown>
           </div>
         </header>
+
+        <InboxCaseActions
+          v-if="inboxEnabled && inboxAccountId"
+          :key="inboxOrg + '/' + inboxAccountId + '/' + contactsStore.currentContact.id"
+          :account-id="inboxAccountId"
+          :contact-id="contactsStore.currentContact.id"
+          :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
+          :can-write="authStore.hasPermission('chat', 'write')"
+          @changed="updateInboxSummary"
+        />
 
         <!-- Account Tabs (shown when the org has several WhatsApp accounts) -->
         <div v-if="orgAccounts.length > 1 && selectedAccount" class="shrink-0 scroll-x">
@@ -2455,7 +2547,19 @@ async function sendMediaMessage() {
       :narrow="isNarrow"
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
-    />
+    >
+      <template #case-history>
+        <InboxCaseActions
+          v-if="inboxEnabled && inboxAccountId"
+          :key="inboxOrg + '/' + inboxAccountId + '/' + contactsStore.currentContact.id"
+          :account-id="inboxAccountId"
+          :contact-id="contactsStore.currentContact.id"
+          :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
+          :can-write="false"
+          history
+        />
+      </template>
+    </ContactInfoPanel>
 
     <!-- Template Params Dialog -->
     <Modal

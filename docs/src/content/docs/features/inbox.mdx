@@ -202,6 +202,21 @@ When phone masking is enabled for the organization, phone numbers (and profile n
 
 The inbox is driven by the WebSocket hub: new inbound and outbound messages, status changes (sent / delivered / read / failed), reaction updates, and note changes are all broadcast to connected clients for the organization, so the list and open conversation update without a refresh.
 
+## Track inbox cases
+
+An administrator can enable conversation workflow in **Settings → General**. New cases appear when a customer enters the human inbox. Agents can also select **Start case** in a conversation. Earlier messages remain in the thread.
+
+Use **Open** for active work, **Pending** for an internal wait and **Waiting for customer** when you are expecting a reply. Set a priority when the team needs to see how soon to act. A customer reply reopens a waiting case.
+
+To return to a case at a specific time, select **Snoozed** and enter a date and time. The case returns to **Open** when the deadline is reached or the customer replies. Select **Resolve** in the conversation header when the work is finished. Use **Reopen** to resume a resolved case. A later reply routed to the human inbox starts another case in the same thread.
+
+Open the contact details panel and expand **Case activity** to see recent status, priority and follow-up changes. If you switch WhatsApp numbers within a contact, the controls show the case for the selected number.
+
+
+![Synthetic lifecycle workflow on desktop](/whatomate/images/inbox-case-desktop.png)
+
+![Synthetic lifecycle workflow on mobile](/whatomate/images/inbox-case-mobile.png)
+
 ## Related
 
 - [Canned Responses](/whatomate/features/canned-responses) — quick replies and slash commands

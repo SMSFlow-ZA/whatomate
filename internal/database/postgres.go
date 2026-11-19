@@ -71,6 +71,8 @@ func GetMigrationModels() []MigrationModel {
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
+		{"InboxCase", &models.InboxCase{}},
+		{"InboxCaseActivity", &models.InboxCaseActivity{}},
 		{"Template", &models.Template{}},
 		{"WhatsAppFlow", &models.WhatsAppFlow{}},
 
@@ -240,6 +242,8 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_case_active ON inbox_cases (organization_id, account_id, contact_id) WHERE status <> 'resolved' AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_case_snooze_due ON inbox_cases (snoozed_until) WHERE status = 'snoozed' AND deleted_at IS NULL`,
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,

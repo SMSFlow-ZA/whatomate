@@ -97,6 +97,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.Contact{},
 		&models.Tag{},
 		&models.Message{},
+		&models.InboxCase{},
+		&models.InboxCaseActivity{},
 		&models.Template{},
 		&models.WhatsAppFlow{},
 		// Chatbot models
@@ -135,6 +137,9 @@ func runMigrations(db *gorm.DB) error {
 // Uses TRUNCATE CASCADE to handle foreign key constraints properly.
 func cleanupTables(db *gorm.DB) {
 	tables := []string{
+		// Inbox workflow tables
+		"inbox_case_activities",
+		"inbox_cases",
 		// Dashboard tables
 		"widgets",
 		// Catalog tables

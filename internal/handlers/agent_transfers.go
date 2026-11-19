@@ -517,6 +517,13 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
 
+	if enabled, err := inboxWorkflowEnabled(a.DB, orgID, false); err == nil && enabled {
+		var account models.WhatsAppAccount
+		if err := a.DB.Where("organization_id = ? AND name = ?", orgID, transfer.WhatsAppAccount).First(&account).Error; err == nil {
+			a.recordInboxHandoff(&account, contact, &transfer)
+		}
+	}
+
 	// When AssignToSameAgent is enabled and no agent is already assigned,
 	// set the contact's assigned agent for future chat routing.
 	// Skip if already assigned to preserve a manually set relationship manager.
@@ -1192,6 +1199,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	if err := a.DB.Create(transfer).Error; err != nil {
 		return err
 	}
+	a.recordInboxHandoff(account, contact, transfer)
 
 	// Update contact assignment if agent assigned, but only when AssignToSameAgent
 	// is enabled and no relationship manager is already set. Active transfers
