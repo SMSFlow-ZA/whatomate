@@ -28,6 +28,10 @@ import (
 
 // OutgoingMessageRequest contains all parameters for sending any type of message
 type OutgoingMessageRequest struct {
+	// A durable workflow can reserve the message UUID before dispatch. A duplicate
+	// UUID fails during insert, before any call to WhatsApp.
+	IdempotencyKey uuid.UUID
+
 	// Required
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
@@ -147,6 +151,9 @@ func SLASendOptions() MessageSendOptions {
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
 	// 1. Create message record
 	msg := a.createOutgoingMessage(req, opts)
+	if req.IdempotencyKey != uuid.Nil {
+		msg.ID = req.IdempotencyKey
+	}
 
 	// Save to database
 	if err := a.DB.Create(msg).Error; err != nil {
