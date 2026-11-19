@@ -357,6 +357,10 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 }
 
 func (a *App) recordInboxInbound(account *models.WhatsAppAccount, contact *models.Contact, eventKey string, received time.Time, transfer *models.AgentTransfer) {
+	a.recordInboxEntry(account, contact, eventKey, received, received, transfer)
+}
+
+func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.Contact, eventKey string, received, entered time.Time, transfer *models.AgentTransfer) {
 	if eventKey == "" {
 		return
 	}
@@ -383,7 +387,7 @@ func (a *App) recordInboxInbound(account *models.WhatsAppAccount, contact *model
 		if c.ID == uuid.Nil || c.Status == models.InboxCaseResolved {
 			// A previously unseen late delivery still belongs to the case
 			// that was current when the message entered the inbox.
-			if c.ResolvedAt != nil && !received.After(*c.ResolvedAt) {
+			if c.ResolvedAt != nil && !entered.After(*c.ResolvedAt) {
 				return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, Kind: kind})
 			}
 			owner := contact.AssignedUserID
@@ -394,7 +398,7 @@ func (a *App) recordInboxInbound(account *models.WhatsAppAccount, contact *model
 					owner = transfer.AgentID
 				}
 			}
-			c = newInboxCase(t, received, owner, team)
+			c = newInboxCase(t, entered, owner, team)
 			c.LastInboundAt = &received
 			kind = "opened"
 			if err := tx.Create(&c).Error; err != nil {
@@ -431,9 +435,9 @@ func (a *App) recordInboxHandoff(account *models.WhatsAppAccount, contact *model
 			account.OrganizationID, contact.ID, account.Name, models.DirectionIncoming).
 		Order("created_at DESC, id DESC").First(&msg).Error
 	if err == nil {
-		a.recordInboxInbound(account, contact, msg.WhatsAppMessageID, msg.CreatedAt, transfer)
+		a.recordInboxEntry(account, contact, "handoff:"+transfer.ID.String(), msg.CreatedAt, transfer.TransferredAt, transfer)
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		a.recordInboxInbound(account, contact, "handoff:"+transfer.ID.String(), transfer.CreatedAt, transfer)
+		a.recordInboxInbound(account, contact, "handoff:"+transfer.ID.String(), transfer.TransferredAt, transfer)
 	}
 }
 
