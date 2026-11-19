@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Verifies that .vue/.ts files only use classes defined by vendored Oat CSS or
 // layout.css (or the vue-flow prefix), and none of the removed packages/styles.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
