@@ -149,6 +149,26 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Check if phone masking is enabled
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
 	canReadContacts := a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID)
+	transferAccounts := make(map[uuid.UUID]string)
+	if !canReadContacts && len(contacts) > 0 {
+		ids := make([]uuid.UUID, len(contacts))
+		for i := range contacts {
+			ids[i] = contacts[i].ID
+		}
+		var transfers []struct {
+			ContactID       uuid.UUID
+			WhatsAppAccount string
+		}
+		if err := activeInboxTransfers(a.DB, orgID, userID).Select("contact_id, whats_app_account").
+			Where("contact_id IN ?", ids).Order("transferred_at DESC, id DESC").Find(&transfers).Error; err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not load assigned accounts", nil, "")
+		}
+		for _, transfer := range transfers {
+			if _, exists := transferAccounts[transfer.ContactID]; !exists {
+				transferAccounts[transfer.ContactID] = transfer.WhatsAppAccount
+			}
+		}
+	}
 
 	unreadCounts := a.unreadCountsByContact(contacts)
 
@@ -197,7 +217,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			response[i].Metadata = nil
 			response[i].LastMessageAt, response[i].LastMessagePreview, response[i].UnreadCount = nil, "", 0
 			response[i].LastInboundAt, response[i].ServiceWindowOpen = nil, false
-			response[i].WhatsAppAccount = ""
+			response[i].WhatsAppAccount = transferAccounts[c.ID]
 		}
 	}
 
@@ -249,9 +269,7 @@ func (a *App) scopeAssignedContact(query *gorm.DB, userID, orgID uuid.UUID) *gor
 	}
 	return query.Where("assigned_user_id = ? OR id IN (?)",
 		userID,
-		a.DB.Model(&models.AgentTransfer{}).
-			Select("contact_id").
-			Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive),
+		activeInboxTransfers(a.DB, orgID, userID).Select("contact_id"),
 	)
 }
 
@@ -273,6 +291,12 @@ func (a *App) GetContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
+	if caseOnly {
+		contact.LastInboundAt, err = scopedContactInbound(a.DB, orgID, contactID, account)
+		if err != nil {
+			return a.inboxError(r, err)
+		}
+	}
 	response := a.buildContactResponse(&contact, orgID)
 	if caseOnly {
 		response.Metadata = nil
@@ -405,9 +429,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	// Mark messages as read
-	if !caseOnly {
-		a.markMessagesAsRead(orgID, contactID, &contact)
-	}
+	a.markMessagesAsRead(orgID, contactID, &contact, accountFilter)
 
 	response := a.buildMessagesResponse(messages)
 	return r.SendEnvelope(map[string]any{

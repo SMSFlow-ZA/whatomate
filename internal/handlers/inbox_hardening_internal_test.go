@@ -21,7 +21,7 @@ import (
 )
 
 // Regression tests use disposable PostgreSQL, Redis and a synthetic provider.
-func TestInboxHardeningOrphanEventsStarveLiveWork(t *testing.T) {
+func TestInboxHardeningOrphanEventsDoNotStarveLiveWork(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)
@@ -45,7 +45,7 @@ func TestInboxHardeningOrphanEventsStarveLiveWork(t *testing.T) {
 	require.NotNil(t, event.WorkflowProcessedAt)
 }
 
-func TestInboxHardeningHandoffBackdatesSLAToBotMessage(t *testing.T) {
+func TestInboxHardeningHandoffStartsSLAAtHumanQueue(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)
@@ -76,7 +76,7 @@ func TestInboxHardeningHandoffBackdatesSLAToBotMessage(t *testing.T) {
 	require.EqualValues(t, 1, count)
 }
 
-func TestInboxHardeningTransferStillGrantsOtherAccount(t *testing.T) {
+func TestInboxHardeningTransferCannotReadOtherAccount(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Redis: testutil.SetupTestRedis(t), Log: testutil.NopLogger()}
 	require.NotNil(t, a.Redis)
@@ -118,7 +118,7 @@ func TestInboxHardeningTransferStillGrantsOtherAccount(t *testing.T) {
 	require.Equal(t, 404, testutil.GetResponseStatusCode(req))
 }
 
-func TestInboxHardeningQueuedRuleSendsAfterConditionChanges(t *testing.T) {
+func TestInboxHardeningQueuedRuleStopsAfterCaseChanges(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	rdb := testutil.SetupTestRedis(t)
 	require.NotNil(t, rdb)
@@ -165,7 +165,7 @@ func TestInboxHardeningQueuedRuleSendsAfterConditionChanges(t *testing.T) {
 	require.EqualValues(t, 0, calls.Load())
 }
 
-func TestInboxHardeningOverflowStarvesLaterTeam(t *testing.T) {
+func TestInboxHardeningOverflowContinuesToAvailableTeam(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)
@@ -204,7 +204,7 @@ func TestInboxHardeningOverflowStarvesLaterTeam(t *testing.T) {
 	require.Equal(t, user.ID, *live.AssigneeID)
 }
 
-func TestInboxHardeningWorkerQueryScansProcessedHistory(t *testing.T) {
+func TestInboxHardeningWorkerQueryUsesPendingIndexes(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	org := testutil.CreateTestOrganization(t, db)
 	require.NoError(t, db.Model(org).Update("inbox_workflows_enabled", true).Error)
@@ -237,7 +237,7 @@ func TestInboxHardeningWorkerQueryScansProcessedHistory(t *testing.T) {
 	require.Contains(t, plan.String(), "idx_inbox_workflow_pending")
 }
 
-func TestInboxHardeningEditedRuleBorrowsCreatorsPermissions(t *testing.T) {
+func TestInboxHardeningEditedRuleUsesCurrentEditor(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Redis: testutil.SetupTestRedis(t), Log: testutil.NopLogger()}
 	require.NotNil(t, a.Redis)
@@ -378,4 +378,43 @@ func TestInboxHardeningScopesSessionsAndReadReceiptsByAccount(t *testing.T) {
 		require.NotNil(t, data.SessionID)
 		require.Equal(t, sessions[0].ID, *data.SessionID)
 	}
+}
+
+func TestInboxHardeningTransferKeepsUsableScopedContactWindow(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	a := &App{DB: db, Redis: testutil.SetupTestRedis(t), Log: testutil.NopLogger()}
+	org := testutil.CreateTestOrganization(t, db)
+	role := testutil.CreateTestRoleWithKeys(t, db, org.ID, "scoped-window-agent", []string{"chat:read", "chat:write"})
+	agent := testutil.CreateTestUser(t, db, org.ID, testutil.WithRoleID(&role.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, db, org.ID)
+	other := testutil.CreateTestWhatsAppAccount(t, db, org.ID)
+	contact := testutil.CreateTestContactWith(t, db, org.ID, testutil.WithContactAccount(other.Name))
+	now := time.Now().UTC()
+	require.NoError(t, db.Model(contact).Update("last_inbound_at", now).Error)
+	require.NoError(t, db.Create(&models.AgentTransfer{OrganizationID: org.ID, ContactID: contact.ID,
+		AgentID: &agent.ID, WhatsAppAccount: account.Name, Status: models.TransferStatusActive}).Error)
+	inbound := models.Message{BaseModel: models.BaseModel{CreatedAt: now.Add(-30 * time.Hour)}, OrganizationID: org.ID,
+		ContactID: contact.ID, WhatsAppAccount: account.Name, Direction: models.DirectionIncoming, MessageType: models.MessageTypeText}
+	require.NoError(t, db.Create(&inbound).Error)
+	list := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(list, org.ID, agent.ID)
+	require.NoError(t, a.ListContacts(list))
+	var contacts struct{ Contacts []ContactResponse }
+	testutil.ParseEnvelopeResponse(t, list, &contacts)
+	require.Len(t, contacts.Contacts, 1)
+	require.Equal(t, account.Name, contacts.Contacts[0].WhatsAppAccount)
+	read := func() ContactResponse {
+		request := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(request, org.ID, agent.ID)
+		testutil.SetPathParam(request, "id", contact.ID.String())
+		testutil.SetQueryParam(request, "account", account.Name)
+		require.NoError(t, a.GetContact(request))
+		require.Equal(t, 200, testutil.GetResponseStatusCode(request))
+		var response ContactResponse
+		testutil.ParseEnvelopeResponse(t, request, &response)
+		return response
+	}
+	require.False(t, read().ServiceWindowOpen, "Another account's recent activity cannot open this window")
+	require.NoError(t, db.Model(&inbound).Update("created_at", now).Error)
+	require.True(t, read().ServiceWindowOpen, "An authorized agent can reply in this account's actual window")
 }
