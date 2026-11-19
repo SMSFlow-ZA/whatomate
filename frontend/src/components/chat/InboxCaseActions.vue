@@ -1,14 +1,28 @@
 <script setup lang="ts">
+import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@/lib/toast'
 import { isHttpError } from '@/lib/http'
-import { inboxService, type CaseActivity, type CasePriority, type CaseStatus, type InboxCase } from '@/services/inbox'
+import {
+  inboxService,
+  type CaseActivity,
+  type CasePriority,
+  type CaseStatus,
+  type InboxCase,
+} from '@/services/inbox'
 
-const props = defineProps<{ accountId: string; contactId: string; canWrite: boolean; summary?: InboxCase; history?: boolean }>()
-const emit = defineEmits<{ changed: [value: InboxCase] }>()
+const props = defineProps<{
+  accountId: string
+  contactId: string
+  canWrite: boolean
+  summary?: InboxCase
+  history?: boolean
+}>()
+const emit = defineEmits<{ changed: [value: InboxCase]; 'needs-fields': [] }>()
 const { t, locale } = useI18n()
 const current = ref<InboxCase | null>(null)
+const isResolved = computed(() => current.value?.status === 'resolved')
 const activity = ref<CaseActivity[]>([])
 const ready = ref(false)
 const busy = ref(false)
@@ -17,9 +31,21 @@ const snoozeUntil = ref('')
 let sequence = 0
 
 const priorities: CasePriority[] = ['low', 'normal', 'high', 'urgent']
-const activeStatuses: CaseStatus[] = ['open', 'pending', 'waiting_customer', 'snoozed', 'resolved']
-const statuses = computed<CaseStatus[]>(() => current.value?.status === 'resolved' ? ['resolved', 'open'] : activeStatuses)
-const format = (value: string) => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+const activeStatuses: CaseStatus[] = [
+  'open',
+  'pending',
+  'waiting_customer',
+  'snoozed',
+  'resolved',
+]
+const statuses = computed<CaseStatus[]>(() =>
+  current.value?.status === 'resolved' ? ['resolved', 'open'] : activeStatuses,
+)
+const format = (value: string) =>
+  new Intl.DateTimeFormat(locale.value, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
 
 async function load(reset = false) {
   const request = ++sequence
@@ -31,7 +57,10 @@ async function load(reset = false) {
     snoozeUntil.value = ''
   }
   try {
-    const { data } = await inboxService.conversation(props.accountId, props.contactId)
+    const { data } = await inboxService.conversation(
+      props.accountId,
+      props.contactId,
+    )
     if (request !== sequence) return
     current.value = data.data.case
     activity.value = data.data.activity
@@ -41,12 +70,29 @@ async function load(reset = false) {
   }
 }
 
-watch(() => [props.accountId, props.contactId], () => { void load(true) }, { immediate: true })
-watch(() => [props.summary?.id, props.summary?.version], () => {
-  if (props.summary?.version !== current.value?.version || props.summary?.id !== current.value?.id) void load()
-})
+watch(
+  () => [props.accountId, props.contactId],
+  () => {
+    void load(true)
+  },
+  { immediate: true },
+)
+watch(
+  () => [props.summary?.id, props.summary?.version],
+  () => {
+    if (
+      props.summary?.version !== current.value?.version ||
+      props.summary?.id !== current.value?.id
+    )
+      void load()
+  },
+)
 
-async function update(input: { status?: CaseStatus; priority?: CasePriority; snoozed_until?: string }) {
+async function update(input: {
+  status?: CaseStatus
+  priority?: CasePriority
+  snoozed_until?: string
+}) {
   const accountId = props.accountId
   const contactId = props.contactId
   busy.value = true
@@ -103,68 +149,146 @@ function saveSnooze() {
 </script>
 
 <template>
-  <div v-if="ready" class="flex flex-wrap items-center gap-2" :aria-label="t('inboxWorkflow.title')">
-    <details v-if="history && activity.length" class="text-sm">
-      <summary>{{ t('inboxWorkflow.activity') }}</summary>
-      <ol>
-        <li v-for="item in activity" :key="item.id">
-          <time :datetime="item.created_at">{{ format(item.created_at) }}</time>
-          {{ t('inboxWorkflow.event.' + item.kind) }}
-          <span v-if="item.detail"> · {{ item.detail }}</span>
-          <span v-if="item.to_status && item.to_status !== item.from_status"> · {{ t('inboxWorkflow.status.' + item.to_status) }}</span>
-          <span v-if="item.to_priority && item.to_priority !== item.from_priority"> · {{ t('inboxWorkflow.priority.' + item.to_priority) }}</span>
-        </li>
-      </ol>
-    </details>
-    <template v-else-if="current && !history">
-      <template v-if="canWrite">
-        <select
-          class="case-control"
-          :aria-label="t('inboxWorkflow.caseStatus')"
-          :value="current.status"
-          :disabled="busy"
-          @change="selectStatus"
-        >
-          <option v-for="status in statuses" :key="status" :value="status">
-            {{ t(status === 'open' && current.status === 'resolved' ? 'inboxWorkflow.reopen' : 'inboxWorkflow.status.' + status) }}
-          </option>
-        </select>
-        <select
-          v-if="current.status !== 'resolved'"
-          class="case-control"
-          :aria-label="t('inboxWorkflow.casePriority')"
-          :value="current.priority"
-          :disabled="busy"
-          @change="selectPriority"
-        >
-          <option v-for="priority in priorities" :key="priority" :value="priority">
-            {{ t('inboxWorkflow.priority.' + priority) }}
-          </option>
-        </select>
-      </template>
-      <span v-else class="badge">{{ t('inboxWorkflow.status.' + current.status) }}</span>
-      <time class="text-sm text-light" v-if="current.snoozed_until" :datetime="current.snoozed_until">
-        {{ format(current.snoozed_until) }}
-      </time>
+  <section
+    v-if="ready"
+    class="inbox-ui"
+    :class="history ? 'inbox-case-details' : 'inbox-case-toolbar'"
+    :aria-label="t('inboxWorkflow.title')"
+  >
+    <template v-if="history">
+      <details class="inbox-history">
+        <summary>
+          <History class="h-4 w-4" aria-hidden="true" />{{
+            t('inboxWorkflow.activity')
+          }}
+        </summary>
+        <ol v-if="activity.length">
+          <li v-for="item in activity" :key="item.id">
+            <time :datetime="item.created_at" class="inbox-caption">{{
+              format(item.created_at)
+            }}</time>
+            <p>
+              {{ t('inboxWorkflow.event.' + item.kind)
+              }}<span
+                v-if="item.to_status && item.to_status !== item.from_status"
+              >
+                / {{ t('inboxWorkflow.status.' + item.to_status) }}</span
+              ><span
+                v-if="
+                  item.to_priority && item.to_priority !== item.from_priority
+                "
+              >
+                / {{ t('inboxWorkflow.priority.' + item.to_priority) }}</span
+              >
+            </p>
+          </li>
+        </ol>
+        <p v-else class="inbox-caption py-3">
+          {{ t('inboxUX.caseHistoryEmpty') }}
+        </p>
+      </details>
 
     </template>
-    <button v-else-if="canWrite" type="button" class="outline small" :disabled="busy" @click="update({ status: 'open' })">
-      {{ t('inboxWorkflow.startCase') }}
-    </button>
-    <form v-if="snoozing" class="flex flex-wrap items-center gap-2" @submit.prevent="saveSnooze">
-      <label class="flex flex-wrap items-center gap-2">
-        {{ t('inboxWorkflow.snoozeUntil') }}
-        <input v-model="snoozeUntil" type="datetime-local" required :disabled="busy" />
-      </label>
-      <button type="submit" class="small" :disabled="busy">{{ t('common.save') }}</button>
-      <button type="button" class="ghost small" :disabled="busy" @click="snoozing = false">{{ t('common.cancel') }}</button>
-    </form>
-  </div>
-</template>
+    <template v-else-if="current">
+      <div class="inbox-case-controls">
+        <template v-if="canWrite"
+          ><label class="inbox-case-select"
+            ><Clock class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+              :aria-label="t('inboxWorkflow.caseStatus')"
+              :value="current.status"
+              :disabled="busy"
+              @change="selectStatus"
+            >
+              <option v-for="status in statuses" :key="status" :value="status">
+                {{
+                  t(
+                    status === 'open' && current.status === 'resolved'
+                      ? 'inboxWorkflow.reopen'
+                      : 'inboxWorkflow.status.' + status,
+                  )
+                }}
+              </option>
+            </select></label
+          ><label v-if="current.status !== 'resolved'" class="inbox-case-select"
+            ><Flag class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+              :aria-label="t('inboxWorkflow.casePriority')"
+              :value="current.priority"
+              :disabled="busy"
+              @change="selectPriority"
+            >
+              <option
+                v-for="priority in priorities"
+                :key="priority"
+                :value="priority"
+              >
+                {{ t('inboxWorkflow.priority.' + priority) }}
+              </option>
+            </select></label
+          ></template
+        >
+        <span v-else class="inbox-badge">{{
+          t('inboxWorkflow.status.' + current.status)
+        }}</span>
+        <button
+          v-if="canWrite"
+          type="button"
 
-<style scoped>
-.case-control {
-  width: auto;
-  max-width: 100%;
-}
-</style>
+          class="small ml-auto"
+          :class="{ outline: isResolved }"
+          :disabled="busy"
+          @click="
+            update({
+              status: current.status === 'resolved' ? 'open' : 'resolved',
+            })
+          "
+          ><RotateCcw
+            v-if="current.status === 'resolved'"
+            class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
+            aria-hidden="true"
+          /><Check v-else class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
+            t(
+              current.status === 'resolved'
+                ? 'inboxWorkflow.reopen'
+                : 'inboxUX.resolveAction',
+            )
+          }}</button>
+      </div>
+
+      <time
+        v-if="current.snoozed_until"
+        class="inbox-caption mt-2 block"
+        :datetime="current.snoozed_until"
+        >{{ t('inboxWorkflow.snoozeUntil') }}
+        {{ format(current.snoozed_until) }}</time
+      >
+    </template>
+    <button
+      v-else-if="canWrite"
+
+
+      :disabled="busy"
+      @click="update({ status: 'open' })"
+       class="outline small" type="button">{{ t('inboxWorkflow.startCase') }}</button>
+    <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
+      <label class="inbox-label"
+        >{{ t('inboxWorkflow.snoozeUntil')
+        }}<input
+          v-model="snoozeUntil"
+          type="datetime-local"
+          required
+          :disabled="busy"
+      /></label>
+      <div class="flex gap-2">
+        <button type="submit" :disabled="busy" class="small">{{
+          t('common.save')
+        }}</button><button
+          type="button"
+
+
+          :disabled="busy"
+          @click="snoozing = false"
+           class="outline small">{{ t('common.cancel') }}</button>
+      </div>
+    </form>
+  </section>
+</template>
