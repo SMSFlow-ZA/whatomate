@@ -16,6 +16,7 @@ type InboxWorkflow struct {
 	BaseModel
 	OrganizationID uuid.UUID        `gorm:"type:uuid;not null;index" json:"-"`
 	CreatedByID    uuid.UUID        `gorm:"type:uuid;not null" json:"created_by_id"`
+	UpdatedByID    *uuid.UUID       `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 	Name           string           `gorm:"size:100;not null" json:"name"`
 	Kind           string           `gorm:"size:10;not null" json:"kind"`
 	Trigger        string           `gorm:"size:24" json:"trigger,omitempty"`

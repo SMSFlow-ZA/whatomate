@@ -243,10 +243,32 @@ func newInboxWorkflowRun(id uuid.UUID, w models.InboxWorkflow, c models.InboxCas
 }
 
 func saveInboxWorkflowRun(tx *gorm.DB, c models.InboxCase, run *models.InboxWorkflowRun) error {
+	if run.State == inboxRunPending {
+		var err error
+		run.CaseDigest, err = inboxSendCaseDigest(tx, c)
+		if err != nil {
+			return err
+		}
+	}
 	if err := tx.Create(run).Error; err != nil {
 		return err
 	}
 	return appendInboxActivity(tx, c, models.InboxCaseActivity{Kind: "workflow_" + run.State, ActorID: &run.ActorID, Detail: run.WorkflowName})
+}
+
+// Snapshot after this workflow's own actions. Subsequent case, contact or field
+// changes invalidate queued sends, including old runs without a snapshot.
+func inboxSendCaseDigest(tx *gorm.DB, c models.InboxCase) (string, error) {
+	var contact models.Contact
+	if err := tx.First(&contact, "id = ? AND organization_id = ?", c.ContactID, c.OrganizationID).Error; err != nil {
+		return "", err
+	}
+	var values []models.InboxFieldValue
+	if err := tx.Where("organization_id = ? AND subject_id IN ?", c.OrganizationID, []uuid.UUID{c.ID, c.ContactID}).
+		Order("definition_id, subject_id").Find(&values).Error; err != nil {
+		return "", err
+	}
+	return workflowDigest([]any{c.Version, c.Status, c.Priority, c.AssigneeID, c.TeamID, contact.Tags, values}), nil
 }
 
 func (a *App) ListInboxWorkflowRuns(r *fastglue.Request) error {

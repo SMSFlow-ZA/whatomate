@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"net/http"
 	"sync"
 
@@ -187,7 +188,7 @@ func (a *App) StartCampaignStatsSubscriber() error {
 		)
 
 		// Broadcast to organization via WebSocket
-		a.WSHub.BroadcastToOrg(update.OrganizationID, websocket.WSMessage{
+		a.broadcastResource(update.OrganizationID, models.ResourceCampaigns, websocket.WSMessage{
 			Type: websocket.TypeCampaignStatsUpdate,
 			Payload: map[string]any{
 				"campaign_id":     update.CampaignID,

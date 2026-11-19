@@ -148,6 +148,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	// Check if phone masking is enabled
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
+	canReadContacts := a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID)
 
 	unreadCounts := a.unreadCountsByContact(contacts)
 
@@ -190,6 +191,13 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			MarketingOptOut:    c.MarketingOptOut,
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
+		}
+		if !canReadContacts && (c.AssignedUserID == nil || *c.AssignedUserID != userID) {
+			// A transfer grants one account, not this contact's global preview.
+			response[i].Metadata = nil
+			response[i].LastMessageAt, response[i].LastMessagePreview, response[i].UnreadCount = nil, "", 0
+			response[i].LastInboundAt, response[i].ServiceWindowOpen = nil, false
+			response[i].WhatsAppAccount = ""
 		}
 	}
 

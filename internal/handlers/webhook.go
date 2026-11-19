@@ -508,7 +508,7 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		if errMsg, ok := updates["error_message"].(string); ok && errMsg != "" {
 			wsPayload["error_message"] = errMsg
 		}
-		a.WSHub.BroadcastToOrg(message.OrganizationID, websocket.WSMessage{
+		a.broadcastConversation(message.OrganizationID, message.ContactID, message.WhatsAppAccount, websocket.WSMessage{
 			Type:    websocket.TypeStatusUpdate,
 			Payload: wsPayload,
 		})

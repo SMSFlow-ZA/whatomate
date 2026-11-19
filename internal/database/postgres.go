@@ -143,6 +143,9 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
+	if err := MigrateInboxWorkflowAuthority(db); err != nil {
+		return err
+	}
 	return channelmigration.Run(db)
 }
 
@@ -183,6 +186,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 
 	// Create indexes
 	if err := channelmigration.Run(silentDB); err != nil {
+		return err
+	}
+	if err := MigrateInboxWorkflowAuthority(silentDB); err != nil {
 		return err
 	}
 	for _, idx := range indexes {
@@ -265,6 +271,10 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_case_active ON inbox_cases (organization_id, account_id, contact_id) WHERE status <> 'resolved' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_case_snooze_due ON inbox_cases (snoozed_until) WHERE status = 'snoozed' AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_event ON inbox_case_activities (created_at, id) WHERE deleted_at IS NULL AND workflow_processed_at IS NULL AND workflow_trigger <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_case ON inbox_case_activities (organization_id, case_id, created_at, id) WHERE deleted_at IS NULL AND workflow_processed_at IS NULL AND workflow_trigger <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_send ON inbox_workflow_runs (created_at, id) WHERE deleted_at IS NULL AND state = 'pending'`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_overflow_retry ON inbox_cases (routing_next_attempt_at) WHERE deleted_at IS NULL AND assignee_id IS NULL AND team_id IS NOT NULL AND status IN ('open', 'pending') AND routing_reason <> ''`,
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,

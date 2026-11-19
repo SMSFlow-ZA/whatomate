@@ -1573,6 +1573,7 @@ func TestApp_GetMessages_AssignedViaActiveTransfer(t *testing.T) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, agent.ID)
 		testutil.SetPathParam(req, "id", contact.ID.String())
+		testutil.SetQueryParam(req, "account", account.Name)
 		require.NoError(t, app.GetMessages(req))
 		return testutil.GetResponseStatusCode(req)
 	}

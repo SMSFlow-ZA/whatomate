@@ -28,7 +28,7 @@ func (a *App) processInboxRuleEvent(ctx context.Context, event models.InboxCaseA
 		var c models.InboxCase
 		err = tx.First(&c, "id = ? AND organization_id = ? AND account_id = ?", event.CaseID, event.OrganizationID, event.AccountID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+			return a.finishOrphanInboxEvent(tx, event, "case_missing")
 		}
 		if err != nil {
 			return err
@@ -36,7 +36,7 @@ func (a *App) processInboxRuleEvent(ctx context.Context, event models.InboxCaseA
 		thread := inboxThread{c.OrganizationID, c.AccountID, c.ContactID}
 		if err := thread.lock(tx); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
+				return a.finishOrphanInboxEvent(tx, event, "contact_missing")
 			}
 			return err
 		}
@@ -59,11 +59,26 @@ func (a *App) processInboxRuleEvent(ctx context.Context, event models.InboxCaseA
 		}
 		if latest.ID == c.ID {
 			if err := a.applyInboxRules(tx, event, latest, now); err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return a.finishOrphanInboxEvent(tx, event, "conversation_missing")
+				}
 				return err
 			}
 		}
 		return tx.Model(&event).Update("workflow_processed_at", now).Error
 	})
+}
+
+// Missing conversation records are terminal. Leaving them pending can fill the
+// oldest-event batch forever and prevent unrelated conversations from advancing.
+func (a *App) finishOrphanInboxEvent(tx *gorm.DB, event models.InboxCaseActivity, reason string) error {
+	res := tx.Model(&models.InboxCaseActivity{}).
+		Where("id = ? AND organization_id = ? AND workflow_processed_at IS NULL", event.ID, event.OrganizationID).
+		Update("workflow_processed_at", time.Now().UTC())
+	if res.Error == nil && res.RowsAffected != 0 {
+		a.Log.Warn("Inbox workflow event skipped", "event_id", event.ID, "reason", reason)
+	}
+	return res.Error
 }
 
 func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c models.InboxCase, now time.Time) error {
@@ -88,6 +103,9 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 	sendSelected := false
 	for _, w := range workflows {
 		user := w.CreatedByID
+		if w.UpdatedByID != nil {
+			user = *w.UpdatedByID
+		}
 		var scoped models.InboxCase
 		if !a.workflowActorActive(tx, c.OrganizationID, user) ||
 			!a.HasPermission(user, models.ResourceSettingsGeneral, models.ActionWrite, c.OrganizationID) ||
@@ -205,6 +223,10 @@ func (a *App) dispatchClaimedInboxSend(ctx context.Context, run models.InboxWork
 	thread := inboxThread{run.OrganizationID, run.AccountID, run.ContactID}
 	c, err := thread.latest(a.DB)
 	if err != nil || c.ID != run.CaseID {
+		return inboxRunBlocked, "case_changed"
+	}
+	digest, err := inboxSendCaseDigest(a.DB, c)
+	if err != nil || run.CaseDigest == "" || digest != run.CaseDigest {
 		return inboxRunBlocked, "case_changed"
 	}
 	var scoped models.InboxCase

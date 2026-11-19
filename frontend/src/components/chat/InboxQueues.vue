@@ -3,16 +3,20 @@ import InboxFieldMatchers from './InboxFieldMatchers.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accountsService, tagsService, teamsService, usersService } from '@/services/api'
+import { accountsService, tagsService, usersService } from '@/services/api'
 import {
   inboxService,
   type BulkInboxAction, type BulkInboxResult, type CasePriority, type CaseStatus,
   type InboxFilters, type InboxQueue, type QueueCase, type SavedInboxView
 } from '@/services/inbox'
 import { useAuthStore } from '@/stores/auth'
+import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 
-defineProps<{ active: boolean }>()
+const props = defineProps<{ active: boolean }>()
+const teamsStore = useTeamsStore()
+const lookupFailed = ref(false)
+let lookupsLoaded = false
 const emit = defineEmits<{ open: [row: QueueCase]; changed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -52,6 +56,7 @@ function selectedFilters() {
 }
 
 async function refresh() {
+  if (!props.active || document.visibilityState !== 'visible') return
   const id = ++revision
   loading.value = true
   failed.value = false
@@ -81,17 +86,31 @@ watch(filters, () => {
   void refresh()
 }, { deep: true })
 
-onMounted(() => {
+async function loadLookups() {
+  lookupFailed.value = false
+  const results = await Promise.allSettled([
+    accountsService.list().then(res => { accounts.value = res.data.data?.accounts ?? [] }),
+    teamsStore.fetchTeams({ limit: 100 }).then(result => { teams.value = result.teams }),
+    usersService.list({ limit: 100 }).then(res => { agents.value = res.data.data?.users ?? [] }),
+    tagsService.list({ limit: 100 }).then(res => { tags.value = (res.data as any).data?.tags ?? [] }),
+  ])
+  lookupsLoaded = results.every(result => result.status === 'fulfilled')
+  lookupFailed.value = !lookupsLoaded
+}
+function activate() {
+  if (!props.active || document.visibilityState !== 'visible') return
   void refresh()
   void refreshViews()
-  void accountsService.list().then(res => { accounts.value = res.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsService.list({ limit: 100 }).then(res => { teams.value = (res.data as any).data?.teams ?? [] }).catch(() => {})
-  void usersService.list({ limit: 100 }).then(res => { agents.value = res.data.data?.users ?? [] }).catch(() => {})
-  void tagsService.list({ limit: 100 }).then(res => { tags.value = (res.data as any).data?.tags ?? [] }).catch(() => {})
+  if (!lookupsLoaded) void loadLookups()
+}
+onMounted(() => { activate(); document.addEventListener('visibilitychange', activate) })
+watch(() => props.active, active => {
+  if (active) activate()
+  else { revision++; loading.value = false }
 })
 watch(selected, () => { reviewing.value = false })
-const refreshTimer = setInterval(() => { if (document.visibilityState === 'visible' && !reviewing.value && !saving.value) void refresh() }, 20_000)
-onUnmounted(() => { revision++; clearInterval(refreshTimer) })
+const refreshTimer = setInterval(() => { if (!loading.value && !reviewing.value && !saving.value) void refresh() }, 20_000)
+onUnmounted(() => { revision++; clearInterval(refreshTimer); document.removeEventListener('visibilitychange', activate) })
 
 function chooseView() {
   const view = views.value.find(view => view.id === activeView.value)
@@ -150,6 +169,10 @@ async function applyBulk() {
     <select v-model="filters.queue" class="rounded-md border border-input bg-background px-2 py-1 text-sm" :aria-label="t('inboxQueue.title')">
       <option v-for="queue in queues" :key="queue" :value="queue">{{ t('inboxQueue.queue.' + (queue || 'all')) }}</option>
     </select>
+    <p v-if="lookupFailed" role="alert" class="text-sm text-destructive">
+      {{ t('inboxQueue.loadFiltersError') }}
+      <button class="underline" type="button" @click="loadLookups">{{ t('common.retry') }}</button>
+    </p>
     <details>
       <summary>{{ t('inboxQueue.filters') }}</summary>
       <div class="flex flex-col gap-2 mt-2">
@@ -225,7 +248,7 @@ async function applyBulk() {
     <details v-if="Object.keys(results).length">
       <summary role="status">{{ t('inboxQueue.bulkSummary', { updated: Object.values(results).filter(v => v === 'updated').length, total: Object.keys(results).length }) }}</summary>
       <ul>
-        <li v-for="(result, id) in results" :key="id">{{ resultContacts[id] }} · {{ t('inboxQueue.result.' + result) }}</li>
+        <li v-for="(result, id) in results" :key="id">{{ resultContacts[id] }} Ã‚Â· {{ t('inboxQueue.result.' + result) }}</li>
       </ul>
     </details>
     <p v-if="failed" role="alert">{{ t('inboxQueue.loadError') }} <button type="button" class="rounded-md border border-input px-2 py-1 text-sm" @click="refresh">{{ t('inboxQueue.retry') }}</button></p>
@@ -241,7 +264,7 @@ async function applyBulk() {
         <button type="button" class="rounded-md px-2 py-1 hover:bg-muted flex-1 min-w-0 text-start" @click="emit('open', row)">
           <span class="flex flex-col min-w-0">
             <strong class="truncate">{{ row.contact_name || t('inboxQueue.unnamed') }}</strong>
-            <small class="text-muted-foreground">{{ row.account_name }} · {{ t('inboxWorkflow.status.' + row.status) }} · {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
+            <small class="text-muted-foreground">{{ row.account_name }} Ã‚Â· {{ t('inboxWorkflow.status.' + row.status) }} Ã‚Â· {{ t('inboxWorkflow.priority.' + row.priority) }}</small>
             <InboxSLAIndicators v-if="row.sla" class="mt-1" :sla="row.sla" />
             <small v-if="!row.assignee_id && row.routing_reason">{{ t('inboxCapacity.reason.' + row.routing_reason) }}</small>
             <small v-if="results[row.id]">{{ t('inboxQueue.result.' + results[row.id]) }}</small>

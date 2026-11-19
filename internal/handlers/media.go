@@ -168,8 +168,11 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		if _, _, err := a.findInboxChatContact(orgID, userID, message.ContactID, message.WhatsAppAccount); err != nil {
 			// Not owner / not directly assigned — check team membership via active transfer
 			var transfer models.AgentTransfer
-			if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL",
-				message.ContactID, orgID, models.TransferStatusActive).First(&transfer).Error; err != nil {
+			if message.WhatsAppAccount == "" {
+				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
+			}
+			if err := a.DB.Where("contact_id = ? AND organization_id = ? AND whats_app_account = ? AND status = ? AND team_id IS NOT NULL",
+				message.ContactID, orgID, message.WhatsAppAccount, models.TransferStatusActive).First(&transfer).Error; err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 			}
 			var count int64
