@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { Filter, Save as Bookmark, MessageSquare as Inbox, RotateCw } from '@/lib/icons'
+import {
+  Filter,
+  Save as Bookmark,
+  MessageSquare as Inbox,
+  RotateCw,
+} from '@/lib/icons'
 import { computed, onMounted, onUnmounted, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsService, tagsService, usersService } from '@/services/api'
@@ -288,10 +293,19 @@ async function applyBulk() {
         </button>
       </nav>
       <div class="mt-3 flex items-center gap-1">
-        <ot-dropdown><button :popovertarget="filterId"
-               class="outline small" type="button"><Filter class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
-                t('inboxQueue.filters')
-              }}</button><div :id="filterId" popover class="inbox-ui inbox-filter-popover"><h2 class="inbox-section-heading mb-4">
+        <ot-dropdown
+          ><button
+            :popovertarget="filterId"
+            class="outline small"
+            type="button"
+          >
+            <Filter
+              class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            />{{ t('inboxQueue.filters') }}
+          </button>
+          <div :id="filterId" popover class="inbox-ui inbox-filter-popover">
+            <h2 class="inbox-section-heading mb-4">
               {{ t('inboxUX.queueFilters') }}
             </h2>
             <div class="grid gap-3">
@@ -382,16 +396,24 @@ async function applyBulk() {
                 </div>
               </fieldset>
               <button
-
-
                 @click="filters = { tags: [], queue: filters.queue }"
-                 class="outline small" type="button">{{ t('inboxUX.resetFilters') }}</button>
-            </div></div
-          ></ot-dropdown>
-        <ot-dropdown><button :popovertarget="viewId"
-               class="ghost small" type="button"><Bookmark class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
-                t('inboxQueue.savedViews')
-              }}</button><div :id="viewId" popover class="inbox-ui inbox-filter-popover"><h2 class="inbox-section-heading mb-3">
+                class="outline small"
+                type="button"
+              >
+                {{ t('inboxUX.resetFilters') }}
+              </button>
+            </div>
+          </div></ot-dropdown
+        >
+        <ot-dropdown
+          ><button :popovertarget="viewId" class="ghost small" type="button">
+            <Bookmark
+              class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            />{{ t('inboxQueue.savedViews') }}
+          </button>
+          <div :id="viewId" popover class="inbox-ui inbox-filter-popover">
+            <h2 class="inbox-section-heading mb-3">
               {{ t('inboxQueue.savedViews') }}
             </h2>
             <label class="inbox-label"
@@ -405,10 +427,11 @@ async function applyBulk() {
             ><button
               v-if="activeView"
               class="ghost small mt-2 text-destructive"
-
-
               @click="removeView"
-               type="button">{{ t('inboxQueue.deleteView') }}</button>
+              type="button"
+            >
+              {{ t('inboxQueue.deleteView') }}
+            </button>
             <form
               class="mt-4 grid gap-3 border-t border-border pt-4"
               @submit.prevent="saveView"
@@ -431,20 +454,26 @@ async function applyBulk() {
                 </select></label
               ><button
                 type="submit"
-
                 :disabled="saving || !viewName.trim()"
-                 class="small">{{ t('inboxQueue.saveView') }}</button>
-            </form></div
-          ></ot-dropdown>
+                class="small"
+              >
+                {{ t('inboxQueue.saveView') }}
+              </button>
+            </form>
+          </div></ot-dropdown
+        >
         <button
-
-
           class="ghost icon ml-auto h-8 w-8"
           :aria-label="t('inboxQueue.retry')"
           :disabled="loading"
           @click="refresh"
-           type="button"><RotateCw class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true"
-        /></button>
+          type="button"
+        >
+          <RotateCw
+            class="inbox-icon-height-small inbox-icon-width-small"
+            aria-hidden="true"
+          />
+        </button>
       </div>
       <p v-if="activeView" class="inbox-caption mt-2">
         {{ views.find((v) => v.id === activeView)?.name }}
@@ -476,11 +505,13 @@ async function applyBulk() {
           </option></select
         ><button
           v-if="!reviewing"
-
-
           :disabled="!actionReady"
           @click="reviewing = true"
-           class="outline small" type="button">{{ t('inboxQueue.review') }}</button>
+          class="outline small"
+          type="button"
+        >
+          {{ t('inboxQueue.review') }}
+        </button>
       </div>
       <select
         v-if="action === 'assign'"
@@ -514,12 +545,19 @@ async function applyBulk() {
 
         <label v-if="action === 'assign' && auth.hasPermission('teams','write')" class="inbox-label my-2">{{ t('inboxCapacity.override') }}<input v-model="overrideReason" maxlength="500" /></label><div class="flex gap-2">
           <button
-
             :disabled="saving || !actionReady"
             @click="applyBulk"
-             class="small" type="button">{{ t('inboxQueue.apply') }}</button><button @click="reviewing = false" class="outline small" type="button">{{
-            t('common.cancel')
-          }}</button>
+            class="small"
+            type="button"
+          >
+            {{ t('inboxQueue.apply') }}</button
+          ><button
+            @click="reviewing = false"
+            class="outline small"
+            type="button"
+          >
+            {{ t('common.cancel') }}
+          </button>
         </div></template
       >
     </div>
@@ -610,16 +648,20 @@ async function applyBulk() {
     </div>
     <div v-if="offset || hasMore" class="flex gap-2 border-t border-border p-3">
       <button
-
-
         :disabled="!offset || loading"
         @click="pageBy(-50)"
-         class="outline small" type="button">{{ t('inboxQueue.previous') }}</button><button
-
-
+        class="outline small"
+        type="button"
+      >
+        {{ t('inboxQueue.previous') }}</button
+      ><button
         :disabled="!hasMore || loading"
         @click="pageBy(50)"
-         class="outline small" type="button">{{ t('inboxQueue.next') }}</button>
+        class="outline small"
+        type="button"
+      >
+        {{ t('inboxQueue.next') }}
+      </button>
     </div>
   </section>
 </template>
