@@ -613,9 +613,12 @@ async function selectContact(id: string) {
   // Direct deep links to /chat/:id may target a contact that isn't in the
   // currently-loaded (paginated) list — fall back to fetching it directly.
   const preferredAccount = queueAccount.value
-  const contact = preferredAccount
+  let contact = preferredAccount
     ? await contactsStore.fetchContact(id, preferredAccount)
     : contactsStore.contacts.find(c => c.id === id) ?? await contactsStore.fetchContact(id)
+  if (contact && !preferredAccount && !authStore.hasPermission('contacts', 'read') && contact.whatsapp_account) {
+    contact = await contactsStore.fetchContact(id, contact.whatsapp_account)
+  }
   if (contact) {
     // Reset unread pill — fetchMessages will mark everything read on the server
     newMessagesCount.value = 0
