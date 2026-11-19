@@ -240,7 +240,7 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
-	return []string{
+	return append([]string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE chatbot_sessions ALTER COLUMN phone_number TYPE varchar(50)`,
@@ -251,9 +251,6 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_case_active ON inbox_cases (organization_id, account_id, contact_id) WHERE status <> 'resolved' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_case_snooze_due ON inbox_cases (snoozed_until) WHERE status = 'snoozed' AND deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_event ON inbox_case_activities (created_at, id) WHERE deleted_at IS NULL AND workflow_processed_at IS NULL AND workflow_trigger <> ''`,
-		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_case ON inbox_case_activities (organization_id, case_id, created_at, id) WHERE deleted_at IS NULL AND workflow_processed_at IS NULL AND workflow_trigger <> ''`,
-		`CREATE INDEX IF NOT EXISTS idx_inbox_workflow_pending_send ON inbox_workflow_runs (created_at, id) WHERE deleted_at IS NULL AND state = 'pending'`,
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
@@ -301,7 +298,7 @@ func getIndexes() []string {
 		// IVR flows
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
-	}
+	}, inboxWorkflowIndexSQL...)
 }
 
 // CreateIndexes creates additional indexes not handled by GORM tags
