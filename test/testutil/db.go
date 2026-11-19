@@ -100,6 +100,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxCase{},
 		&models.InboxCaseActivity{},
 		&models.InboxSavedView{},
+		&models.InboxSLAPolicy{},
 		&models.InboxWorkflow{},
 		&models.InboxWorkflowRun{},
 		&models.Template{},
@@ -144,6 +145,7 @@ func cleanupTables(db *gorm.DB) {
 		"inbox_case_activities",
 		"inbox_saved_views",
 		"inbox_cases",
+		"inbox_sla_policies",
 		"inbox_workflow_runs", "inbox_workflows",
 		// Dashboard tables
 		"widgets",

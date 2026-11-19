@@ -43,6 +43,7 @@ type InboxCase struct {
 	ResolvedAt        *time.Time        `json:"resolved_at,omitempty"`
 	LastInboundAt     *time.Time        `json:"last_inbound_at,omitempty"`
 	FirstHumanReplyAt *time.Time        `json:"first_human_reply_at,omitempty"`
+	NextReplyFrom     *time.Time        `json:"next_reply_from,omitempty"`
 	LastHumanReplyAt  *time.Time        `json:"last_human_reply_at,omitempty"`
 }
 

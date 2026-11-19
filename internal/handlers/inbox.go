@@ -229,7 +229,11 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 	if c.AssigneeID != nil && *c.AssigneeID != user && !a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) {
 		return a.inboxError(r, gorm.ErrRecordNotFound)
 	}
-	return r.SendEnvelope(map[string]any{"case": c, "activity": activities})
+	sla, err := a.inboxSLASnapshots(t.org, []models.InboxCase{c}, time.Now().UTC())
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"case": inboxSLACase{InboxCase: c, SLA: sla[c.ID]}, "activity": activities})
 }
 
 type inboxCaseUpdate struct {
@@ -261,7 +265,7 @@ func (input inboxCaseUpdate) valid(now time.Time) bool {
 }
 
 func applyInboxTransition(tx *gorm.DB, c *models.InboxCase, input inboxCaseUpdate, actor *uuid.UUID, now time.Time, kind string) error {
-	event := models.InboxCaseActivity{ActorID: actor, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
+	event := models.InboxCaseActivity{ActorID: actor, OccurredAt: &now, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
 	if input.Status != "" {
 		if input.Status != c.Status {
 			c.StatusChangedAt = now
@@ -426,6 +430,9 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 				c.Status, c.StatusChangedAt, c.SnoozedUntil = models.InboxCaseOpen, received, nil
 				kind = "customer_replied"
 			}
+			if c.LastHumanReplyAt != nil && received.After(*c.LastHumanReplyAt) && (c.NextReplyFrom == nil || received.Before(*c.NextReplyFrom)) {
+				c.NextReplyFrom = &received
+			}
 			c.Version++
 			if err := tx.Save(&c).Error; err != nil {
 				return err
@@ -539,6 +546,9 @@ func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *mo
 			c.FirstHumanReplyAt = &at
 		}
 		c.LastHumanReplyAt = &at
+		if c.NextReplyFrom != nil && !c.NextReplyFrom.After(at) {
+			c.NextReplyFrom = nil
+		}
 		c.Version++
 		if err := tx.Save(&c).Error; err != nil {
 			return err

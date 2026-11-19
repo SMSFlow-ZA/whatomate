@@ -8,7 +8,20 @@ export interface InboxWorkflowPreview { matches: boolean; confirmation: string; 
 export type CaseStatus = 'open' | 'pending' | 'waiting_customer' | 'snoozed' | 'resolved'
 export type CasePriority = 'low' | 'normal' | 'high' | 'urgent'
 
+export interface InboxSLAPolicy {
+  account_id: string
+  first_reply_minutes: number
+  next_reply_minutes: number
+  resolution_minutes: number
+  timezone: string
+  business_hours: boolean
+  shifts: { Day: number; StartMinute: number; EndMinute: number }[]
+}
+
+export type InboxSLA = Record<string, { status: string; deadline?: string; remaining_seconds: number }>
+
 export interface InboxCase {
+  sla?: InboxSLA
   id: string
   contact_id: string
   account_id: string
@@ -45,6 +58,10 @@ const conversationPath = (accountId: string, contactId: string) =>
 
 const workflowPath = (id: string) => '/inbox/workflow-definitions/' + encodeURIComponent(id)
 export const inboxService = {
+  slaPolicies: () => api.get<Envelope<{ policies: InboxSLAPolicy[] }>>('/inbox/sla/policies'),
+  setSlaPolicy: (id: string, policy: InboxSLAPolicy) => api.put('/inbox/sla/policies/' + encodeURIComponent(id), policy),
+  deleteSlaPolicy: (id: string) => api.delete('/inbox/sla/policies/' + encodeURIComponent(id)),
+  slaReport: (account: string, team: string, offset: number) => api.get<Envelope<{ cases: QueueCase[]; has_more: boolean }>>('/inbox/sla/report', { params: { account_id: account || undefined, team_id: team || undefined, offset } }),
   workflowDefinitions: (kind: 'macro' | 'rule') => api.get<Envelope<{ workflows: InboxWorkflow[] }>>('/inbox/workflow-definitions', { params: {kind} }),
   createWorkflow: (input: InboxWorkflowInput) => api.post('/inbox/workflow-definitions', input),
   updateWorkflow: (id: string, input: InboxWorkflowInput) => api.put(workflowPath(id), input),

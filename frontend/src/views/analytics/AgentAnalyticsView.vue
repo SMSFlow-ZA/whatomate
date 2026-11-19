@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import InboxTabs from '@/components/shared/InboxTabs.vue'
+import InboxSLAReport from '@/components/chat/InboxSLAReport.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAnalyticsService } from '@/services/api'
@@ -59,6 +61,7 @@ interface AgentAnalyticsResponse {
 }
 
 const { t } = useI18n()
+const analyticsTab = ref('overview')
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
@@ -249,11 +252,12 @@ void _displayStats.value // Suppress unused warning
 <template>
   <div class="flex flex-col h-full">
     <PageHeader
+      class="inbox-analytics-header"
       :title="$t('agentAnalytics.title')"
       :description="isAdminOrManager ? $t('agentAnalytics.subtitle') : $t('agentAnalytics.myMetrics')"
       :icon="BarChart3"
     >
-      <template #actions>
+      <template v-if="analyticsTab === 'overview'" #actions>
         <div class="hstack gap-2 items-center flex-wrap justify-end">
           <!-- Agent Filter (Admin/Manager only) -->
           <Combobox
@@ -277,9 +281,11 @@ void _displayStats.value // Suppress unused warning
         </div>
       </template>
     </PageHeader>
+    <div v-if="isAdminOrManager" class="inbox-ui p-4"><InboxTabs v-model="analyticsTab" :label="t('agentAnalytics.title')" :items="[{value:'overview',label:t('inboxUX.analyticsOverview')},{value:'inbox',label:t('inboxUX.liveInbox')}]" /></div>
+    <div v-if="isAdminOrManager && analyticsTab === 'inbox'" class="flex-1 scroll-y p-4"><InboxSLAReport /></div>
 
     <!-- Content -->
-    <div class="flex-1 scroll-y p-4">
+    <div v-if="!isAdminOrManager || analyticsTab === 'overview'" class="flex-1 scroll-y p-4">
       <div class="vstack gap-4">
         <!-- Error State -->
         <ErrorState
