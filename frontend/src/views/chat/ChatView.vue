@@ -2087,6 +2087,7 @@ async function sendMediaMessage() {
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
           :can-write="authStore.hasPermission('chat', 'write')"
           @changed="updateInboxSummary"
+          @needs-fields="isInfoPanelOpen = true"
         />
 
         <!-- Account Tabs (shown when the org has several WhatsApp accounts) -->
@@ -2591,7 +2592,7 @@ async function sendMediaMessage() {
           :account-id="inboxAccountId"
           :contact-id="contactsStore.currentContact.id"
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
-          :can-write="false"
+          :can-write="authStore.hasPermission('chat', 'write')"
           history
         />
       </template>

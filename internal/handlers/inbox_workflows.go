@@ -127,6 +127,9 @@ func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
 	if !validInboxWorkflow(w) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid inbox workflow", nil, "")
 	}
+	if err := validateInboxFieldMatchers(a.DB, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+		return a.inboxError(r, errInboxTransition)
+	}
 	if err := a.DB.Create(&w).Error; err != nil {
 		return a.inboxError(r, err)
 	}
@@ -181,6 +184,9 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 		// Rules execute as their last editor, never with an earlier author's rights.
 		w.UpdatedByID = &user
 		if input.Kind != w.Kind || !validInboxWorkflow(w) {
+			return errInboxTransition
+		}
+		if err := validateInboxFieldMatchers(tx, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 			return errInboxTransition
 		}
 		w.EnabledAt = nil

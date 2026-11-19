@@ -37,7 +37,7 @@ func validateInboxFilter(f models.InboxQueueFilter) bool {
 	if f.Priority != "" && !(inboxCaseUpdate{Priority: f.Priority}).valid(time.Time{}) {
 		return false
 	}
-	if len(f.Tags) > 20 {
+	if len(f.Fields) > 8 || len(f.Tags) > 20 {
 		return false
 	}
 	for _, tag := range f.Tags {
@@ -114,8 +114,16 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 		}
 		q = q.Where("c.tags @> ?::jsonb", string(value))
 	}
+	allowContact := a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)
+	if err := validateInboxFieldMatchers(a.DB, org, f.Fields, allowContact); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A field filter is invalid or unavailable", nil, "")
+	}
+	q, err := queryInboxFieldMatchers(q, org, f.Fields, allowContact)
+	if err != nil {
+		return a.inboxError(r, err)
+	}
 	rows := []inboxQueueRow{}
-	err := q.Select("inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name").
+	err = q.Select("inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name").
 		Order("CASE inbox_cases.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, inbox_cases.opened_at, inbox_cases.id").
 		Offset(pg).Limit(51).Scan(&rows).Error
 	if err != nil {
@@ -203,6 +211,9 @@ func (a *App) CreateInboxSavedView(r *fastglue.Request) error {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A name and valid filters are required", nil, "")
+	}
+	if err := validateInboxFieldMatchers(a.DB, org, input.Filters.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A field filter is invalid or unavailable", nil, "")
 	}
 	if input.TeamID != nil {
 		permitted, err := a.canPublishInboxView(org, user, *input.TeamID)
@@ -304,6 +315,8 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 			state = "stale"
 		case errors.Is(err, errInboxTransition):
 			state = "invalid"
+		case errors.Is(err, errRequiredInboxFields):
+			state = "required_fields"
 		case errors.Is(err, errInboxAgentAtCapacity):
 			state = "capacity"
 		case err != nil:

@@ -12,6 +12,7 @@ import { getErrorMessage } from '@/lib/api-utils'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
+import InboxFieldPanel from '@/components/chat/InboxFieldPanel.vue'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import DeleteConfirmDialog from '@/components/shared/DeleteConfirmDialog.vue'
@@ -310,6 +311,7 @@ onMounted(async () => {
         </div>
       </article>
 
+      <InboxFieldPanel v-if="contact" :contact="contact.id" :can-write="canWrite" />
       <AuditLogPanel
         v-if="contact"
         resource-type="contact"

@@ -133,7 +133,7 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 			return a.runInboxWorkflowActions(inner, &nextCase, &nextContact, user, w, now)
 		}); err != nil {
 			switch {
-			case errors.Is(err, errInboxTransition), errors.Is(err, gorm.ErrRecordNotFound):
+			case errors.Is(err, errInboxTransition), errors.Is(err, errRequiredInboxFields), errors.Is(err, gorm.ErrRecordNotFound):
 				run.State, run.Outcome = inboxRunFailed, "action_rejected"
 			default:
 				return err

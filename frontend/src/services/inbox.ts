@@ -1,5 +1,19 @@
 import { api } from '@/services/api'
 
+export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'select'
+export type FieldValue = string | number | boolean | null
+export interface FieldDefinition {
+  id: string
+  scope: 'case' | 'contact'
+  key: string
+  label: string
+  kind: FieldKind
+  options?: string[]
+  required_on_resolve: boolean
+  archived_at?: string
+}
+export interface FieldMatch { definition_id: string; value: FieldValue }
+
 export interface InboxAction { type: 'assign' | 'tag' | 'priority' | 'status' | 'note' | 'send_text' | 'send_template'; value: string; consent_confirmed?: boolean }
 export interface InboxWorkflowInput { kind: 'macro' | 'rule'; name: string; trigger: string; position: number; actions: InboxAction[]; conditions: InboxFilters; enabled?: boolean }
 export interface InboxWorkflow extends InboxWorkflowInput { id: string; enabled_at?: string }
@@ -60,6 +74,7 @@ type Envelope<T> = { data: T }
 const conversationPath = (accountId: string, contactId: string) =>
   '/inbox/accounts/' + encodeURIComponent(accountId) + '/contacts/' + encodeURIComponent(contactId)
 
+const fieldPath = (contact: string, account?: string) => (account ? conversationPath(account, contact) : '/inbox/contacts/' + encodeURIComponent(contact)) + '/fields'
 const workflowPath = (id: string) => '/inbox/workflow-definitions/' + encodeURIComponent(id)
 export const inboxService = {
   teamCapacity: (team: string, account: string) => api.get<Envelope<{ agents: InboxCapacity[] }>>('/inbox/teams/' + encodeURIComponent(team) + '/capacity/' + encodeURIComponent(account)),
@@ -77,6 +92,11 @@ export const inboxService = {
   workflowRuns: (case_id?: string) => api.get<Envelope<{ runs: InboxWorkflowRun[] }>>('/inbox/workflow-runs', { params: {case_id} }),
   automationState: () => api.get<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation'),
   setAutomation: (enabled: boolean) => api.put<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation', { enabled }),
+  fieldDefinitions: (scope?: FieldDefinition['scope']) => api.get<Envelope<{ definitions: FieldDefinition[] }>>('/inbox/fields', { params: { scope } }),
+  createFieldDefinition: (input: Omit<FieldDefinition, 'id' | 'archived_at'>) => api.post('/inbox/fields', input),
+  updateFieldDefinition: (id: string, input: { label?: string; required_on_resolve?: boolean; archive?: boolean }) => api.put('/inbox/fields/' + encodeURIComponent(id), input),
+  fieldValues: (contact: string, account?: string) => api.get<Envelope<{ subject_id: string; values: FieldMatch[] }>>(fieldPath(contact, account)),
+  setFieldValue: (contact: string, account: string | undefined, definition: string, subject_id: string, value: FieldValue) => api.put(fieldPath(contact, account) + '/' + encodeURIComponent(definition), { subject_id, value }),
   settings: () => api.get<Envelope<{ enabled: boolean }>>('/inbox/workflows'),
   queue: (filters: InboxFilters, offset = 0) =>
     api.get<Envelope<{ cases: QueueCase[]; has_more: boolean }>>('/inbox/queue', {
@@ -101,7 +121,7 @@ export const inboxService = {
 
 export type InboxQueue = '' | 'mine' | 'unassigned' | 'awaiting_reply' | 'follow_ups'
 export type BulkInboxAction = 'assign' | 'tag' | 'resolve'
-export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed' | 'capacity'
+export type BulkInboxResult = 'updated' | 'unavailable' | 'stale' | 'invalid' | 'failed' | 'required_fields' | 'capacity'
 
 export interface InboxFilters {
   queue?: InboxQueue
@@ -111,6 +131,7 @@ export interface InboxFilters {
   status?: CaseStatus
   priority?: CasePriority
   tags?: string[]
+  fields?: FieldMatch[]
 }
 
 export interface QueueCase extends InboxCase {

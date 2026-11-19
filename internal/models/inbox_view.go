@@ -1,8 +1,18 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"encoding/json"
+
+	"github.com/google/uuid"
+)
+
+type InboxFieldMatch struct {
+	DefinitionID uuid.UUID       `json:"definition_id"`
+	Value        json.RawMessage `json:"value"`
+}
 
 type InboxQueueFilter struct {
+	Fields     []InboxFieldMatch `json:"fields,omitempty"`
 	Queue      string            `json:"queue,omitempty"`
 	AccountID  *uuid.UUID        `json:"account_id,omitempty"`
 	TeamID     *uuid.UUID        `json:"team_id,omitempty"`

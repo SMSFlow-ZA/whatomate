@@ -141,6 +141,7 @@ export const navigationSections: NavSection[] = [
         children: [
           { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
           { name: 'inboxRules.title', path: '/settings/inbox-workflows', icon: Settings, permission: 'settings.general' },
+          { name: 'inboxFields.title', path: '/settings/custom-fields', icon: Settings, permission: 'settings.general' },
           { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
           { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' },
           { name: 'nav.contacts', path: '/settings/contacts', icon: Contact, permission: 'contacts' },
