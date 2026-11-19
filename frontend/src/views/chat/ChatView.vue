@@ -1753,6 +1753,8 @@ async function sendMediaMessage() {
         v-if="inboxEnabled"
         :key="inboxOrg"
         :active="showInboxQueues"
+        :selected-contact="contactsStore.currentContact?.id"
+        :selected-account="inboxAccountId || undefined"
         @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id } })"
         @changed="refreshInboxSummaries"
       />
