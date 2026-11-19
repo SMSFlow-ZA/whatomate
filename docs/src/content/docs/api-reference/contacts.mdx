@@ -508,3 +508,17 @@ Internal, contact-scoped notes visible to agents (never sent to the customer). R
 ```
 
 The list endpoint returns `{ "notes": [...], "total": <n>, "has_more": <bool> }`.
+
+
+## Account-scoped agent access
+
+When access comes from an inbox case or active transfer, include the assigned WhatsApp account name in the `account` query parameter for contact details, messages, session data and read receipts. Current case reassignment revokes the previous agent's access. Contact owners and users with contact-read permission retain their ordinary contact-wide access.
+
+```http
+GET /api/contacts/{contactId}?account=Support%20desk
+GET /api/contacts/{contactId}/messages?account=Support%20desk
+GET /api/contacts/{contactId}/session-data?account=Support%20desk
+POST /api/contacts/{contactId}/mark-read?account=Support%20desk
+```
+
+Read receipts with an account parameter acknowledge only that account's incoming messages. Contact-wide metadata and notes require contact-level access. Live conversation updates follow the current account and assignment permissions.

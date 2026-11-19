@@ -16,7 +16,6 @@ const { t } = useI18n()
 
 const popoverId = `${useId()}-templates`
 const popover = ref<HTMLElement | null>(null)
-const trigger = ref<HTMLButtonElement | null>(null)
 const search = ref<HTMLInputElement | null>(null)
 const isLoading = ref(false)
 const searchQuery = ref('')
@@ -116,7 +115,6 @@ function selectTemplate(tpl: any) {
 <template>
   <ot-dropdown>
     <button
-      ref="trigger"
       type="button"
       class="ghost icon"
       :popovertarget="popoverId"
