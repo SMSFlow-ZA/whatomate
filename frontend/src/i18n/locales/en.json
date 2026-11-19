@@ -1,5 +1,6 @@
 {
   "inboxRules": {
+    "any": "Any",
     "title": "Inbox workflows",
     "macros": "Macros",
     "rules": "Rules",

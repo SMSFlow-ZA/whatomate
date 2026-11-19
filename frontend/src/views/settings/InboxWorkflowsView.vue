@@ -88,7 +88,7 @@ const hasReply = (w: InboxWorkflow) =>
   w.actions.some((a) => ['send_text', 'send_template'].includes(a.type))
 const inboxName = (w: InboxWorkflow) =>
   accounts.value.find((a) => a.id === w.conditions.account_id)?.name ??
-  t('inboxSla.any')
+  t('inboxRules.any')
 const readyToSave = computed(
   () =>
     !!form.value.name.trim() &&
@@ -645,7 +645,7 @@ onMounted(async () => {
                     >{{ t('inboxQueue.account')
                     }}<select v-model="form.conditions.account_id">
                       <option :value="undefined">
-                        {{ t('inboxSla.any') }}
+                        {{ t('inboxRules.any') }}
                       </option>
                       <option v-for="a in accounts" :key="a.id" :value="a.id">
                         {{ a.name }}
@@ -656,7 +656,7 @@ onMounted(async () => {
                     >{{ t('inboxQueue.team')
                     }}<select v-model="form.conditions.team_id">
                       <option :value="undefined">
-                        {{ t('inboxSla.any') }}
+                        {{ t('inboxRules.any') }}
                       </option>
                       <option v-for="a in teams" :key="a.id" :value="a.id">
                         {{ a.name }}
@@ -667,7 +667,7 @@ onMounted(async () => {
                     >{{ t('inboxWorkflow.caseStatus')
                     }}<select v-model="form.conditions.status">
                       <option :value="undefined">
-                        {{ t('inboxSla.any') }}
+                        {{ t('inboxRules.any') }}
                       </option>
                       <option v-for="s in statuses" :key="s" :value="s">
                         {{ t('inboxWorkflow.status.' + s) }}
@@ -678,7 +678,7 @@ onMounted(async () => {
                     >{{ t('inboxWorkflow.casePriority')
                     }}<select v-model="form.conditions.priority">
                       <option :value="undefined">
-                        {{ t('inboxSla.any') }}
+                        {{ t('inboxRules.any') }}
                       </option>
                       <option v-for="p in priorities" :key="p" :value="p">
                         {{ t('inboxWorkflow.priority.' + p) }}
@@ -689,7 +689,7 @@ onMounted(async () => {
                     >{{ t('inboxQueue.assignee')
                     }}<select v-model="form.conditions.assignee_id">
                       <option :value="undefined">
-                        {{ t('inboxSla.any') }}
+                        {{ t('inboxRules.any') }}
                       </option>
                       <option v-for="a in users" :key="a.id" :value="a.id">
                         {{ a.full_name }}
