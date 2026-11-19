@@ -631,7 +631,10 @@ async function selectContact(id: string) {
     contactsStore.setAccountFilter(null)
 
     contactsStore.setCurrentContact(contact)
-    await contactsStore.fetchMessages(id, preferredAccount ? { account: preferredAccount } : undefined)
+    // Restricted agents select an account before requesting conversation data.
+    const messageAccount = preferredAccount || (!authStore.hasPermission('contacts', 'read')
+      ? contact.whatsapp_account || orgAccounts.value[0]?.name : undefined)
+    await contactsStore.fetchMessages(id, messageAccount ? { account: messageAccount } : undefined)
 
     // Discover distinct accounts from the unfiltered message set
     const accounts = new Set<string>()

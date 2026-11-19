@@ -669,7 +669,7 @@ func (a *App) broadcastCallEvent(orgID uuid.UUID, eventType string, payload map[
 	if a.WSHub == nil {
 		return
 	}
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+	a.broadcastResource(orgID, models.ResourceCallLogs, websocket.WSMessage{
 		Type:    eventType,
 		Payload: payload,
 	})

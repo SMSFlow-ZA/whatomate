@@ -1095,7 +1095,7 @@ func (a *App) incrementCampaignStat(campaignID string, status string) {
 
 	// Broadcast stats update via WebSocket
 	if a.WSHub != nil && result.RowsAffected > 0 {
-		a.WSHub.BroadcastToOrg(campaign.OrganizationID, websocket.WSMessage{
+		a.broadcastResource(campaign.OrganizationID, models.ResourceCampaigns, websocket.WSMessage{
 			Type: websocket.TypeCampaignStatsUpdate,
 			Payload: map[string]any{
 				"campaign_id":     campaignID,

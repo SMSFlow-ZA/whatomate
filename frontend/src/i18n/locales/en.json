@@ -37,6 +37,7 @@
     "bulkSummary": "Updated {updated} of {total} cases",
     "bulkError": "Could not apply the changes.",
     "loadViewsError": "Could not load saved views.",
+    "loadFiltersError": "Some filter options could not be loaded. Retry to restore them.",
     "saveError": "Could not update this saved view.",
     "loadError": "Could not load the queue.",
     "retry": "Retry",

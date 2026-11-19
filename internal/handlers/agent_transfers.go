@@ -1124,7 +1124,7 @@ func (a *App) broadcastTransferCreated(transfer *models.AgentTransfer, contact *
 		payload["team_id"] = transfer.TeamID.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.broadcastConversation(transfer.OrganizationID, transfer.ContactID, transfer.WhatsAppAccount, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransfer,
 		Payload: payload,
 	})
@@ -1148,7 +1148,7 @@ func (a *App) broadcastTransferResumed(transfer *models.AgentTransfer) {
 		payload["resumed_by"] = transfer.ResumedBy.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.broadcastConversation(transfer.OrganizationID, transfer.ContactID, transfer.WhatsAppAccount, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferResume,
 		Payload: payload,
 	})
@@ -1177,7 +1177,7 @@ func (a *App) broadcastTransferAssigned(transfer *models.AgentTransfer) {
 		payload["team_id"] = nil
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.broadcastConversation(transfer.OrganizationID, transfer.ContactID, transfer.WhatsAppAccount, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferAssign,
 		Payload: payload,
 	})

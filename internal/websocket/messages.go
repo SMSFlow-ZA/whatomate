@@ -71,6 +71,8 @@ type BroadcastMessage struct {
 	UserID    uuid.UUID // Optional: only send to specific user
 	ContactID uuid.UUID // Optional: only send to users viewing this contact
 	Message   WSMessage
+	// Authorize is evaluated immediately before delivery, outside the hub lock.
+	Authorize func(uuid.UUID) bool
 }
 
 // AuthPayload is the payload for auth messages from client
