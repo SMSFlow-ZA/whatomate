@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func TestInboxHardeningOrphanEventsStarveLiveWork(t *testing.T) {
+func TestInboxHardeningOrphanEventsDoNotStarveLiveWork(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)
@@ -41,7 +41,7 @@ func TestInboxHardeningOrphanEventsStarveLiveWork(t *testing.T) {
 	require.NotNil(t, event.WorkflowProcessedAt)
 }
 
-func TestInboxHardeningQueuedRuleSendsAfterConditionChanges(t *testing.T) {
+func TestInboxHardeningQueuedRuleStopsAfterCaseChanges(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	rdb := testutil.SetupTestRedis(t)
 	require.NotNil(t, rdb)
@@ -88,7 +88,7 @@ func TestInboxHardeningQueuedRuleSendsAfterConditionChanges(t *testing.T) {
 	require.EqualValues(t, 0, calls.Load())
 }
 
-func TestInboxHardeningWorkerQueryScansProcessedHistory(t *testing.T) {
+func TestInboxHardeningWorkerQueryUsesPendingIndexes(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	org := testutil.CreateTestOrganization(t, db)
 	require.NoError(t, db.Model(org).Update("inbox_workflows_enabled", true).Error)
@@ -121,7 +121,7 @@ func TestInboxHardeningWorkerQueryScansProcessedHistory(t *testing.T) {
 	require.Contains(t, plan.String(), "idx_inbox_workflow_pending")
 }
 
-func TestInboxHardeningEditedRuleBorrowsCreatorsPermissions(t *testing.T) {
+func TestInboxHardeningEditedRuleUsesCurrentEditor(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Redis: testutil.SetupTestRedis(t), Log: testutil.NopLogger()}
 	require.NotNil(t, a.Redis)
