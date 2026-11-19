@@ -170,7 +170,7 @@ function saveSnooze() {
             }}</time>
             <p>
               {{ t('inboxWorkflow.event.' + item.kind)
-              }}<span
+              }}<span v-if="item.detail"> / {{ item.detail }}</span><span
                 v-if="item.to_status && item.to_status !== item.from_status"
               >
                 / {{ t('inboxWorkflow.status.' + item.to_status) }}</span

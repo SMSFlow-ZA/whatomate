@@ -58,6 +58,7 @@ const viewTeam = ref('')
 const activeView = ref('')
 const action = ref<BulkInboxAction>('resolve')
 const actionValue = ref('')
+const overrideReason = ref('')
 const reviewing = ref(false)
 function resetBulkReview() {
   actionValue.value = ''
@@ -138,6 +139,7 @@ watch(
     selected.value = []
     results.value = {}
     reviewing.value = false
+    overrideReason.value = ''
     void refresh()
   },
   { deep: true },
@@ -249,6 +251,7 @@ async function applyBulk() {
       action.value,
       selection,
       actionValue.value,
+      action.value === 'assign' ? overrideReason.value.trim() || undefined : undefined,
     )
     results.value = Object.fromEntries(
       data.data.results.map((item) => [item.id, item.result]),
@@ -260,6 +263,7 @@ async function applyBulk() {
       ]),
     )
     reviewing.value = false
+    overrideReason.value = ''
     selected.value = []
     emit('changed')
     await refresh()
@@ -540,7 +544,7 @@ async function applyBulk() {
           </li>
         </ul>
 
-        <div class="flex gap-2">
+        <label v-if="action === 'assign' && auth.hasPermission('teams','write')" class="inbox-label my-2">{{ t('inboxCapacity.override') }}<input v-model="overrideReason" maxlength="500" /></label><div class="flex gap-2">
           <button
             :disabled="saving || !actionReady"
             @click="applyBulk"
@@ -638,6 +642,7 @@ async function applyBulk() {
             ><small v-if="results[row.id]" class="inbox-caption">{{
               t('inboxQueue.result.' + results[row.id])
             }}</small>
+            <span v-if="row.routing_reason" class="inbox-caption">{{ t('inboxCapacity.reason.'+row.routing_reason) }}</span>
             <InboxSLAIndicators v-if="row.sla" :sla="row.sla" />
           </button>
         </li>

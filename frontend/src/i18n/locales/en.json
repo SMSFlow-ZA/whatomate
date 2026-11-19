@@ -1,34 +1,52 @@
 {
-  "inboxSla": {
-    "title": "Inbox response targets",
-    "report": "Inbox deadlines",
-    "minutes": "minutes",
-    "businessHours": "Count business hours",
-    "timezone": "Time zone",
-    "day": "Day",
-    "from": "From",
-    "to": "To",
-    "midnight": "Until midnight",
-    "addShift": "Add business hours",
-    "removePolicy": "Remove targets",
-    "saveError": "Could not save response targets. Check the time zone and business hours.",
-    "loadError": "Could not load inbox deadlines.",
-    "any": "All",
-    "allCases": "Include cases on track",
-    "empty": "No matching inbox deadlines on this page.",
-    "target": {
-      "first_reply": "First reply",
-      "next_reply": "Next reply",
-      "resolution": "Resolution"
-    },
-    "state": {
-      "on_track": "On track",
-      "at_risk": "At risk",
-      "breached": "Breached",
-      "paused": "Paused",
-      "met": "Met",
-      "unanswered": "Resolved without reply"
+  "inboxCapacity": {
+    "title": "Inbox workload",
+    "help": "Set a limit per agent and WhatsApp account across teams. A limit of 0 allows unlimited Open and Pending cases.",
+    "saveError": "Could not save the agent’s case limit.",
+    "loadError": "Could not load inbox workload.",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "unlimited": "Unlimited",
+    "workload": "{count} active",
+    "limit": "Case limit for {name}",
+    "override": "Capacity override reason (optional)",
+    "reason": {
+      "capacity": "Waiting for agent capacity",
+      "unavailable": "Waiting for an available agent",
+      "available_search": "Waiting for assignment"
     }
+  },
+  "inboxFields": {
+    "title": "Custom fields",
+    "add": "Add a custom field",
+    "label": "Field label",
+    "key": "Field key",
+    "appliesTo": "Applies to",
+    "type": "Field type",
+    "choices": "Choices, one per line",
+    "required": "Required to resolve",
+    "archived": "Archived",
+    "archive": "Archive field",
+    "archiveConfirm": "Archive this field and keep its recorded values?",
+    "enableFirst": "Enable inbox workflows in General settings to manage custom fields.",
+    "loadError": "Could not load custom fields.",
+    "saveError": "Could not save this custom field.",
+    "scope": {
+      "case": "Case",
+      "contact": "Contact"
+    },
+    "kind": {
+      "text": "Text",
+      "number": "Number",
+      "date": "Date",
+      "boolean": "Yes or no",
+      "select": "Single select"
+    },
+    "matches": "Custom field matches",
+    "unavailable": "Unavailable field",
+    "choose": "Choose a custom field",
+    "addMatch": "Add match",
+    "missing": "Complete the required custom fields before resolving this case."
   },
   "inboxQueue": {
     "contacts": "Contacts",
@@ -82,7 +100,8 @@
       "unavailable": "Unavailable",
       "stale": "Changed since selection",
       "invalid": "Invalid action",
-      "failed": "Failed"
+      "failed": "Failed",
+      "capacity": "Agent is at capacity"
     }
   },
   "inboxWorkflow": {
@@ -120,6 +139,7 @@
       "snooze_elapsed": "Snooze ended",
       "human_reply": "Agent replied",
       "assigned": "Case assigned",
+      "capacity_override": "Capacity override",
       "tagged": "Tag added"
     }
   },
@@ -2793,6 +2813,17 @@
     "viewSaveHelp": "Save the current filters for yourself or an authorized team.",
     "resetFilters": "Clear filters",
     "resolveAction": "Resolve",
+    "capacityActive": "Open and pending",
+    "capacityAgent": "Agent",
+    "capacityDescription": "Balance active work across the team, for each WhatsApp inbox.",
+    "capacityEmpty": "No agents in this team",
+    "capacityEmptyHelp": "Add team members before setting workload limits.",
+    "capacityInboxHelp": "Choose an inbox to see availability, active cases and each agent’s limit.",
+    "capacityLimit": "Case limit",
+    "capacityLimitHelp": "Zero means unlimited. Limits apply to the agent and inbox across teams.",
+    "selectInbox": "Choose a WhatsApp inbox",
+    "workloadTab": "Workload",
+    "chooseTeam": "Choose a team to review its workload.",
     "analyticsOverview": "Performance overview",
     "elapsedHelp": "Leave this off to count elapsed time, including evenings and weekends.",
     "liveInbox": "Live inbox",
@@ -2800,7 +2831,6 @@
     "removeTargets": "Remove targets",
     "removeTargetsHelp": "Stop applying response targets to this inbox. Conversation and case history will be retained.",
     "responseTargets": "Response targets",
-    "selectInbox": "Choose a WhatsApp inbox",
     "slaClockHelp": "Only resolution pauses while waiting for a customer. Pending and snoozed cases follow the selected clock.",
     "slaDescription": "See which customer enquiries need a reply or resolution next.",
     "slaEmptyHelp": "No matching cases are currently at risk. Include on-track cases or adjust the inbox and team filters.",
@@ -2849,6 +2879,37 @@
     "searchWorkflows": "Search workflows",
     "templateHelp": "Only eligible, approved utility templates can be sent. Content, consent and the selected inbox are checked again before dispatch.",
     "workflowsDescription": "Create reusable actions and route enquiries with clear, reviewable rules."
+  },
+  "inboxSla": {
+    "title": "Inbox response targets",
+    "report": "Inbox deadlines",
+    "minutes": "minutes",
+    "businessHours": "Count business hours",
+    "timezone": "Time zone",
+    "day": "Day",
+    "from": "From",
+    "to": "To",
+    "midnight": "Until midnight",
+    "addShift": "Add business hours",
+    "removePolicy": "Remove targets",
+    "saveError": "Could not save response targets. Check the time zone and business hours.",
+    "loadError": "Could not load inbox deadlines.",
+    "any": "All",
+    "allCases": "Include cases on track",
+    "empty": "No matching inbox deadlines on this page.",
+    "target": {
+      "first_reply": "First reply",
+      "next_reply": "Next reply",
+      "resolution": "Resolution"
+    },
+    "state": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "breached": "Breached",
+      "paused": "Paused",
+      "met": "Met",
+      "unanswered": "Resolved without reply"
+    }
   },
   "inboxRules": {
     "any": "Any",

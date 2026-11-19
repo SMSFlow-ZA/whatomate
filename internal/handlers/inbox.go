@@ -271,6 +271,11 @@ func applyInboxTransition(tx *gorm.DB, c *models.InboxCase, input inboxCaseUpdat
 			c.StatusChangedAt = now
 		}
 		c.Status = input.Status
+		if !inboxCountsForCapacity(event.FromStatus) && inboxCountsForCapacity(c.Status) {
+			if err := protectInboxActiveAssignment(tx, c); err != nil {
+				return err
+			}
+		}
 		c.SnoozedUntil = input.SnoozedUntil
 		if c.Status == models.InboxCaseResolved {
 			c.ResolvedAt = &now
@@ -342,6 +347,9 @@ func (a *App) UpdateInboxConversation(r *fastglue.Request) error {
 			owner = c.AssigneeID
 		}
 		c = newInboxCase(t, now, owner, team)
+		if err := protectInboxActiveAssignment(tx, &c); err != nil {
+			return err
+		}
 		if input.Priority != "" {
 			c.Priority = input.Priority
 		}
@@ -364,6 +372,8 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, errInboxDisabled.Error(), nil, "")
 	case errors.Is(err, errInboxConflict):
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
+	case errors.Is(err, errInboxAgentAtCapacity):
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxAgentAtCapacity.Error(), nil, "inbox_capacity")
 	case errors.Is(err, errInboxSendIneligible):
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
 	case errors.Is(err, errInboxTransition):
@@ -417,6 +427,12 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 				}
 			}
 			c = newInboxCase(t, entered, owner, team)
+			if err := protectInboxActiveAssignment(tx, &c); err != nil {
+				return err
+			}
+			if c.AssigneeID == nil && c.TeamID != nil && c.RoutingReason == "" {
+				c.RoutingReason = "available_search"
+			}
 			c.LastInboundAt = &received
 			kind = "opened"
 			if err := tx.Create(&c).Error; err != nil {
@@ -428,6 +444,9 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 			}
 			if !received.Before(c.StatusChangedAt) && (c.Status == models.InboxCaseWaiting || c.Status == models.InboxCaseSnoozed) {
 				c.Status, c.StatusChangedAt, c.SnoozedUntil = models.InboxCaseOpen, received, nil
+				if err := protectInboxActiveAssignment(tx, &c); err != nil {
+					return err
+				}
 				kind = "customer_replied"
 			}
 			if c.LastHumanReplyAt != nil && received.After(*c.LastHumanReplyAt) && (c.NextReplyFrom == nil || received.Before(*c.NextReplyFrom)) {

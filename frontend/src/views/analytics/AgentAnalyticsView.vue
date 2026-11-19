@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InboxTabs from '@/components/shared/InboxTabs.vue'
+import InboxCapacityOverview from '@/components/chat/InboxCapacityOverview.vue'
 import InboxSLAReport from '@/components/chat/InboxSLAReport.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -63,6 +64,7 @@ interface AgentAnalyticsResponse {
 const { t } = useI18n()
 const analyticsTab = ref('overview')
 const authStore = useAuthStore()
+
 const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
 // roles with the right permission should get the same view.
@@ -281,9 +283,10 @@ void _displayStats.value // Suppress unused warning
         </div>
       </template>
     </PageHeader>
-    <div v-if="isAdminOrManager" class="inbox-ui p-4"><InboxTabs v-model="analyticsTab" :label="t('agentAnalytics.title')" :items="[{value:'overview',label:t('inboxUX.analyticsOverview')},{value:'inbox',label:t('inboxUX.liveInbox')}]" /></div>
+    <div v-if="isAdminOrManager" class="inbox-ui p-4"><InboxTabs v-model="analyticsTab" :label="t('agentAnalytics.title')" :items="[{value:'overview',label:t('inboxUX.analyticsOverview')},{value:'inbox',label:t('inboxUX.liveInbox')},...(authStore.hasPermission('teams','read') ? [{value:'workload',label:t('inboxUX.workloadTab')}] : [])]" /></div>
     <div v-if="isAdminOrManager && analyticsTab === 'inbox'" class="flex-1 scroll-y p-4"><InboxSLAReport /></div>
 
+    <div v-if="isAdminOrManager && analyticsTab === 'workload'" class="flex-1 scroll-y p-4"><InboxCapacityOverview /></div>
     <!-- Content -->
     <div v-if="!isAdminOrManager || analyticsTab === 'overview'" class="flex-1 scroll-y p-4">
       <div class="vstack gap-4">
