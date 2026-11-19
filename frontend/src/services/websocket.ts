@@ -289,6 +289,7 @@ class WebSocketService {
     // Check if this message is for the current contact
     const currentContact = store.currentContact
     const isViewingThisContact = currentContact && payload.contact_id === currentContact.id
+      && (!store.accountFilter || payload.whatsapp_account === store.accountFilter)
 
     // The sidebar row is updated in place (addMessage does it for the open
     // chat). Only refetch, coalesced, when the contact isn't loaded yet,
@@ -372,7 +373,7 @@ class WebSocketService {
     const userActive = typeof document === 'undefined'
       || (document.visibilityState === 'visible' && document.hasFocus())
     if (isViewingThisContact && currentContact && payload.direction === 'incoming' && !alreadyRead && userActive) {
-      contactsService.markRead(currentContact.id)
+      contactsService.markRead(currentContact.id, store.accountFilter || payload.whatsapp_account || undefined)
         .then(() => store.markContactRead(currentContact.id))
         .catch(() => { /* non-critical, will resync on next chat-open */ })
     }

@@ -221,6 +221,14 @@ Use **Saved views** to name a filter you use regularly. A personal view is avail
 
 Select cases to resolve them, assign them to an agent or add a contact tag. Review and apply the action, then check the outcome for each case. An item can become unavailable or change before you apply an action. As with the usual chat assignment and tags, updating a contact's assignment or tags is visible on that contact.
 
+### Workflow review and dispatch safety
+
+Rules run with the last editor's current permissions. After upgrading an earlier workflow release, review and enable existing rules again to record their responsible editor. Queued replies from an older release are held. Subsequent case or tag changes also hold queued replies for review; a workflow's own actions are part of its saved snapshot. Uncertain sends are reconciled rather than submitted again.
+
+![Inbox workflow editor with a synthetic rule](/whatomate/images/inbox-automation-desktop.png)
+
+![Inbox workflow editor on a mobile screen](/whatomate/images/inbox-automation-mobile.png)
+
 ## Related
 
 - [Canned Responses](/whatomate/features/canned-responses) — quick replies and slash commands
