@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ApiHelper } from '../../helpers/api'
+import { createInboxTestContext } from '../../helpers/inbox'
 import { createTestScope } from '../../framework'
 
 test('filters queues, saves a view, and reviews a bulk resolve', async ({
@@ -7,8 +7,7 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({
   request,
 }, testInfo) => {
   const scope = createTestScope('inbox-queues')
-  const api = new ApiHelper(request)
-  await api.loginAsAdmin()
+  const { api } = await createInboxTestContext(request, scope)
   const before = await api.get('/api/inbox/workflows')
   expect(before.ok()).toBeTruthy()
   const wasEnabled = (await before.json()).data.enabled
