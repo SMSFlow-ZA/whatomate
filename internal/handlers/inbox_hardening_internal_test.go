@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInboxHardeningHandoffBackdatesSLAToBotMessage(t *testing.T) {
+func TestInboxHardeningHandoffStartsSLAAtHumanQueue(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Log: testutil.NopLogger()}
 	org := testutil.CreateTestOrganization(t, db)

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestInboxHardeningTransferStillGrantsOtherAccount(t *testing.T) {
+func TestInboxHardeningTransferCannotReadOtherAccount(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	a := &App{DB: db, Redis: testutil.SetupTestRedis(t), Log: testutil.NopLogger()}
 	require.NotNil(t, a.Redis)
