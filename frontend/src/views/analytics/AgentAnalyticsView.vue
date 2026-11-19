@@ -250,6 +250,7 @@ void _displayStats.value // Suppress unused warning
 <template>
   <div class="flex flex-col h-full">
     <PageHeader
+      class="inbox-analytics-header"
       :title="$t('agentAnalytics.title')"
       :description="isAdminOrManager ? $t('agentAnalytics.subtitle') : $t('agentAnalytics.myMetrics')"
       :icon="BarChart3"
@@ -364,3 +365,23 @@ void _displayStats.value // Suppress unused warning
     </div>
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 640px) {
+  .inbox-analytics-header {
+    height: auto;
+    min-height: 4rem;
+    padding: 1rem;
+    flex-wrap: wrap;
+    align-content: start;
+  }
+  .inbox-analytics-header :deep([data-page-actions]) {
+    flex-basis: 100%;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .inbox-analytics-header :deep([data-page-actions] > div) {
+    justify-content: flex-start;
+  }
+}
+</style>
