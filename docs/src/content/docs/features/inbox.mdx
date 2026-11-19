@@ -245,6 +245,34 @@ Rules run with the last editor's current permissions. After upgrading an earlier
 - [Contacts API](/whatomate/api-reference/contacts) — contact, assignment, tags, and notes endpoints
 - [Messages API](/whatomate/api-reference/messages) — send text, media, templates, and reactions
 
+## Agent workload
+
+Open **Settings → Teams**, choose a team and use **Inbox workload** to set each agent’s Open and Pending limit for a WhatsApp account. The panel shows current work and available capacity together. Cases that cannot be assigned remain visible in **Unassigned**. When an eligible agent has capacity, the highest-priority case that has waited the longest is tried first. Supervisors can review workloads in **Agent Analytics → Workload**, selecting a team and WhatsApp account, and override a limit with team edit access and a recorded reason.
+
+A limit of zero is unlimited. The limit applies to an agent and WhatsApp account across teams. Unassigned work is retried in bounded rounds, so a full or unavailable team does not block another team's eligible cases. Existing cases and assignments remain intact when a limit is introduced.
+
+![Team workload limits for a synthetic support inbox](/whatomate/images/inbox-capacity-desktop.png)
+
+![Team workload limits on a mobile screen](/whatomate/images/inbox-capacity-mobile.png)
+
+
+![Synthetic supervisor workload on desktop](/whatomate/images/inbox-supervisor-workload-desktop.png)
+
+![Synthetic supervisor workload on mobile](/whatomate/images/inbox-supervisor-workload-mobile.png)
+## Response targets
+
+Open **Settings → Inbox response targets** to configure first reply, next reply and resolution targets per WhatsApp account. Choose elapsed time or enter a business schedule and its time zone. Waiting for a customer pauses the resolution target. Check at-risk and breached cases in **Agent Analytics → Live inbox**.
+
+The clock begins when the case enters the human queue, including chatbot handoff. Another unanswered message keeps the existing reply deadline. Pending and Snoozed continue to follow the configured clock. Waiting for customer pauses only the resolution clock; a reply or manual reopen resumes it.
+
+![Inbox deadlines for a synthetic support case](/whatomate/images/inbox-sla-desktop.png)
+
+![Inbox deadlines on a mobile screen](/whatomate/images/inbox-sla-mobile.png)
+
+
+![Synthetic response targets on desktop](/whatomate/images/inbox-response-targets-desktop.png)
+
+![Synthetic response targets on mobile](/whatomate/images/inbox-response-targets-mobile.png)
 ### Macros and rules
 
 Use **Macros** beside the composer to search by name and review the action sequence. Assignment previews display the agent’s name. Applying a non-sending macro still requires confirmation; opening its preview changes nothing. A macro that sends a reply identifies the recipient and exact content before confirmation. Use **Rules**, **Macros** and **History** in **Settings → Inbox workflows** to find definitions and run outcomes. Create or edit a definition in its focused editor. Use **Dry run** to select a case and review matching actions without applying them. New rules start disabled. Automatic replies remain paused until an administrator explicitly enables them and dispatch is available.

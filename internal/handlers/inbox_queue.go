@@ -18,8 +18,9 @@ import (
 
 type inboxQueueRow struct {
 	models.InboxCase
-	AccountName string `json:"account_name"`
-	ContactName string `json:"contact_name"`
+	AccountName string            `json:"account_name"`
+	SLA         *inboxSLASnapshot `gorm:"-" json:"sla,omitempty"`
+	ContactName string            `json:"contact_name"`
 }
 
 func validateInboxFilter(f models.InboxQueueFilter) bool {
@@ -128,6 +129,14 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
+	rows, hasMore, err := a.prepareInboxRows(org, rows)
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": hasMore})
+}
+
+func (a *App) prepareInboxRows(org uuid.UUID, rows []inboxQueueRow) ([]inboxQueueRow, bool, error) {
 	// Match the contact service's phone masking rules for numeric profile names.
 	if a.ShouldMaskPhoneNumbers(org) {
 		for i := range rows {
@@ -138,7 +147,18 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if hasMore {
 		rows = rows[:50]
 	}
-	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": hasMore})
+	base := make([]models.InboxCase, len(rows))
+	for i := range rows {
+		base[i] = rows[i].InboxCase
+	}
+	snapshots, err := a.inboxSLASnapshots(org, base, time.Now().UTC())
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range rows {
+		rows[i].SLA = snapshots[rows[i].ID]
+	}
+	return rows, hasMore, nil
 }
 
 func parseInboxQueuePage(args *fasthttp.Args) int {
@@ -252,10 +272,11 @@ type bulkInboxItem struct {
 }
 
 type bulkInboxRequest struct {
-	Items      []bulkInboxItem `json:"items"`
-	Action     string          `json:"action"`
-	Tag        string          `json:"tag"`
-	AssigneeID *uuid.UUID      `json:"assignee_id"`
+	Items          []bulkInboxItem `json:"items"`
+	Action         string          `json:"action"`
+	Tag            string          `json:"tag"`
+	OverrideReason string          `json:"override_reason,omitempty"`
+	AssigneeID     *uuid.UUID      `json:"assignee_id"`
 }
 
 func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
@@ -275,6 +296,10 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 		if !a.HasPermission(user, models.ResourceContacts, models.ActionWrite, org) {
 			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		}
+		input.OverrideReason = strings.TrimSpace(input.OverrideReason)
+		if len(input.OverrideReason) > 500 || (input.OverrideReason != "" && (input.Action != "assign" || !a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org))) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "A permitted supervisor and reason are required for a capacity override", nil, "")
+		}
 	case "resolve":
 	default:
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid bulk action", nil, "")
@@ -292,6 +317,8 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 			state = "invalid"
 		case errors.Is(err, errRequiredInboxFields):
 			state = "required_fields"
+		case errors.Is(err, errInboxAgentAtCapacity):
+			state = "capacity"
 		case err != nil:
 			state = "failed"
 			a.Log.Error("Inbox bulk action failed", "case_id", item.ID, "error", err)
@@ -337,7 +364,7 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 			if input.AssigneeID == nil {
 				return errInboxTransition
 			}
-			return assignInboxCase(tx, &c, user, *input.AssigneeID)
+			return assignInboxCase(tx, &c, user, *input.AssigneeID, input.OverrideReason)
 		case "tag":
 			var contact models.Contact
 			if err := tx.First(&contact, "organization_id = ? AND id = ?", org, c.ContactID).Error; err != nil {
@@ -349,7 +376,7 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 	})
 }
 
-func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID) error {
+func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID, override string) error {
 	var member models.UserOrganization
 	if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
 		Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", c.OrganizationID, assignee).First(&member).Error; err != nil {
@@ -361,12 +388,19 @@ func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID)
 			return err
 		}
 	}
-	c.AssigneeID = &assignee
+	kind, overrideDetail := "assigned", ""
+	if err := reserveInboxAgent(tx, *c, assignee); err != nil {
+		if !errors.Is(err, errInboxAgentAtCapacity) || override == "" {
+			return err
+		}
+		kind, overrideDetail = "capacity_override", override
+	}
+	c.AssigneeID, c.RoutingReason = &assignee, ""
 	c.Version++
 	if err := tx.Save(c).Error; err != nil {
 		return err
 	}
-	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: "assigned"})
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: kind, Detail: overrideDetail})
 }
 
 func tagInboxCase(tx *gorm.DB, c *models.InboxCase, contact *models.Contact, user uuid.UUID, name string) error {

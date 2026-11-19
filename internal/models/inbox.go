@@ -29,21 +29,24 @@ const (
 // and its message history remain attached to the existing contact and account.
 type InboxCase struct {
 	BaseModel
-	OrganizationID    uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:1" json:"-"`
-	AccountID         uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:2" json:"account_id"`
-	ContactID         uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:3" json:"contact_id"`
-	TeamID            *uuid.UUID        `gorm:"type:uuid;index" json:"team_id,omitempty"`
-	AssigneeID        *uuid.UUID        `gorm:"type:uuid;index" json:"assignee_id,omitempty"`
-	Status            InboxCaseStatus   `gorm:"size:24;not null" json:"status"`
-	Priority          InboxCasePriority `gorm:"size:12;not null" json:"priority"`
-	Version           int64             `gorm:"not null" json:"version"`
-	OpenedAt          time.Time         `gorm:"not null;index:idx_inbox_cases_thread,priority:4,sort:desc" json:"opened_at"`
-	StatusChangedAt   time.Time         `gorm:"not null" json:"status_changed_at"`
-	SnoozedUntil      *time.Time        `json:"snoozed_until,omitempty"`
-	ResolvedAt        *time.Time        `json:"resolved_at,omitempty"`
-	LastInboundAt     *time.Time        `json:"last_inbound_at,omitempty"`
-	FirstHumanReplyAt *time.Time        `json:"first_human_reply_at,omitempty"`
-	LastHumanReplyAt  *time.Time        `json:"last_human_reply_at,omitempty"`
+	OrganizationID       uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:1" json:"-"`
+	AccountID            uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:2" json:"account_id"`
+	ContactID            uuid.UUID         `gorm:"type:uuid;not null;index:idx_inbox_cases_thread,priority:3" json:"contact_id"`
+	TeamID               *uuid.UUID        `gorm:"type:uuid;index" json:"team_id,omitempty"`
+	RoutingReason        string            `gorm:"size:24;not null;default:''" json:"routing_reason,omitempty"`
+	RoutingNextAttemptAt *time.Time        `json:"-"`
+	AssigneeID           *uuid.UUID        `gorm:"type:uuid;index" json:"assignee_id,omitempty"`
+	Status               InboxCaseStatus   `gorm:"size:24;not null" json:"status"`
+	Priority             InboxCasePriority `gorm:"size:12;not null" json:"priority"`
+	Version              int64             `gorm:"not null" json:"version"`
+	OpenedAt             time.Time         `gorm:"not null;index:idx_inbox_cases_thread,priority:4,sort:desc" json:"opened_at"`
+	StatusChangedAt      time.Time         `gorm:"not null" json:"status_changed_at"`
+	SnoozedUntil         *time.Time        `json:"snoozed_until,omitempty"`
+	ResolvedAt           *time.Time        `json:"resolved_at,omitempty"`
+	LastInboundAt        *time.Time        `json:"last_inbound_at,omitempty"`
+	FirstHumanReplyAt    *time.Time        `json:"first_human_reply_at,omitempty"`
+	LastHumanReplyAt     *time.Time        `json:"last_human_reply_at,omitempty"`
+	NextReplyFrom *time.Time `json:"next_reply_from,omitempty"`
 }
 
 type InboxCaseActivity struct {

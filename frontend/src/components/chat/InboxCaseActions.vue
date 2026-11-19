@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InboxFieldPanel from "./InboxFieldPanel.vue"
+import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -173,7 +174,7 @@ function saveSnooze() {
             }}</time>
             <p>
               {{ t('inboxWorkflow.event.' + item.kind)
-              }}<span
+              }}<span v-if="item.detail"> / {{ item.detail }}</span><span
                 v-if="item.to_status && item.to_status !== item.from_status"
               >
                 / {{ t('inboxWorkflow.status.' + item.to_status) }}</span
@@ -286,6 +287,7 @@ function saveSnooze() {
     >
       {{ t('inboxWorkflow.startCase') }}
     </button>
+    <InboxSLAIndicators v-if="current?.sla && !history" :sla="current.sla" />
     <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
       <label class="inbox-label"
         >{{ t('inboxWorkflow.snoozeUntil')

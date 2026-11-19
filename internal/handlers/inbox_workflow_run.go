@@ -109,7 +109,7 @@ func (a *App) runInboxWorkflowActions(tx *gorm.DB, c *models.InboxCase, contact 
 			if err != nil {
 				return errInboxTransition
 			}
-			if err := assignInboxCase(tx, c, actor, assignee); err != nil {
+			if err := assignInboxCase(tx, c, actor, assignee, ""); err != nil {
 				return err
 			}
 		case "tag":

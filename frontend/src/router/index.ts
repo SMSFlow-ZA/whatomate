@@ -252,6 +252,13 @@ const router = createRouter({
           meta: { permission: 'roles' }
         },
         {
+          path: 'settings/inbox-response-targets',
+          name: 'inbox-response-targets',
+          component: () => import('@/views/settings/InboxResponseTargetsView.vue'),
+          meta: { permission: 'accounts' },
+          beforeEnter: () => useAuthStore().hasPermission('accounts', 'write') || { path: '/settings' },
+        },
+        {
           path: 'settings/teams',
           name: 'teams',
           component: () => import('@/views/settings/TeamsView.vue'),
