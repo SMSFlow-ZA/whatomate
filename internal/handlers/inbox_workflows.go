@@ -156,7 +156,7 @@ func (a *App) DeleteInboxWorkflow(r *fastglue.Request) error {
 }
 
 func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
-	org, _, ok := a.inboxFeatureAuth(r, models.ActionWrite)
+	org, user, ok := a.inboxFeatureAuth(r, models.ActionWrite)
 	if !ok {
 		return nil
 	}
@@ -178,6 +178,8 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 		}
 		w.Name, w.Trigger, w.Position = strings.TrimSpace(input.Name), input.Trigger, input.Position
 		w.Actions, w.Conditions = input.Actions, input.Conditions
+		// Rules execute as their last editor, never with an earlier author's rights.
+		w.UpdatedByID = &user
 		if input.Kind != w.Kind || !validInboxWorkflow(w) {
 			return errInboxTransition
 		}

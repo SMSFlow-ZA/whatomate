@@ -23,5 +23,6 @@ type InboxWorkflowRun struct {
 	State               string     `gorm:"size:24;not null;index" json:"state"`
 	Outcome             string     `gorm:"size:50" json:"outcome,omitempty"`
 	SendDigest          string     `gorm:"size:64" json:"-"`
+	CaseDigest          string     `gorm:"size:64" json:"-"`
 	SubmissionStartedAt *time.Time `json:"submission_started_at,omitempty"`
 }
