@@ -1,7 +1,6 @@
 package handlers
 
 import (
-"time"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -9,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"testing"
+	"time"
 )
 
 func TestInboxHardeningTransferCannotReadOtherAccount(t *testing.T) {
