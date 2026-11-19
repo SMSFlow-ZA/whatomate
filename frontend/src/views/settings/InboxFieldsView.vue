@@ -181,7 +181,7 @@ onMounted(load)
               ><label class="inbox-label"
                 >{{ t('inboxFields.appliesTo')
                 }}<select v-model="scope">
-                  <option value="">{{ t('inboxSla.any') }}</option>
+                  <option value="">{{ t('inboxRules.any') }}</option>
                   <option value="case">
                     {{ t('inboxFields.scope.case') }}
                   </option>
