@@ -229,6 +229,12 @@ Select cases to resolve them, assign them to an agent or add a contact tag. Revi
 - [Contacts API](/whatomate/api-reference/contacts) — contact, assignment, tags, and notes endpoints
 - [Messages API](/whatomate/api-reference/messages) — send text, media, templates, and reactions
 
-### Response targets
+## Response targets
 
 Configure first reply, next reply and resolution targets per WhatsApp account. Choose elapsed time or enter a business schedule and its time zone. Waiting for a customer pauses the resolution target. Check at-risk and breached cases in **Agent Analytics → Inbox deadlines**.
+
+The clock begins when the case enters the human queue, including chatbot handoff. Another unanswered message keeps the existing reply deadline. Pending and Snoozed continue to follow the configured clock. Waiting for customer pauses only the resolution clock; a reply or manual reopen resumes it.
+
+![Inbox deadlines for a synthetic support case](/whatomate/images/inbox-sla-desktop.png)
+
+![Inbox deadlines on a mobile screen](/whatomate/images/inbox-sla-mobile.png)
