@@ -439,7 +439,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 
 		// Broadcast failure status via WebSocket so frontend updates immediately
 		if opts.BroadcastWebSocket && a.WSHub != nil {
-			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+			a.broadcastConversation(req.Account.OrganizationID, req.Contact.ID, req.Account.Name, websocket.WSMessage{
 				Type: websocket.TypeStatusUpdate,
 				Payload: map[string]any{
 					"message_id":    msg.ID,
@@ -468,7 +468,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 
 	// Broadcast status update via WebSocket
 	if opts.BroadcastWebSocket && a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+		a.broadcastConversation(req.Account.OrganizationID, req.Contact.ID, req.Account.Name, websocket.WSMessage{
 			Type: websocket.TypeStatusUpdate,
 			Payload: map[string]any{
 				"message_id": msg.ID,
@@ -542,7 +542,7 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		}
 	}
 
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+	a.broadcastConversation(orgID, contact.ID, msg.WhatsAppAccount, websocket.WSMessage{
 		Type:    websocket.TypeNewMessage,
 		Payload: payload,
 	})
@@ -553,7 +553,11 @@ func (a *App) broadcastReactionUpdate(orgID uuid.UUID, messageID, contactID uuid
 	if a.WSHub == nil {
 		return
 	}
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+	var message models.Message
+	if a.DB.Select("whats_app_account").First(&message, "id = ? AND organization_id = ? AND contact_id = ?", messageID, orgID, contactID).Error != nil {
+		return
+	}
+	a.broadcastConversation(orgID, contactID, message.WhatsAppAccount, websocket.WSMessage{
 		Type: "reaction_update",
 		Payload: map[string]any{
 			"message_id": messageID.String(),

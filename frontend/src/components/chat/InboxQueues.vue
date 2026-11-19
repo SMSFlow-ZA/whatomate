@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accountsService, tagsService, teamsService, usersService } from '@/services/api'
+import { accountsService, tagsService, usersService } from '@/services/api'
 import {
   inboxService,
   type BulkInboxAction, type BulkInboxResult, type CasePriority, type CaseStatus,
   type InboxFilters, type InboxQueue, type QueueCase, type SavedInboxView
 } from '@/services/inbox'
 import { useAuthStore } from '@/stores/auth'
+import { useTeamsStore } from '@/stores/teams'
 import { toast } from '@/lib/toast'
 
-defineProps<{ active: boolean }>()
+const props = defineProps<{ active: boolean }>()
+const teamsStore = useTeamsStore()
+const lookupFailed = ref(false)
+let lookupsLoaded = false
 const emit = defineEmits<{ open: [row: QueueCase]; changed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -50,6 +54,7 @@ function selectedFilters() {
 }
 
 async function refresh() {
+  if (!props.active || document.visibilityState !== 'visible') return
   const id = ++revision
   loading.value = true
   failed.value = false
@@ -79,17 +84,31 @@ watch(filters, () => {
   void refresh()
 }, { deep: true })
 
-onMounted(() => {
+async function loadLookups() {
+  lookupFailed.value = false
+  const results = await Promise.allSettled([
+    accountsService.list().then(res => { accounts.value = res.data.data?.accounts ?? [] }),
+    teamsStore.fetchTeams({ limit: 100 }).then(result => { teams.value = result.teams }),
+    usersService.list({ limit: 100 }).then(res => { agents.value = res.data.data?.users ?? [] }),
+    tagsService.list({ limit: 100 }).then(res => { tags.value = (res.data as any).data?.tags ?? [] }),
+  ])
+  lookupsLoaded = results.every(result => result.status === 'fulfilled')
+  lookupFailed.value = !lookupsLoaded
+}
+function activate() {
+  if (!props.active || document.visibilityState !== 'visible') return
   void refresh()
   void refreshViews()
-  void accountsService.list().then(res => { accounts.value = res.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsService.list({ limit: 100 }).then(res => { teams.value = (res.data as any).data?.teams ?? [] }).catch(() => {})
-  void usersService.list({ limit: 100 }).then(res => { agents.value = res.data.data?.users ?? [] }).catch(() => {})
-  void tagsService.list({ limit: 100 }).then(res => { tags.value = (res.data as any).data?.tags ?? [] }).catch(() => {})
+  if (!lookupsLoaded) void loadLookups()
+}
+onMounted(() => { activate(); document.addEventListener('visibilitychange', activate) })
+watch(() => props.active, active => {
+  if (active) activate()
+  else { revision++; loading.value = false }
 })
 watch(selected, () => { reviewing.value = false })
-const refreshTimer = setInterval(() => { if (document.visibilityState === 'visible' && !reviewing.value && !saving.value) void refresh() }, 20_000)
-onUnmounted(() => { revision++; clearInterval(refreshTimer) })
+const refreshTimer = setInterval(() => { if (!loading.value && !reviewing.value && !saving.value) void refresh() }, 20_000)
+onUnmounted(() => { revision++; clearInterval(refreshTimer); document.removeEventListener('visibilitychange', activate) })
 
 function chooseView() {
   const view = views.value.find(view => view.id === activeView.value)
@@ -148,6 +167,10 @@ async function applyBulk() {
     <select v-model="filters.queue" class="small" :aria-label="t('inboxQueue.title')">
       <option v-for="queue in queues" :key="queue" :value="queue">{{ t('inboxQueue.queue.' + (queue || 'all')) }}</option>
     </select>
+    <p v-if="lookupFailed" role="alert">
+      {{ t('inboxQueue.loadFiltersError') }}
+      <button type="button" @click="loadLookups">{{ t('common.retry') }}</button>
+    </p>
     <details>
       <summary>{{ t('inboxQueue.filters') }}</summary>
       <div class="vstack gap-2 mt-2">
