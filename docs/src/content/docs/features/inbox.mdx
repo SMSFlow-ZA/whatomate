@@ -229,6 +229,12 @@ Select cases to resolve them, assign them to an agent or add a contact tag. Revi
 - [Contacts API](/whatomate/api-reference/contacts) — contact, assignment, tags, and notes endpoints
 - [Messages API](/whatomate/api-reference/messages) — send text, media, templates, and reactions
 
-### Agent workload
+## Agent workload
 
 Set an agent’s Open and Pending limit for each WhatsApp account in team settings. Cases that cannot be assigned remain visible in **Unassigned**. When an eligible agent has capacity, the highest-priority case that has waited the longest is tried first. Supervisors can review workloads in **Agent Analytics** and override a limit with team edit access and a recorded reason.
+
+A limit of zero is unlimited. The limit applies to an agent and WhatsApp account across teams. Unassigned work is retried in bounded rounds, so a full or unavailable team does not block another team's eligible cases. Existing cases and assignments remain intact when a limit is introduced.
+
+![Team workload limits for a synthetic support inbox](/whatomate/images/inbox-capacity-desktop.png)
+
+![Team workload limits on a mobile screen](/whatomate/images/inbox-capacity-mobile.png)
