@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { Filter, Save as Bookmark, MessageSquare as Inbox, RotateCw } from '@/lib/icons'
-import '@/assets/inbox.css'
-import '@/assets/inbox-queues.css'
 import { computed, onMounted, onUnmounted, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsService, tagsService, usersService } from '@/services/api'
@@ -41,6 +39,7 @@ const teams = ref<{ id: string; name: string }[]>([])
 const agents = ref<{ id: string; full_name: string }[]>([])
 const tags = ref<{ name: string }[]>([])
 const selected = ref<string[]>([])
+const isUrgent = (row: QueueCase) => row.priority === 'urgent'
 const results = ref<Record<string, BulkInboxResult>>({})
 const resultContacts = ref<Record<string, string>>({})
 const loading = ref(false)
@@ -286,7 +285,7 @@ async function applyBulk() {
       </nav>
       <div class="mt-3 flex items-center gap-1">
         <ot-dropdown><button :popovertarget="filterId"
-               class="outline small" type="button"><Filter class="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{{
+               class="outline small" type="button"><Filter class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
                 t('inboxQueue.filters')
               }}</button><div :id="filterId" popover class="inbox-ui inbox-filter-popover"><h2 class="inbox-section-heading mb-4">
               {{ t('inboxUX.queueFilters') }}
@@ -386,7 +385,7 @@ async function applyBulk() {
             </div></div
           ></ot-dropdown>
         <ot-dropdown><button :popovertarget="viewId"
-               class="ghost small" type="button"><Bookmark class="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{{
+               class="ghost small" type="button"><Bookmark class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
                 t('inboxQueue.savedViews')
               }}</button><div :id="viewId" popover class="inbox-ui inbox-filter-popover"><h2 class="inbox-section-heading mb-3">
               {{ t('inboxQueue.savedViews') }}
@@ -440,7 +439,7 @@ async function applyBulk() {
           :aria-label="t('inboxQueue.retry')"
           :disabled="loading"
           @click="refresh"
-           type="button"><RotateCw class="h-3.5 w-3.5" aria-hidden="true"
+           type="button"><RotateCw class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true"
         /></button>
       </div>
       <p v-if="activeView" class="inbox-caption mt-2">
@@ -588,13 +587,13 @@ async function applyBulk() {
             ><span class="inbox-caption mt-1 block truncate">{{
               row.account_name
             }}</span
-            ><span class="mt-2 flex flex-wrap gap-1.5"
+            ><span class="mt-2 flex flex-wrap inbox-gap-small"
               ><span class="inbox-badge">{{
                 t('inboxWorkflow.status.' + row.status)
               }}</span
               ><span
                 class="inbox-badge"
-                :class="{ 'text-destructive': row.priority === 'urgent' }"
+                :class="{ 'text-destructive': isUrgent(row) }"
                 >{{ t('inboxWorkflow.priority.' + row.priority) }}</span
               ></span
             ><small v-if="results[row.id]" class="inbox-caption">{{
