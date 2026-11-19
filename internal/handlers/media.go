@@ -177,7 +177,8 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 			}
 			if err := a.DB.Where("contact_id = ? AND organization_id = ? AND whats_app_account = ? AND status = ? AND team_id IS NOT NULL",
-				message.ContactID, orgID, message.WhatsAppAccount, models.TransferStatusActive).First(&transfer).Error; err != nil {
+				message.ContactID, orgID, message.WhatsAppAccount, models.TransferStatusActive).
+				Where("NOT EXISTS (?)", inboxAssignedElsewhere(a.DB, orgID, userID, message.ContactID, message.WhatsAppAccount)).First(&transfer).Error; err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 			}
 			var count int64
