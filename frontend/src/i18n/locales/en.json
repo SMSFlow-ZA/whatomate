@@ -2812,6 +2812,18 @@
     "queueEmptyHelp": "Start a case from a conversation, or adjust the filters to see more work.",
     "viewSaveHelp": "Save the current filters for yourself or an authorized team.",
     "resetFilters": "Clear filters",
-    "resolveAction": "Resolve"
+    "resolveAction": "Resolve",
+    "capacityActive": "Open and pending",
+    "capacityAgent": "Agent",
+    "capacityDescription": "Balance active work across the team, for each WhatsApp inbox.",
+    "capacityEmpty": "No agents in this team",
+    "capacityEmptyHelp": "Add team members before setting workload limits.",
+    "capacityInboxHelp": "Choose an inbox to see availability, active cases and each agent’s limit.",
+    "capacityLimit": "Case limit",
+    "capacityLimitHelp": "Zero means unlimited. Limits apply to the agent and inbox across teams.",
+    "selectInbox": "Choose a WhatsApp inbox",
+    "workloadTab": "Workload",
+    "chooseTeam": "Choose a team to review its workload.",
+    "analyticsOverview": "Performance overview"
   }
 }

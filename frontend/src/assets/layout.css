@@ -679,3 +679,15 @@
 
 }
 /* inbox-queues end */
+
+/* inbox-capacity start */
+@layer layout {
+.inbox-capacity-table input { width:5rem; }
+.inbox-ui .max-w-sm { max-width:24rem; }
+.inbox-ui .ml-2 { margin-left:.5rem; }
+.inbox-ui .tabular-nums { font-variant-numeric:tabular-nums; }
+.inbox-ui .w-20 { width:5rem; }
+.inbox-ui .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
+
+}
+/* inbox-capacity end */

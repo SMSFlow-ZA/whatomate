@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import InboxTabs from '@/components/shared/InboxTabs.vue'
+import InboxCapacityOverview from '@/components/chat/InboxCapacityOverview.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAnalyticsService } from '@/services/api'
@@ -63,6 +65,7 @@ interface AgentAnalyticsResponse {
 }
 
 const { t } = useI18n()
+const analyticsTab = ref('overview')
 const authStore = useAuthStore()
 
 const workloadTeams = ref<{ id: string; name: string }[]>([])
@@ -280,7 +283,7 @@ void _displayStats.value // Suppress unused warning
       :description="isAdminOrManager ? $t('agentAnalytics.subtitle') : $t('agentAnalytics.myMetrics')"
       :icon="BarChart3"
     >
-      <template #actions>
+      <template v-if="analyticsTab === 'overview'" #actions>
         <div class="hstack gap-2 items-center flex-wrap justify-end">
           <!-- Agent Filter (Admin/Manager only) -->
           <Combobox
@@ -305,8 +308,10 @@ void _displayStats.value // Suppress unused warning
       </template>
     </PageHeader>
 
+    <div v-if="isAdminOrManager" class="inbox-ui p-4"><InboxTabs v-model="analyticsTab" :label="t('agentAnalytics.title')" :items="[{value:'overview',label:t('inboxUX.analyticsOverview')},...(authStore.hasPermission('teams','read') ? [{value:'workload',label:t('inboxUX.workloadTab')}] : [])]" /></div>
+    <div v-if="isAdminOrManager && analyticsTab === 'workload'" class="flex-1 scroll-y p-4"><InboxCapacityOverview /></div>
     <!-- Content -->
-    <div class="flex-1 scroll-y p-4">
+    <div v-if="!isAdminOrManager || analyticsTab === 'overview'" class="flex-1 scroll-y p-4">
       <section v-if="workloadTeams.length" class="grid gap-2 mb-4">
         <label>
           {{ t('inboxQueue.team') }}
