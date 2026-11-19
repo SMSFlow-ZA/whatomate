@@ -573,7 +573,7 @@ function onUserActive() {
   if (!firstUnreadId.value) return
   if (contactsStore.currentContact) {
     const contactId = contactsStore.currentContact.id
-    contactsService.markRead(contactId)
+    contactsService.markRead(contactId, selectedAccount.value || queueAccount.value || undefined)
       .then(() => contactsStore.markContactRead(contactId))
       .catch(() => { /* non-critical */ })
   }
@@ -677,6 +677,7 @@ async function selectContact(id: string) {
     // Restricted agents select an account before requesting conversation data.
     const messageAccount = preferredAccount || (!authStore.hasPermission('contacts', 'read')
       ? contact.whatsapp_account || orgAccounts.value[0]?.name : undefined)
+    contactsStore.setAccountFilter(messageAccount || null)
     await contactsStore.fetchMessages(id, messageAccount ? { account: messageAccount } : undefined)
 
     // Discover distinct accounts from the unfiltered message set
@@ -737,7 +738,7 @@ async function selectContact(id: string) {
     // Fetch notes and session data in parallel (independent requests)
     const [, sessionResult] = await Promise.all([
       notesStore.fetchNotes(id),
-      contactsService.getSessionData(id).catch(() => null)
+      contactsService.getSessionData(id, messageAccount || selectedAccount.value || undefined).catch(() => null)
     ])
     if (sessionResult) {
       contactSessionData.value = sessionResult.data.data || sessionResult.data

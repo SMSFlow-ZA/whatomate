@@ -433,6 +433,7 @@ export const useContactsStore = defineStore('contacts', () => {
   return {
     contacts,
     currentContact,
+    accountFilter,
     messages,
     isLoading,
     isLoadingMessages,

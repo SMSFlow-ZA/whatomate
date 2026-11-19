@@ -5,6 +5,7 @@ vi.mock('@/router', () => ({ default: { push: vi.fn() } }))
 vi.mock('@/services/api', () => ({ contactsService: { markRead: vi.fn().mockResolvedValue({}) }, messagesService: {} }))
 import { wsService } from './websocket'
 import { useContactsStore } from '@/stores/contacts'
+import { contactsService } from '@/services/api'
 
 describe('SMS websocket wire mapping', () => {
   it('preserves SMS identity and attempts before updating the open inbox', () => {
@@ -18,4 +19,27 @@ describe('SMS websocket wire mapping', () => {
     expect(store.messages[0].delivery_attempts).toEqual(payload.delivery_attempts)
     expect(store.currentContact?.service_window_open).toBe(false)
   })
+})
+
+it('marks only the selected WhatsApp account read and leaves SMS receipts alone', () => {
+  setActivePinia(createPinia())
+  const store = useContactsStore()
+  const contact = { id: 'c1', phone_number: '12025550191', name: 'Example', tags: [], status: 'active', metadata: {}, unread_count: 0, service_window_open: false, created_at: '', updated_at: '' }
+  store.contacts = [contact]
+  store.setCurrentContact({ ...contact })
+  store.setAccountFilter('inbox-a')
+  const mark = vi.mocked(contactsService.markRead)
+  mark.mockClear()
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  const message = { id: 'm1', contact_id: 'c1', channel: 'whatsapp', whatsapp_account: 'inbox-b', direction: 'incoming', status: 'delivered', message_type: 'text', content: { body: 'Synthetic reply' }, created_at: '2026-11-19T10:00:00Z', updated_at: '' }
+  try {
+    ;(wsService as any).handleNewMessage(store, message)
+    expect(mark).not.toHaveBeenCalled()
+    ;(wsService as any).handleNewMessage(store, { ...message, id: 'm2', whatsapp_account: 'inbox-a' })
+    expect(mark).toHaveBeenCalledWith('c1', 'inbox-a')
+    mark.mockClear()
+    ;(wsService as any).handleNewMessage(store, { ...message, id: 'm3', channel: 'sms', whatsapp_account: '' })
+    expect(mark).not.toHaveBeenCalled()
+  } finally { vi.restoreAllMocks() }
 })

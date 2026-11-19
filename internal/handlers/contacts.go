@@ -500,31 +500,42 @@ func (a *App) MarkContactRead(r *fastglue.Request) error {
 		return nil
 	}
 
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	account := string(r.RequestCtx.QueryArgs().Peek("account"))
+	contact, _, err := a.findInboxChatContact(orgID, userID, contactID, account)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
-	a.markMessagesAsRead(orgID, contactID, &contact)
+	a.markMessagesAsRead(orgID, contactID, &contact, account)
 	return r.SendEnvelope(map[string]any{"status": "ok"})
 }
 
 // markMessagesAsRead marks messages as read and sends read receipts
-func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *models.Contact) {
+func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *models.Contact, accounts ...string) {
+	accountName := contact.WhatsAppAccount
+	scoped := len(accounts) != 0 && accounts[0] != ""
+	query := a.DB.Where("contact_id = ? AND organization_id = ? AND direction = ?", contactID, orgID, models.DirectionIncoming)
+	if scoped {
+		accountName = accounts[0]
+		query = query.Where("whats_app_account = ?", accountName)
+	}
 	var unreadMessages []models.Message
-	a.DB.Where("contact_id = ? AND direction = ? AND status != ?", contactID, models.DirectionIncoming, models.MessageStatusRead).
-		Find(&unreadMessages)
+	if err := query.Session(&gorm.Session{}).Where("status != ?", models.MessageStatusRead).Find(&unreadMessages).Error; err != nil {
+		a.Log.Error("Could not read pending read receipts", "error", err)
+		return
+	}
 
-	a.DB.Model(&models.Message{}).
-		Where("contact_id = ? AND direction = ?", contactID, models.DirectionIncoming).
-		Update("status", models.MessageStatusRead)
+	if err := query.Session(&gorm.Session{}).Model(&models.Message{}).Update("status", models.MessageStatusRead).Error; err != nil {
+		a.Log.Error("Could not mark messages read", "error", err)
+		return
+	}
 
-	a.DB.Model(contact).Update("is_read", true)
+	if !scoped {
+		a.DB.Model(contact).Update("is_read", true)
+	}
 
-	if len(unreadMessages) > 0 && contact.WhatsAppAccount != "" {
-		if account, err := a.resolveWhatsAppAccount(orgID, contact.WhatsAppAccount); err == nil {
+	if len(unreadMessages) > 0 && accountName != "" {
+		if account, err := a.resolveWhatsAppAccount(orgID, accountName); err == nil {
 			if account.AutoReadReceipt {
 				a.wg.Add(1)
 				go func() {
@@ -1255,11 +1266,8 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Verify contact belongs to org (users without full read permission can only access assigned contacts)
-	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	account := string(r.RequestCtx.QueryArgs().Peek("account"))
+	if _, _, err := a.findInboxChatContact(orgID, userID, contactID, account); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
@@ -1270,8 +1278,11 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 
 	// Get the most recent completed or active session for this contact
 	var session models.ChatbotSession
-	err = a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID).
-		Where("status IN ?", []models.SessionStatus{models.SessionStatusActive, models.SessionStatusCompleted}).
+	sessions := a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID)
+	if account != "" {
+		sessions = sessions.Where("whats_app_account = ?", account)
+	}
+	err = sessions.Where("status IN ?", []models.SessionStatus{models.SessionStatusActive, models.SessionStatusCompleted}).
 		Order("created_at DESC").
 		First(&session).Error
 
