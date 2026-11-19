@@ -188,13 +188,15 @@ function saveSnooze() {
           {{ t('inboxUX.caseHistoryEmpty') }}
         </p>
       </details>
-
     </template>
     <template v-else-if="current">
       <div class="inbox-case-controls">
         <template v-if="canWrite"
           ><label class="inbox-case-select"
-            ><Clock class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+            ><Clock
+              class="inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            /><select
               :aria-label="t('inboxWorkflow.caseStatus')"
               :value="current.status"
               :disabled="busy"
@@ -211,7 +213,10 @@ function saveSnooze() {
               </option>
             </select></label
           ><label v-if="current.status !== 'resolved'" class="inbox-case-select"
-            ><Flag class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+            ><Flag
+              class="inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            /><select
               :aria-label="t('inboxWorkflow.casePriority')"
               :value="current.priority"
               :disabled="busy"
@@ -233,7 +238,6 @@ function saveSnooze() {
         <button
           v-if="canWrite"
           type="button"
-
           class="small ml-auto"
           :class="{ outline: isResolved }"
           :disabled="busy"
@@ -242,17 +246,23 @@ function saveSnooze() {
               status: current.status === 'resolved' ? 'open' : 'resolved',
             })
           "
-          ><RotateCcw
+        >
+          <RotateCcw
             v-if="current.status === 'resolved'"
             class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
             aria-hidden="true"
-          /><Check v-else class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
+          /><Check
+            v-else
+            class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
+            aria-hidden="true"
+          />{{
             t(
               current.status === 'resolved'
                 ? 'inboxWorkflow.reopen'
                 : 'inboxUX.resolveAction',
             )
-          }}</button>
+          }}
+        </button>
       </div>
 
       <time
@@ -265,11 +275,13 @@ function saveSnooze() {
     </template>
     <button
       v-else-if="canWrite"
-
-
       :disabled="busy"
       @click="update({ status: 'open' })"
-       class="outline small" type="button">{{ t('inboxWorkflow.startCase') }}</button>
+      class="outline small"
+      type="button"
+    >
+      {{ t('inboxWorkflow.startCase') }}
+    </button>
     <InboxSLAIndicators v-if="current?.sla && !history" :sla="current.sla" />
     <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
       <label class="inbox-label"
@@ -281,15 +293,16 @@ function saveSnooze() {
           :disabled="busy"
       /></label>
       <div class="flex gap-2">
-        <button type="submit" :disabled="busy" class="small">{{
-          t('common.save')
-        }}</button><button
+        <button type="submit" :disabled="busy" class="small">
+          {{ t('common.save') }}</button
+        ><button
           type="button"
-
-
           :disabled="busy"
           @click="snoozing = false"
-           class="outline small">{{ t('common.cancel') }}</button>
+          class="outline small"
+        >
+          {{ t('common.cancel') }}
+        </button>
       </div>
     </form>
   </section>
