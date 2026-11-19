@@ -542,7 +542,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 		query = query.Where("whats_app_account = ?", accountName)
 	}
 	var unreadMessages []models.Message
-	if err := query.Session(&gorm.Session{}).Where("status != ?", models.MessageStatusRead).Find(&unreadMessages).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Where("status != ? AND whats_app_message_id <> ''", models.MessageStatusRead).Find(&unreadMessages).Error; err != nil {
 		a.Log.Error("Could not read pending read receipts", "error", err)
 		return
 	}

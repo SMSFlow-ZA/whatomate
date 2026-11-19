@@ -217,7 +217,7 @@ func TestInboxHardeningWorkerQueryUsesPendingIndexes(t *testing.T) {
         SELECT gen_random_uuid(),?::uuid,?::uuid,?::uuid,now(),now(),'opened','case_opened',now()
         FROM generate_series(1,30000)`, org.ID, account.ID, c.ID).Error)
 	require.NoError(t, appendInboxActivity(db, c, models.InboxCaseActivity{Kind: "opened"}))
-	require.NoError(t, database.CreateIndexes(db))
+	require.NoError(t, database.CreateInboxWorkflowIndexes(db))
 	require.NoError(t, db.Exec("ANALYZE inbox_case_activities").Error)
 	rows, err := db.Raw(`EXPLAIN (ANALYZE, FORMAT TEXT)
         SELECT * FROM inbox_case_activities WHERE deleted_at IS NULL
