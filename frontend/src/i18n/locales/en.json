@@ -2792,6 +2792,21 @@
     "queueEmptyHelp": "Start a case from a conversation, or adjust the filters to see more work.",
     "viewSaveHelp": "Save the current filters for yourself or an authorized team.",
     "resetFilters": "Clear filters",
-    "resolveAction": "Resolve"
+    "resolveAction": "Resolve",
+    "analyticsOverview": "Performance overview",
+    "elapsedHelp": "Leave this off to count elapsed time, including evenings and weekends.",
+    "liveInbox": "Live inbox",
+    "manageTargets": "Manage response targets",
+    "removeTargets": "Remove targets",
+    "removeTargetsHelp": "Stop applying response targets to this inbox. Conversation and case history will be retained.",
+    "responseTargets": "Response targets",
+    "selectInbox": "Choose a WhatsApp inbox",
+    "slaClockHelp": "Only resolution pauses while waiting for a customer. Pending and snoozed cases follow the selected clock.",
+    "slaDescription": "See which customer enquiries need a reply or resolution next.",
+    "slaEmptyHelp": "No matching cases are currently at risk. Include on-track cases or adjust the inbox and team filters.",
+    "slaPolicyHelp": "These are internal response targets. They do not change your customer-facing service commitments.",
+    "slaSetupHelp": "Choose an inbox, set the targets and decide how working time is counted.",
+    "targetMinutesHelp": "Enter each target in minutes. Targets start when an enquiry enters the human queue.",
+    "workingClock": "Working clock"
   }
 }

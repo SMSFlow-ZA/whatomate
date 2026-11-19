@@ -679,3 +679,64 @@
 
 }
 /* inbox-queues end */
+
+/* inbox-sla start */
+@layer layout {
+.inbox-sla-targets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.inbox-shift-row {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.inbox-shift-row > label:first-child {
+  min-width: 9rem;
+}
+
+.inbox-ui .mb-5 { margin-bottom:1.25rem; }
+.inbox-ui .max-w-md { max-width:28rem; }
+.inbox-ui .underline-offset-4 { text-underline-offset:.25rem; }
+.inbox-link:hover { text-decoration:underline; }
+@media(max-width:640px) { .inbox-sla-targets { grid-template-columns:minmax(0,1fr); } }
+
+}
+/* inbox-sla end */
+
+/* inbox-supervisor start */
+@layer layout {
+
+@media (max-width: 640px) {
+  .inbox-analytics-header {
+    height: auto;
+    min-height: 4rem;
+    padding: 1rem;
+    flex-wrap: wrap;
+    align-content: start;
+  }
+  .inbox-analytics-header [data-page-actions] {
+    flex-basis: 100%;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .inbox-analytics-header [data-page-actions] > div {
+    justify-content: flex-start;
+  }
+}
+
+}
+/* inbox-supervisor end */
+
+/* inbox-deadlines start */
+@layer layout {
+.inbox-deadlines { display:flex;flex-wrap:wrap;gap:.25rem;list-style:none;margin:0;padding:0; }
+.inbox-deadlines li { border-radius:.25rem;padding:.125rem .375rem;font-size:.75rem;color:var(--muted-foreground);background:var(--muted); }
+.inbox-deadlines [data-state="breached"] { color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent); }
+.inbox-deadlines [data-state="at_risk"] { color:var(--warning);background:color-mix(in srgb,var(--warning) 10%,transparent); }
+.inbox-deadlines [data-state="met"] { color:var(--success);background:color-mix(in srgb,var(--success) 10%,transparent); }
+
+}
+/* inbox-deadlines end */
