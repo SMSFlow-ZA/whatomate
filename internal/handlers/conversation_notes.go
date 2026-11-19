@@ -28,7 +28,7 @@ type ConversationNoteResponse struct {
 
 // ListConversationNotes returns paginated notes for a contact (latest at bottom).
 func (a *App) ListConversationNotes(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	orgID, userID, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -36,6 +36,10 @@ func (a *App) ListConversationNotes(r *fastglue.Request) error {
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
+	}
+
+	if _, _, err := a.findInboxChatContact(orgID, userID, contactID, ""); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
 	pg := parsePaginationWithDefaults(r, 30, 100)
@@ -99,6 +103,9 @@ func (a *App) CreateConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
+	if _, _, err := a.findInboxChatContact(orgID, userID, contactID, ""); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
 	var req ConversationNoteRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
@@ -130,7 +137,7 @@ func (a *App) CreateConversationNote(r *fastglue.Request) error {
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToContact(orgID, contactID, websocket.WSMessage{
+		a.broadcastConversation(orgID, contactID, "", websocket.WSMessage{
 			Type:    websocket.TypeConversationNoteCreated,
 			Payload: resp,
 		})
@@ -146,7 +153,7 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -159,6 +166,13 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 	note, err := findByIDAndOrg[models.ConversationNote](a.DB, r, noteID, orgID, "Note")
 	if err != nil {
 		return nil
+	}
+
+	if note.ContactID != contactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
+	}
+	if _, _, err := a.findInboxChatContact(orgID, userID, contactID, ""); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 
 	// Only the creator can update their own notes
@@ -191,7 +205,7 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToContact(orgID, note.ContactID, websocket.WSMessage{
+		a.broadcastConversation(orgID, note.ContactID, "", websocket.WSMessage{
 			Type:    websocket.TypeConversationNoteUpdated,
 			Payload: resp,
 		})
@@ -207,7 +221,7 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -222,12 +236,17 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
+	if note.ContactID != contactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
+	}
+	if _, _, err := a.findInboxChatContact(orgID, userID, contactID, ""); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+
 	// Only the creator can delete their own notes
 	if note.CreatedByID != userID {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only delete your own notes", nil, "")
 	}
-
-	contactID := note.ContactID
 
 	if err := a.DB.Delete(note).Error; err != nil {
 		a.Log.Error("Failed to delete conversation note", "error", err)
@@ -237,7 +256,7 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToContact(orgID, contactID, websocket.WSMessage{
+		a.broadcastConversation(orgID, contactID, "", websocket.WSMessage{
 			Type: websocket.TypeConversationNoteDeleted,
 			Payload: map[string]any{
 				"id":         noteID,

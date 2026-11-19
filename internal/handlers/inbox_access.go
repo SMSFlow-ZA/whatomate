@@ -22,14 +22,20 @@ func latestInboxAssignment(db *gorm.DB, org, user uuid.UUID) *gorm.DB {
 // relies only on a case assignment must explicitly select the assigned account.
 func (a *App) findInboxChatContact(org, user, contactID uuid.UUID, account string) (models.Contact, bool, error) {
 	var contact models.Contact
-	err := a.scopeAssignedContact(a.DB.Where("id = ? AND organization_id = ?", contactID, org), user, org).First(&contact).Error
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, org)
+	if !a.HasPermission(user, models.ResourceContacts, models.ActionRead, org) {
+		query = query.Where("assigned_user_id = ?", user)
+	}
+	err := query.First(&contact).Error
 	if !errors.Is(err, gorm.ErrRecordNotFound) || account == "" {
 		return contact, false, err
 	}
 	grant := latestInboxAssignment(a.DB, org, user).
 		Joins("JOIN whatsapp_accounts wa ON wa.id = ic.account_id AND wa.organization_id = ic.organization_id AND wa.deleted_at IS NULL").
 		Where("wa.name = ? AND ic.contact_id = contacts.id", account).Select("1")
-	err = a.DB.Where("contacts.id = ? AND contacts.organization_id = ? AND EXISTS (?)", contactID, org, grant).
+	transfer := a.DB.Model(&models.AgentTransfer{}).Select("1").
+		Where("organization_id = ? AND contact_id = contacts.id AND agent_id = ? AND whats_app_account = ? AND status = ?", org, user, account, models.TransferStatusActive)
+	err = a.DB.Where("contacts.id = ? AND contacts.organization_id = ? AND (EXISTS (?) OR EXISTS (?))", contactID, org, grant, transfer).
 		First(&contact).Error
 	if err == nil {
 		contact.WhatsAppAccount = account

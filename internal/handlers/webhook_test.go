@@ -423,7 +423,7 @@ func TestUpdateMessageStatus_FailedBroadcastsErrorMessageViaWebSocket(t *testing
 	require.NoError(t, app.DB.Create(&msg).Error)
 
 	// Register a WS client for this org
-	userID := uuid.New()
+	userID := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID
 	client := websocket.NewClient(hub, nil, userID, org.ID)
 	hub.Register(client)
 
@@ -504,7 +504,7 @@ func TestUpdateMessageStatus_DeliveredBroadcastsViaWebSocket_NoErrorMessage(t *t
 	require.NoError(t, app.DB.Create(&msg).Error)
 
 	// Register a WS client for this org
-	client := websocket.NewClient(hub, nil, uuid.New(), org.ID)
+	client := websocket.NewClient(hub, nil, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID, org.ID)
 	hub.Register(client)
 
 	deadline := time.Now().Add(2 * time.Second)
