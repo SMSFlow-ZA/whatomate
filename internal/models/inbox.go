@@ -46,7 +46,7 @@ type InboxCase struct {
 	LastInboundAt        *time.Time        `json:"last_inbound_at,omitempty"`
 	FirstHumanReplyAt    *time.Time        `json:"first_human_reply_at,omitempty"`
 	LastHumanReplyAt     *time.Time        `json:"last_human_reply_at,omitempty"`
-	NextReplyFrom *time.Time `json:"next_reply_from,omitempty"`
+	NextReplyFrom        *time.Time        `json:"next_reply_from,omitempty"`
 }
 
 type InboxCaseActivity struct {
