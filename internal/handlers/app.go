@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"github.com/shridarpatil/whatomate/internal/models"
 	"net/http"
 	"sync"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/channelapp"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
