@@ -2838,5 +2838,13 @@
       "image": "Image",
       "footerButton": "Footer Button"
     }
+  },
+  "inboxUX": {
+    "caseHistoryEmpty": "Case changes will appear here.",
+    "queueFilters": "Filter cases",
+    "queueEmptyHelp": "Start a case from a conversation, or adjust the filters to see more work.",
+    "viewSaveHelp": "Save the current filters for yourself or an authorized team.",
+    "resetFilters": "Clear filters",
+    "resolveAction": "Resolve"
   }
 }
