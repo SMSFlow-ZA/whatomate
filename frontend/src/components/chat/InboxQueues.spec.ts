@@ -2,6 +2,7 @@
 import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import InboxQueues from './InboxQueues.vue'
+vi.mock('./InboxFieldMatchers.vue', () => ({ default: { render: () => null } }))
 
 const mocks = vi.hoisted(() => ({
   queue: vi.fn(),

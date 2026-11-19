@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxFieldMatchers from '@/components/chat/InboxFieldMatchers.vue'
 import { Filter, Save as Bookmark, MessageSquare as Inbox, RotateCw } from '@/lib/icons'
 import { computed, onMounted, onUnmounted, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -377,7 +378,7 @@ async function applyBulk() {
                   >
                 </div>
               </fieldset>
-              <button
+              <InboxFieldMatchers :model-value="filters.fields ?? []" @update:model-value="filters.fields = $event" /><button
 
 
                 @click="filters = { tags: [], queue: filters.queue }"

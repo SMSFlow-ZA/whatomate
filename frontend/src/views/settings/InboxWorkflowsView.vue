@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxFieldMatchers from '@/components/chat/InboxFieldMatchers.vue'
 import Modal from '@/components/oat/Modal.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -718,7 +719,7 @@ onMounted(async () => {
                   </fieldset>
                 </div>
                 <div class="mt-4"></div>
-              </section>
+              <InboxFieldMatchers :model-value="form.conditions.fields ?? []" @update:model-value="form.conditions.fields = $event" /></section>
               <section class="inbox-form-section">
                 <h2>{{ t('inboxRules.actions') }}</h2>
                 <p>{{ t('inboxUX.actionsHelp') }}</p>

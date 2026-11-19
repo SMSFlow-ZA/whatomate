@@ -2919,6 +2919,23 @@
     "searchMacros": "Search macros",
     "searchWorkflows": "Search workflows",
     "templateHelp": "Only eligible, approved utility templates can be sent. Content, consent and the selected inbox are checked again before dispatch.",
-    "workflowsDescription": "Create reusable actions and route enquiries with clear, reviewable rules."
+    "workflowsDescription": "Create reusable actions and route enquiries with clear, reviewable rules.",
+    "activeFields": "Active fields",
+    "archiveHelp": "Archived fields keep their saved values but cannot receive new entries.",
+    "archivedFields": "Archived",
+    "backToFields": "Back to fields",
+    "caseFieldTitle": "Case fields",
+    "contactFieldTitle": "Contact fields",
+    "editField": "Edit field",
+    "fieldHelp": "Use clear labels your agents will recognize. Recorded values are kept when a field is archived.",
+    "fieldKeyHelp": "A stable identifier for API requests and filters, such as enquiry_reference.",
+    "fieldOptionsHelp": "Enter one option per line. The saved values use these exact options.",
+    "fieldRequiredHelp": "Agents must supply a value before resolving a case. This also applies to automated resolution.",
+    "fieldTypeLocked": "Scope, key and type are fixed after creation to preserve recorded values.",
+    "fieldsDescription": "Keep useful customer and case details beside the conversation.",
+    "newField": "New field",
+    "noFields": "Add the details your team needs",
+    "noFieldsHelp": "Create contact fields for reusable customer details and case fields for a specific enquiry.",
+    "searchFields": "Search fields"
   }
 }

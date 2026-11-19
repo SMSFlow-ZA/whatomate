@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxFieldPanel from './InboxFieldPanel.vue'
 import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -112,6 +113,9 @@ async function update(input: {
     if (isHttpError(error) && error.response?.status === 409) {
       toast.error(t('inboxWorkflow.conflict'))
       await load()
+    } else if (isHttpError(error) && error.response?.status === 422) {
+      toast.error(t('inboxFields.missing'))
+      emit('needs-fields')
     } else {
       toast.error(t('inboxWorkflow.updateError'))
     }
@@ -186,7 +190,7 @@ function saveSnooze() {
         <p v-else class="inbox-caption py-3">
           {{ t('inboxUX.caseHistoryEmpty') }}
         </p>
-      </details>
+      </details><InboxFieldPanel v-if="current" :contact="contactId" :account="accountId" :case-id="current.id" :can-write="canWrite" />
 
     </template>
     <template v-else-if="current">
