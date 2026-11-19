@@ -5,6 +5,8 @@ import { callLogsService, ivrFlowsService, callTransfersService, outgoingCallsSe
 import { toast } from '@/lib/toast'
 import { i18n } from '@/i18n'
 
+type ActiveCallTransfer = Omit<CallTransfer, 'status'> & { status: CallTransfer['status'] | 'connecting' }
+
 export const useCallingStore = defineStore('calling', () => {
   // Call Logs state
   const callLogs = ref<CallLog[]>([])
@@ -24,7 +26,7 @@ export const useCallingStore = defineStore('calling', () => {
 
   // Call Transfer state
   const waitingTransfers = ref<CallTransfer[]>([])
-  const activeTransfer = ref<CallTransfer | null>(null)
+  const activeTransfer = ref<ActiveCallTransfer | null>(null)
   const localStream = ref<MediaStream | null>(null)
   const peerConnection = ref<RTCPeerConnection | null>(null)
   const isOnCall = ref(false)
