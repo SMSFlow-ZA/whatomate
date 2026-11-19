@@ -137,8 +137,8 @@ onMounted(async () => {
                 )
               }}</span>
             </td>
-            <td class="tabular-nums">{{ row.active }}</td>
-            <td>
+            <td class="tabular-nums" :data-label="t('inboxUX.capacityActive')">{{ row.active }}</td>
+            <td :data-label="t('inboxUX.capacityLimit')">
               <form
                 v-if="canWrite"
                 class="flex items-center gap-2"
