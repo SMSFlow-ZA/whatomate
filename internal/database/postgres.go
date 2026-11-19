@@ -246,6 +246,7 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_case_active ON inbox_cases (organization_id, account_id, contact_id) WHERE status <> 'resolved' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_case_snooze_due ON inbox_cases (snoozed_until) WHERE status = 'snoozed' AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_overflow_retry ON inbox_cases (routing_next_attempt_at) WHERE deleted_at IS NULL AND assignee_id IS NULL AND team_id IS NOT NULL AND status IN ('open', 'pending') AND routing_reason <> ''`,
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,

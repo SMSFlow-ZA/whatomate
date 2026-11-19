@@ -152,8 +152,9 @@ func (a *App) routeInboxOverflow(ctx context.Context) error {
 	var cases []models.InboxCase
 	err := a.DB.WithContext(ctx).
 		Where("assignee_id IS NULL AND team_id IS NOT NULL AND status IN ? AND routing_reason <> ''", inboxActiveStatuses).
+		Where("routing_next_attempt_at IS NULL OR routing_next_attempt_at <= ?", time.Now().UTC()).
 		Where("EXISTS (SELECT 1 FROM organizations o WHERE o.id = inbox_cases.organization_id AND o.inbox_workflows_enabled AND o.deleted_at IS NULL)").
-		Order("CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, opened_at, id").
+		Order("routing_next_attempt_at ASC NULLS FIRST, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, opened_at, id").
 		Limit(100).Find(&cases).Error
 	if err != nil {
 		return err
@@ -175,7 +176,8 @@ func (a *App) routeOneInboxCase(ctx context.Context, candidate models.InboxCase)
 		}
 		if err := thread.lock(tx); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
+				return tx.Model(&models.InboxCase{}).Where("id = ? AND organization_id = ?", candidate.ID, thread.org).
+					Update("routing_next_attempt_at", time.Now().UTC().Add(15*time.Second)).Error
 			}
 			return err
 		}
@@ -184,6 +186,13 @@ func (a *App) routeOneInboxCase(ctx context.Context, candidate models.InboxCase)
 			return nil
 		}
 		if err != nil || c.ID != candidate.ID || c.AssigneeID != nil || c.TeamID == nil || !inboxCountsForCapacity(c.Status) {
+			return err
+		}
+		// Fair, restart-safe retry rounds stop unavailable teams from occupying
+		// every batch. Priority and age determine order within each round.
+		next := time.Now().UTC().Add(15 * time.Second)
+		c.RoutingNextAttemptAt = &next
+		if err := tx.Model(&c).Update("routing_next_attempt_at", next).Error; err != nil {
 			return err
 		}
 		var team models.Team
@@ -220,6 +229,7 @@ func (a *App) routeOneInboxCase(ctx context.Context, candidate models.InboxCase)
 				return err
 			}
 			c.AssigneeID, c.RoutingReason = &m.UserID, ""
+			c.RoutingNextAttemptAt = nil
 			c.Version++
 			if err := tx.Save(&c).Error; err != nil {
 				return err
