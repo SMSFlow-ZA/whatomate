@@ -32,6 +32,7 @@
     "missing": "Complete the required custom fields before resolving this case."
   },
   "inboxRules": {
+    "any": "Any",
     "title": "Inbox workflows",
     "macros": "Macros",
     "rules": "Rules",
