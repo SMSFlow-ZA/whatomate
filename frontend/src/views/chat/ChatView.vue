@@ -2520,7 +2520,7 @@ async function sendMediaMessage() {
               @select="handleCannedSelect"
               @close="closeCannedPicker"
             />
-          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @applied="refreshInboxSummaries" />
+          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
             <TemplatePicker
               ref="templatePickerRef"
               :selected-account="selectedAccount"
