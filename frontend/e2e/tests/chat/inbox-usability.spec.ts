@@ -12,6 +12,7 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
   await api.loginAsAdmin()
   const before = (await (await api.get('/api/inbox/workflows')).json()).data
     .enabled
+  expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
   const automaticBefore = (
     await (await api.get('/api/inbox/automation')).json()
   ).data.enabled
@@ -48,7 +49,7 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
       profile,
     )
     await page.goto('/settings/inbox-workflows')
-    await page.getByRole('button', { name: 'New rule', exact: true }).click()
+    await page.getByRole('button', { name: 'New rule', exact: true }).first().click()
     const ruleForm = page.locator('#inbox-workflow-editor')
     await ruleForm.getByLabel('Workflow name').fill(scope.name('safe-rule'))
     await ruleForm
@@ -143,7 +144,7 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
     expect(savedCapacity.ok()).toBeTruthy()
 
     await page.goto('/settings/custom-fields')
-    await page.getByRole('button', { name: 'New field', exact: true }).click()
+    await page.getByRole('button', { name: 'New field', exact: true }).first().click()
     const fieldForm = page.locator('#inbox-field-editor')
     const label = scope.name('Reference')
     await fieldForm.getByLabel('Field label', { exact: true }).fill(label)

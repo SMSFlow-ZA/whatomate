@@ -83,7 +83,7 @@ test('runs the inbox support workflow on an isolated workspace', async ({
     await page.goto('/settings/custom-fields', {
       waitUntil: 'domcontentloaded',
     })
-    await page.getByRole('button', { name: 'New field', exact: true }).click()
+    await page.getByRole('button', { name: 'New field', exact: true }).first().click()
     const fieldForm = page
       .locator('form')
       .filter({
