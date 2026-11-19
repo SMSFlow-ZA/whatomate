@@ -1826,6 +1826,8 @@ async function sendMediaMessage() {
         v-if="inboxEnabled"
         :key="inboxOrg"
         :active="showInboxQueues"
+        :selected-contact="contactsStore.currentContact?.id"
+        :selected-account="inboxAccountId || undefined"
         @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id } })"
         @changed="refreshInboxSummaries"
       />
@@ -2096,6 +2098,7 @@ async function sendMediaMessage() {
                   variant="ghost"
                   size="icon"
                   id="info-button"
+                  :aria-label="$t('chat.contactInfo')"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
                   @click="isInfoPanelOpen = !isInfoPanelOpen"
@@ -2143,6 +2146,7 @@ async function sendMediaMessage() {
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
           :can-write="authStore.hasPermission('chat', 'write')"
           @changed="updateInboxSummary"
+          @needs-fields="isInfoPanelOpen = true"
         />
 
         <!-- Account Tabs (shown when contact has messages from multiple WhatsApp accounts) -->
@@ -2621,7 +2625,7 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
-          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @applied="refreshInboxSummaries" />
+          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
           <ChannelOptions v-model="deliveryOptions" :text="messageInput" />
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
@@ -2724,7 +2728,7 @@ async function sendMediaMessage() {
           :account-id="inboxAccountId"
           :contact-id="contactsStore.currentContact.id"
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
-          :can-write="false"
+          :can-write="authStore.hasPermission('chat', 'write')"
           history
         />
       </template>

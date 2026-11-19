@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
-import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import InboxWorkflowSetting from '@/components/settings/InboxWorkflowSetting.vue'
 import { toast } from 'vue-sonner'
 import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music } from 'lucide-vue-next'
@@ -345,7 +344,7 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                 </div>
               </div>
               <InboxWorkflowSetting v-if="canWriteGeneral" />
-              <InboxSLASettings v-if="canWriteGeneral && canWriteAccounts" />
+              <RouterLink v-if="canWriteGeneral && canWriteAccounts" to="/settings/inbox-workflows?tab=sla" class="mt-3 inline-block text-sm underline underline-offset-4">{{ $t('inboxUX.manageTargets') }}</RouterLink>
             </div>
 
             <!-- Meta App Credentials Card (Gated on canWriteAccounts) -->
