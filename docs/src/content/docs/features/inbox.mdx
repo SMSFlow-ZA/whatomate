@@ -200,7 +200,7 @@ When phone masking is enabled for the organization, phone numbers (and profile n
 
 ## Real-time updates
 
-The inbox is driven by the WebSocket hub: new inbound and outbound messages, status changes (sent / delivered / read / failed), reaction updates, and note changes are all broadcast to connected clients for the organization, so the list and open conversation update without a refresh.
+The inbox receives live updates for conversations the signed-in user can currently read. Account-specific assignments and active transfers apply to live messages, reactions and delivery updates as well as HTTP reads. Contact-wide notes require contact-level access.
 
 ## Track inbox cases
 
@@ -230,15 +230,17 @@ Rules can run when a case enters the human inbox, when a customer sends a messag
 
 Service text requires an open WhatsApp messaging window for the same number. Choose an approved utility template with complete previewable text for other replies and confirm the intended recipients have opted in. The application checks eligibility again at dispatch.
 
+Rules run with their last editor's current permissions. After upgrading an earlier workflow release, review and enable existing rules again so their responsible editor is recorded. Queued replies from an older release are held. Changes to a case, its tags or its field values after actions have been queued also hold the reply for review; the workflow's own actions are included in its saved snapshot. Uncertain submissions require reconciliation and are never automatically resent.
+
 ## Set response targets and review deadlines
 
-Set first reply, next reply and resolution targets for each WhatsApp account in **Settings → General → Inbox response targets**. Choose elapsed time or a weekly business-hours schedule with a time zone. Waiting for the customer pauses resolution time. The reply deadlines continue during that wait. The next reply target starts with the first unanswered message after an agent reply.
+Set first reply, next reply and resolution targets for each WhatsApp account in **Settings → General → Inbox response targets**. Targets begin when work enters the human queue, including handoffs from a bot. Choose elapsed time or a weekly business-hours schedule with a time zone. Waiting for the customer pauses resolution time. The reply deadlines continue during that wait. The next reply target starts with the first unanswered message after an agent reply.
 
 Deadlines are shown in the case header and queue. Open **Agent Analytics → Inbox deadlines** to review cases at risk or in breach and filter by team and WhatsApp account.
 
 ## Set workload limits
 
-In team settings, select a WhatsApp account under **Inbox workload** and set a maximum number of Open and Pending cases per agent. A limit of zero leaves the agent unlimited. Cases waiting for a slot stay in the unassigned queue. Automatic routing retries by priority and then waiting time. A permitted supervisor can assign beyond the limit by entering a reason during review. The case history records the override.
+In team settings, select a WhatsApp account under **Inbox workload** and set a maximum number of Open and Pending cases per agent. A limit of zero leaves the agent unlimited. Cases waiting for a slot stay in the unassigned queue. Automatic routing checks priority and then waiting time in fair retry rounds, so an unavailable team cannot block other teams. A permitted supervisor can assign beyond the limit by entering a reason during review. The case history records the override.
 
 ## Record custom fields
 

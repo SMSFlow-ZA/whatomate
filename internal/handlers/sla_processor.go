@@ -302,7 +302,7 @@ func (p *SLAProcessor) notifyEscalation(transfer models.AgentTransfer, settings 
 	if transfer.TeamID != nil {
 		payload["team_id"] = transfer.TeamID.String()
 	}
-	p.app.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	p.app.broadcastConversation(transfer.OrganizationID, transfer.ContactID, transfer.WhatsAppAccount, websocket.WSMessage{
 		Type:    websocket.TypeTransferEscalation,
 		Payload: payload,
 	})
@@ -352,7 +352,7 @@ func (p *SLAProcessor) broadcastTransferUpdate(transfer models.AgentTransfer, ws
 
 	contactName, phoneNumber := p.app.MaskContactFields(transfer.OrganizationID, contact.ProfileName, contact.PhoneNumber)
 
-	p.app.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	p.app.broadcastConversation(transfer.OrganizationID, transfer.ContactID, transfer.WhatsAppAccount, websocket.WSMessage{
 		Type: wsType,
 		Payload: map[string]any{
 			"id":               transfer.ID.String(),

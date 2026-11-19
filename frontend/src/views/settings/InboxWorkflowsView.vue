@@ -20,6 +20,7 @@ const switchState = ref({ enabled: false, dispatch_available: false })
 const busy = ref(false)
 const ready = ref(false)
 const failed = ref(false)
+const lookupFailed = ref(false)
 const caseId = ref('')
 const cases = ref<QueueCase[]>([])
 const dryRunId = ref('')
@@ -112,18 +113,25 @@ function move(index: number, delta: number) {
   const [item] = items.splice(index, 1)
   items.splice(other, 0, item)
 }
+function loadLookups() {
+  lookupFailed.value = false
+  void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => { lookupFailed.value = true })
+  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => { lookupFailed.value = true })
+  void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => { lookupFailed.value = true })
+  void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => { lookupFailed.value = true })
+  void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => { lookupFailed.value = true })
+}
 onMounted(async () => {
   await load()
   if (!enabled.value) return
-  void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => {})
-  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => {})
-  void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => {})
-  void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => {})
-  void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => {})
+  loadLookups()
 })
 </script>
 
 <template>
+  <p v-if="lookupFailed" role="alert" class="p-4 text-destructive">{{ t('inboxQueue.loadFiltersError') }}
+    <button type="button" class="underline" @click="loadLookups">{{ t('common.retry') }}</button>
+  </p>
   <main class="mx-auto grid max-w-5xl gap-4 p-4">
     <h1 class="text-xl font-semibold">{{ t('inboxRules.title') }}</h1>
     <p v-if="failed" role="alert">{{ t('inboxRules.loadError') }}</p>
@@ -139,7 +147,7 @@ onMounted(async () => {
       </div>
       <ul class="divide-y divide-border">
         <li v-for="w in list" :key="w.id" class="flex flex-wrap items-center gap-2 py-2">
-          <span class="mr-auto">{{ w.name }} <span v-if="w.kind === 'rule'" class="text-sm text-muted-foreground"> · {{ w.position }} · {{ t(w.enabled_at ? 'inboxRules.enabled' : 'inboxRules.disabled') }}</span></span>
+          <span class="mr-auto">{{ w.name }} <span v-if="w.kind === 'rule'" class="text-sm text-muted-foreground"> Â· {{ w.position }} Â· {{ t(w.enabled_at ? 'inboxRules.enabled' : 'inboxRules.disabled') }}</span></span>
           <Button type="button" variant="outline" size="sm" @click="select(w)">{{ t('common.edit') }}</Button>
           <Button type="button" variant="ghost" size="sm" @click="prepare(w)">{{ t('inboxRules.dryRun') }}</Button>
         </li>
@@ -148,7 +156,7 @@ onMounted(async () => {
         <h2 class="font-medium">{{ t('inboxRules.dryRun') }}</h2>
         <p class="text-sm">{{ t('inboxRules.dryRunHelp') }}</p>
         <label>{{ t('inboxRules.chooseCase') }}
-          <select v-model="caseId" @change="preview = null"><option value="">—</option><option v-for="c in cases" :key="c.id" :value="c.id">{{ c.contact_name || t('inboxQueue.unnamed') }} · {{ c.account_name }}</option></select>
+          <select v-model="caseId" @change="preview = null"><option value="">â€”</option><option v-for="c in cases" :key="c.id" :value="c.id">{{ c.contact_name || t('inboxQueue.unnamed') }} Â· {{ c.account_name }}</option></select>
         </label>
         <Button type="button" variant="outline" :disabled="!caseId" class="justify-self-start" @click="runPreview">{{ t('inboxRules.review') }}</Button>
         <InboxWorkflowPreviewPanel v-if="preview" :preview="preview" />
@@ -182,12 +190,12 @@ onMounted(async () => {
               </select>
             </label>
             <select v-if="action.type === 'priority' || action.type === 'status'" v-model="action.value" :aria-label="t('inboxRules.actionValue')">
-              <option value="">—</option><option v-for="value in action.type === 'priority' ? priorities : statuses" :key="value" :value="value">{{ t('inboxWorkflow.' + action.type + '.' + value) }}</option>
+              <option value="">â€”</option><option v-for="value in action.type === 'priority' ? priorities : statuses" :key="value" :value="value">{{ t('inboxWorkflow.' + action.type + '.' + value) }}</option>
             </select>
-            <select v-else-if="action.type === 'assign'" v-model="action.value" :aria-label="t('inboxQueue.assignee')"><option value="">—</option><option v-for="user in users" :key="user.id" :value="user.id">{{ user.full_name }}</option></select>
-            <select v-else-if="action.type === 'tag'" v-model="action.value" :aria-label="t('contacts.tags')"><option value="">—</option><option v-for="tag in tags" :key="tag.name" :value="tag.name">{{ tag.name }}</option></select>
+            <select v-else-if="action.type === 'assign'" v-model="action.value" :aria-label="t('inboxQueue.assignee')"><option value="">â€”</option><option v-for="user in users" :key="user.id" :value="user.id">{{ user.full_name }}</option></select>
+            <select v-else-if="action.type === 'tag'" v-model="action.value" :aria-label="t('contacts.tags')"><option value="">â€”</option><option v-for="tag in tags" :key="tag.name" :value="tag.name">{{ tag.name }}</option></select>
             <template v-else-if="action.type === 'send_template'">
-              <select v-model="action.value" :aria-label="t('inboxRules.action.send_template')"><option value="">—</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.name }} · {{ item.language }}</option></select>
+              <select v-model="action.value" :aria-label="t('inboxRules.action.send_template')"><option value="">â€”</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.name }} Â· {{ item.language }}</option></select>
               <label><input v-model="action.consent_confirmed" type="checkbox" /> {{ t('inboxRules.consent') }}</label>
             </template>
             <textarea v-else v-model="action.value" rows="2" maxlength="4096" :aria-label="t('inboxRules.actionValue')" />
@@ -209,7 +217,7 @@ onMounted(async () => {
         <div class="mb-2 flex items-center justify-between gap-2"><h2 class="font-medium">{{ t('inboxRules.history') }}</h2><Button type="button" size="sm" variant="outline" :disabled="busy" @click="load">{{ t('inboxQueue.retry') }}</Button></div>
         <p v-if="!runs.length">{{ t('inboxRules.noRuns') }}</p>
         <ul v-else class="divide-y divide-border text-sm">
-          <li v-for="run in runs" :key="run.id" class="py-2">{{ run.workflow_name }} · {{ t('inboxRules.runState.' + run.state) }} <span v-if="run.outcome"> · {{ t('inboxRules.outcome.' + run.outcome) }}</span> · {{ new Date(run.created_at).toLocaleString() }}</li>
+          <li v-for="run in runs" :key="run.id" class="py-2">{{ run.workflow_name }} Â· {{ t('inboxRules.runState.' + run.state) }} <span v-if="run.outcome"> Â· {{ t('inboxRules.outcome.' + run.outcome) }}</span> Â· {{ new Date(run.created_at).toLocaleString() }}</li>
         </ul>
       </section>
     </template>

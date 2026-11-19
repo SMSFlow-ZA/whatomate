@@ -37,13 +37,14 @@ func withStorageDir(t *testing.T, app *handlers.App, relPath string, content []b
 func makeMediaMessage(t *testing.T, app *handlers.App, orgID uuid.UUID, contactID uuid.UUID, mediaURL string) *models.Message {
 	t.Helper()
 	msg := &models.Message{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: orgID,
-		ContactID:      contactID,
-		Direction:      models.DirectionIncoming,
-		MessageType:    models.MessageTypeImage,
-		MediaURL:       mediaURL,
-		Status:         models.MessageStatusDelivered,
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  orgID,
+		ContactID:       contactID,
+		WhatsAppAccount: "media-fixture",
+		Direction:       models.DirectionIncoming,
+		MessageType:     models.MessageTypeImage,
+		MediaURL:        mediaURL,
+		Status:          models.MessageStatusDelivered,
 	}
 	require.NoError(t, app.DB.Create(msg).Error)
 	return msg
@@ -238,11 +239,12 @@ func TestApp_ServeMedia_AgentViaDirectTransfer(t *testing.T) {
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	// No assigned_user_id — the agent's only claim is an active transfer to them.
 	require.NoError(t, app.DB.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		AgentID:        &user.ID,
-		Status:         models.TransferStatusActive,
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		AgentID:         &user.ID,
+		Status:          models.TransferStatusActive,
+		WhatsAppAccount: "media-fixture",
 	}).Error)
 
 	rel := withStorageDir(t, app, "images/direct.png", []byte("direct data"))
@@ -255,6 +257,12 @@ func TestApp_ServeMedia_AgentViaDirectTransfer(t *testing.T) {
 	require.NoError(t, app.ServeMedia(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
 		"agent with an active direct transfer should access the contact's media")
+	require.NoError(t, app.DB.Model(msg).Update("whats_app_account", "other-account").Error)
+	other := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(other, org.ID, user.ID)
+	testutil.SetPathParam(other, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(other))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(other))
 }
 
 // --- ServeMedia: agent reaches via team-transfer membership ---
@@ -280,11 +288,12 @@ func TestApp_ServeMedia_AgentViaTeamTransfer(t *testing.T) {
 		Role:      models.TeamRoleAgent,
 	}).Error)
 	require.NoError(t, app.DB.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		TeamID:         &team.ID,
-		Status:         models.TransferStatusActive,
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		TeamID:          &team.ID,
+		Status:          models.TransferStatusActive,
+		WhatsAppAccount: "media-fixture",
 	}).Error)
 
 	rel := withStorageDir(t, app, "images/ticket.png", []byte("team data"))
@@ -296,6 +305,13 @@ func TestApp_ServeMedia_AgentViaTeamTransfer(t *testing.T) {
 
 	require.NoError(t, app.ServeMedia(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	require.NoError(t, app.DB.Model(msg).Update("whats_app_account", "other-account").Error)
+	other := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(other, org.ID, user.ID)
+	testutil.SetPathParam(other, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(other))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(other))
+
 }
 
 // --- ServeMedia: empty MediaURL ---
