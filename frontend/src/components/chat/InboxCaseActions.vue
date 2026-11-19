@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
-import '@/assets/inbox.css'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@/lib/toast'
@@ -23,6 +22,7 @@ const props = defineProps<{
 const emit = defineEmits<{ changed: [value: InboxCase]; 'needs-fields': [] }>()
 const { t, locale } = useI18n()
 const current = ref<InboxCase | null>(null)
+const isResolved = computed(() => current.value?.status === 'resolved')
 const activity = ref<CaseActivity[]>([])
 const ready = ref(false)
 const busy = ref(false)
@@ -193,7 +193,7 @@ function saveSnooze() {
       <div class="inbox-case-controls">
         <template v-if="canWrite"
           ><label class="inbox-case-select"
-            ><Clock class="h-3.5 w-3.5" aria-hidden="true" /><select
+            ><Clock class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
               :aria-label="t('inboxWorkflow.caseStatus')"
               :value="current.status"
               :disabled="busy"
@@ -210,7 +210,7 @@ function saveSnooze() {
               </option>
             </select></label
           ><label v-if="current.status !== 'resolved'" class="inbox-case-select"
-            ><Flag class="h-3.5 w-3.5" aria-hidden="true" /><select
+            ><Flag class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
               :aria-label="t('inboxWorkflow.casePriority')"
               :value="current.priority"
               :disabled="busy"
@@ -234,7 +234,7 @@ function saveSnooze() {
           type="button"
 
           class="small ml-auto"
-          :variant="current.status === 'resolved' ? 'outline' : 'default'"
+          :class="{ outline: isResolved }"
           :disabled="busy"
           @click="
             update({
@@ -243,13 +243,13 @@ function saveSnooze() {
           "
           ><RotateCcw
             v-if="current.status === 'resolved'"
-            class="mr-1.5 h-3.5 w-3.5"
+            class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
             aria-hidden="true"
-          /><Check v-else class="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{{
+          /><Check v-else class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
             t(
               current.status === 'resolved'
                 ? 'inboxWorkflow.reopen'
-                : 'inboxQueue.resolve',
+                : 'inboxUX.resolveAction',
             )
           }}</button>
       </div>
