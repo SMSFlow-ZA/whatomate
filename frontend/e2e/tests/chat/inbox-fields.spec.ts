@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ApiHelper } from '../../helpers/api'
+import { createInboxTestContext } from '../../helpers/inbox'
 import { createTestScope } from '../../framework'
 
 test('assigned agents can complete required case fields without rule administration access', async ({
@@ -8,8 +8,7 @@ test('assigned agents can complete required case fields without rule administrat
 }, testInfo) => {
   page.setDefaultTimeout(12000)
   const scope = createTestScope('inbox-agent-fields')
-  const api = new ApiHelper(request)
-  await api.loginAsAdmin()
+  const { api, admin, roles } = await createInboxTestContext(request, scope)
   const before = (await (await api.get('/api/inbox/workflows')).json()).data
     .enabled
   const account = await api.createWhatsAppAccount({
@@ -34,11 +33,12 @@ test('assigned agents can complete required case fields without rule administrat
     expect(
       (await api.put('/api/inbox/workflows', { enabled: true })).ok(),
     ).toBeTruthy()
-    const users = (await (await api.get('/api/users')).json()).data.users
-    const agent = users.find(
-      (u: { email: string }) => u.email === 'agent@test.com',
-    )
-    expect(agent).toBeTruthy()
+    const role = roles.find(item => item.name === 'agent')
+    expect(role).toBeTruthy()
+    const agent = await api.createUser({
+      email: scope.email('agent'), password: 'InboxAgent123!',
+      full_name: scope.name('agent'), role_id: role!.id,
+    })
     const opened = await api.put(thread, { status: 'open', priority: 'normal' })
     const current = (await opened.json()).data.case
     const assignment = await api.post('/api/inbox/cases/bulk', {
@@ -47,7 +47,7 @@ test('assigned agents can complete required case fields without rule administrat
       assignee_id: agent.id,
     })
     expect((await assignment.json()).data.results[0].result).toBe('updated')
-    await api.login('agent@test.com', 'password')
+    await api.login(agent.email, 'InboxAgent123!')
     const profile = (await (await api.get('/api/me')).json()).data
     expect(
       (await api.get('/api/inbox/workflow-definitions?kind=rule')).status(),
@@ -89,7 +89,7 @@ test('assigned agents can complete required case fields without rule administrat
       (await (await api.get('/api/inbox/automation')).json()).data.enabled,
     ).toBe(false)
   } finally {
-    await api.loginAsAdmin()
+    await api.login(admin.email, admin.password)
     await api.put('/api/inbox/fields/' + field, { archive: true })
     await api.del('/api/contacts/' + contact.id)
     await api.del('/api/accounts/' + account.id)
