@@ -174,9 +174,9 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  async function fetchContact(id: string) {
+  async function fetchContact(id: string, account?: string) {
     try {
-      const response = await contactsService.get(id)
+      const response = await contactsService.get(id, account)
       // API returns { status: "success", data: { ... } }
       const data = response.data.data || response.data
       currentContact.value = data
@@ -407,6 +407,7 @@ export const useContactsStore = defineStore('contacts', () => {
   return {
     contacts,
     currentContact,
+    accountFilter,
     messages,
     isLoading,
     isLoadingMessages,

@@ -16,7 +16,7 @@ import (
 
 func chatRWRole(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.CustomRole {
 	t.Helper()
-	return testutil.CreateTestRoleWithKeys(t, db, orgID, "chat-rw", []string{"chat:read", "chat:write"})
+	return testutil.CreateTestRoleWithKeys(t, db, orgID, "chat-rw", []string{"chat:read", "chat:write", "contacts:read"})
 }
 
 // --- ListConversationNotes ---

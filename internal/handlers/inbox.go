@@ -113,9 +113,9 @@ func (a *App) scopeInboxCases(q *gorm.DB, user, org uuid.UUID) *gorm.DB {
 	if a.HasPermission(user, models.ResourceContacts, models.ActionRead, org) {
 		return q
 	}
-	return q.Where("(inbox_cases.assignee_id IS NULL OR inbox_cases.assignee_id = ?) AND (c.assigned_user_id = ? OR EXISTS ("+
+	return q.Where("inbox_cases.assignee_id = ? OR (inbox_cases.assignee_id IS NULL AND (c.assigned_user_id = ? OR EXISTS ("+
 		"SELECT 1 FROM agent_transfers at WHERE at.contact_id = c.id AND at.organization_id = c.organization_id "+
-		"AND at.whats_app_account = wa.name AND at.agent_id = ? AND at.status = ? AND at.deleted_at IS NULL))",
+		"AND at.whats_app_account = wa.name AND at.agent_id = ? AND at.status = ? AND at.deleted_at IS NULL)))",
 		user, user, user, models.TransferStatusActive)
 }
 
@@ -164,8 +164,9 @@ func (a *App) inboxThreadAccess(db *gorm.DB, t inboxThread, user uuid.UUID) (mod
 	if !a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) {
 		q = q.Where("contacts.assigned_user_id = ? OR EXISTS (SELECT 1 FROM agent_transfers at "+
 			"WHERE at.contact_id = contacts.id AND at.organization_id = contacts.organization_id "+
-			"AND at.whats_app_account = wa.name AND at.agent_id = ? AND at.status = ? AND at.deleted_at IS NULL)",
-			user, user, models.TransferStatusActive)
+			"AND at.whats_app_account = wa.name AND at.agent_id = ? AND at.status = ? AND at.deleted_at IS NULL) OR EXISTS (?)",
+			user, user, models.TransferStatusActive,
+			latestInboxAssignment(db, t.org, user).Where("ic.account_id = wa.id AND ic.contact_id = contacts.id").Select("1"))
 	}
 	err := q.First(&contact).Error
 	return contact, err
@@ -320,7 +321,11 @@ func (a *App) UpdateInboxConversation(r *fastglue.Request) error {
 		if c.ID != uuid.Nil {
 			kind = "reopened"
 		}
-		c = newInboxCase(t, now, contact.AssignedUserID, nil)
+		owner, team := contact.AssignedUserID, c.TeamID
+		if c.AssigneeID != nil {
+			owner = c.AssigneeID
+		}
+		c = newInboxCase(t, now, owner, team)
 		if input.Priority != "" {
 			c.Priority = input.Priority
 		}
@@ -485,8 +490,7 @@ func (a *App) trackInboxIncoming(account *models.WhatsAppAccount, contact *model
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		thread := inboxThread{account.OrganizationID, account.ID, contact.ID}
-		current, lookupErr := thread.latest(a.DB)
-		if lookupErr == nil && current.Status != models.InboxCaseResolved {
+		if _, lookupErr := thread.latest(a.DB); lookupErr == nil {
 			a.recordInboxInbound(account, contact, message.WhatsAppMessageID, message.CreatedAt, nil)
 		}
 	}

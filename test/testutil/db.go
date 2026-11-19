@@ -99,6 +99,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.Message{},
 		&models.InboxCase{},
 		&models.InboxCaseActivity{},
+		&models.InboxSavedView{},
 		&models.Template{},
 		&models.WhatsAppFlow{},
 		// Chatbot models
@@ -139,6 +140,7 @@ func cleanupTables(db *gorm.DB) {
 	tables := []string{
 		// Inbox workflow tables
 		"inbox_case_activities",
+		"inbox_saved_views",
 		"inbox_cases",
 		// Dashboard tables
 		"widgets",

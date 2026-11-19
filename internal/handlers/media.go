@@ -170,13 +170,15 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 	// directly to them (via scopeAssignedContact) — or from contacts with an
 	// active team transfer where the user is a team member.
 	if !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
-		var contact models.Contact
-		q := a.scopeAssignedContact(a.DB.Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
-		if err := q.First(&contact).Error; err != nil {
+		if _, _, err := a.findInboxChatContact(orgID, userID, message.ContactID, message.WhatsAppAccount); err != nil {
 			// Not owner / not directly assigned — check team membership via active transfer
 			var transfer models.AgentTransfer
-			if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL",
-				message.ContactID, orgID, models.TransferStatusActive).First(&transfer).Error; err != nil {
+			if message.WhatsAppAccount == "" {
+				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
+			}
+			if err := a.DB.Where("contact_id = ? AND organization_id = ? AND whats_app_account = ? AND status = ? AND team_id IS NOT NULL",
+				message.ContactID, orgID, message.WhatsAppAccount, models.TransferStatusActive).
+				Where("NOT EXISTS (?)", inboxAssignedElsewhere(a.DB, orgID, userID, message.ContactID, message.WhatsAppAccount)).First(&transfer).Error; err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 			}
 			var count int64

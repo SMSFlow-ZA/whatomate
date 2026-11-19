@@ -70,7 +70,7 @@ What the window controls:
 What a user sees in the inbox depends on their [role's permissions](/whatomate/features/roles-permissions):
 
 - **With `chat:read`** — the user can open conversations. Combined with **`contacts:read`**, they see **every** conversation in the organization.
-- **Without `contacts:read`** — visibility is narrowed to conversations the user *owns*: contacts **assigned to them** (`assigned_user_id`), plus contacts with an **active agent transfer** to them. This scoping is applied uniformly to listing, reading, messaging, reactions, and notes — an agent cannot read or reply to a conversation they don't own.
+- **Without `contacts:read`** — contact owners retain contact-wide access. An agent assigned through a case or active transfer can access that WhatsApp account's thread; another account's messages, session data and read receipts stay separate. A current case reassignment revokes the old agent's case access. Contact-wide metadata and notes require contact-level access.
 
 Assignment is controlled separately:
 
@@ -200,7 +200,7 @@ When phone masking is enabled for the organization, phone numbers (and profile n
 
 ## Real-time updates
 
-The inbox is driven by the WebSocket hub: new inbound and outbound messages, status changes (sent / delivered / read / failed), reaction updates, and note changes are all broadcast to connected clients for the organization, so the list and open conversation update without a refresh.
+The inbox uses WebSocket updates for new messages, delivery status, reactions and notes. Sensitive conversation updates are delivered only to users with current access to the relevant contact and WhatsApp account. Changing assignment changes live access too.
 
 ## Track inbox cases
 
@@ -213,9 +213,21 @@ To return to a case at a specific time, select **Snoozed** and enter a date and 
 Open the contact details panel and expand **Case activity** to see recent status, priority and follow-up changes. If you switch WhatsApp numbers within a contact, the controls show the case for the selected number.
 
 
+## Work from case queues
+
+In **Chat → Queues**, use **Mine**, **Unassigned**, **Awaiting first reply** or **Follow-ups** to find the cases you need. Open **Filters** above the queue to narrow cases by WhatsApp account, team, assignee, status, priority or contact tags. Select a case to open its WhatsApp thread.
+
+Use **Saved views** to name a filter you use regularly. A personal view is available only to you. Team managers with permission can save a view for their team. Each view applies your ordinary case visibility.
+
+Select cases to resolve them, assign them to an agent or add a contact tag. Review and apply the action, then check the outcome for each case. An item can become unavailable or change before you apply an action. Case assignments apply to the selected WhatsApp account; tags remain contact-wide.
+
 ![Synthetic lifecycle workflow on desktop](/whatomate/images/inbox-case-desktop.png)
 
 ![Synthetic lifecycle workflow on mobile](/whatomate/images/inbox-case-mobile.png)
+
+![Synthetic queues workflow on desktop](/whatomate/images/inbox-queues-desktop.png)
+
+![Synthetic queues workflow on mobile](/whatomate/images/inbox-queues-mobile.png)
 
 ## Related
 

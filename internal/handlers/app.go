@@ -11,6 +11,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -182,7 +183,7 @@ func (a *App) StartCampaignStatsSubscriber() error {
 		)
 
 		// Broadcast to organization via WebSocket
-		a.WSHub.BroadcastToOrg(update.OrganizationID, websocket.WSMessage{
+		a.broadcastResource(update.OrganizationID, models.ResourceCampaigns, websocket.WSMessage{
 			Type: websocket.TypeCampaignStatsUpdate,
 			Payload: map[string]any{
 				"campaign_id":     update.CampaignID,

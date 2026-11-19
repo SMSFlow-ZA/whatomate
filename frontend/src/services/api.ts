@@ -183,7 +183,7 @@ export const accountsService = {
 export const contactsService = {
   list: (params?: { search?: string; page?: number; limit?: number; tags?: string }) =>
     api.get('/contacts', { params }),
-  get: (id: string) => api.get(`/contacts/${id}`),
+  get: (id: string, account?: string) => api.get(`/contacts/${id}`, { params: { account } }),
   create: (data: any) => api.post('/contacts', data),
   update: (id: string, data: any) => api.put(`/contacts/${id}`, data),
   delete: (id: string) => api.delete(`/contacts/${id}`),
@@ -191,8 +191,8 @@ export const contactsService = {
     api.put(`/contacts/${id}/assign`, { user_id: userId }),
   updateTags: (id: string, tags: string[]) =>
     api.put(`/contacts/${id}/tags`, { tags }),
-  getSessionData: (id: string) => api.get(`/contacts/${id}/session-data`),
-  markRead: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`)
+  getSessionData: (id: string, account?: string) => api.get(`/contacts/${id}/session-data`, { params: { account } }),
+  markRead: (id: string, account?: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`, undefined, { params: { account } })
 }
 
 // Generic Import/Export Service
