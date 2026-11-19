@@ -243,6 +243,12 @@ Use **Macros** beside the composer to preview the action sequence. A macro that 
 
 Service text requires an active WhatsApp reply window. Outside that window, configure an eligible, approved utility template. The run history records the results. A send with an uncertain outcome stays in reconciliation with its original message ID.
 
-### Custom fields
+## Custom fields
 
 Open **Settings → Custom fields** to define text, number, date, yes/no or single-select fields for contacts and cases. Set fields that must be filled before a case can be resolved. Saved views and workflow conditions can match recorded field values. Archiving hides a field from new entries and keeps its recorded values.
+
+Field values are separate from existing contact metadata. Empty values are supported; a required resolution field is checked when resolving the case. Changing a field after a rule has queued a reply holds that reply for review, rather than sending against stale context.
+
+![Custom field definitions with synthetic examples](/whatomate/images/inbox-fields-desktop.png)
+
+![Custom field definitions on a mobile screen](/whatomate/images/inbox-fields-mobile.png)
