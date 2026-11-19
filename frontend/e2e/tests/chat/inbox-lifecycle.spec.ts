@@ -1,13 +1,12 @@
 import { expect as baseExpect, test } from '@playwright/test'
-import { ApiHelper } from '../../helpers/api'
+import { createInboxTestContext } from '../../helpers/inbox'
 import { createTestScope } from '../../framework'
 
 const expect = baseExpect.configure({ timeout: 20000 })
 
 test('starts, snoozes and resolves a case inside the chat thread', async ({ page, request }, testInfo) => {
   const scope = createTestScope('inbox-lifecycle')
-  const api = new ApiHelper(request)
-  await api.loginAsAdmin()
+  const { api } = await createInboxTestContext(request, scope)
   const before = await api.get('/api/inbox/workflows')
   expect(before.ok()).toBeTruthy()
   const wasEnabled = (await before.json()).data.enabled
