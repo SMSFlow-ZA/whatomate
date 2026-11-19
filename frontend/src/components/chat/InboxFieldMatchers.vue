@@ -7,12 +7,15 @@ import { inboxService, type FieldDefinition, type FieldMatch, type FieldValue } 
 const matches = defineModel<FieldMatch[]>({ required: true })
 const { t } = useI18n()
 const definitions = ref<FieldDefinition[]>([])
+const failed = ref(false)
 const chosen = ref('')
 const value = ref<FieldValue>(null)
 const definition = (id: string) => definitions.value.find(d => d.id === id)
-onMounted(async () => {
-  try { definitions.value = (await inboxService.fieldDefinitions()).data.data.definitions } catch {}
-})
+async function loadDefinitions() {
+  failed.value = false
+  try { definitions.value = (await inboxService.fieldDefinitions()).data.data.definitions } catch { failed.value = true }
+}
+onMounted(loadDefinitions)
 function add() {
   if (!chosen.value || value.value === null || value.value === '' || matches.value.length >= 8) return
   matches.value = [...matches.value.filter(m => m.definition_id !== chosen.value), { definition_id: chosen.value, value: value.value }]
@@ -22,6 +25,9 @@ function add() {
 </script>
 
 <template>
+  <p v-if="failed" role="alert">{{ t('inboxFields.unavailable') }}
+    <button type="button" @click="loadDefinitions">{{ t('common.retry') }}</button>
+  </p>
   <fieldset v-if="definitions.length || matches.length" class="grid gap-2 rounded-md border border-border p-2">
     <legend>{{ t('inboxFields.matches') }}</legend>
     <div v-for="match in matches" :key="match.definition_id" class="flex items-center justify-between gap-2 break-all text-sm">

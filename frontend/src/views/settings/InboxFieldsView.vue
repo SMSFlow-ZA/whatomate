@@ -49,14 +49,14 @@ async function update(d: FieldDefinition, remove = false) {
 onMounted(load)
 </script>
 <template>
-  <main class="mx-auto grid max-w-4xl gap-4 p-4">
+  <main class="field-settings vstack gap-4 p-4">
     <h1 class="text-xl font-semibold">{{ t('inboxFields.title') }}</h1>
     <p v-if="failed" role="alert">{{ t('inboxFields.loadError') }}</p>
     <p v-else-if="ready && !enabled">{{ t('inboxFields.enableFirst') }}</p>
     <template v-else-if="ready">
-      <form v-if="canWrite" class="grid gap-3 rounded-lg border border-border p-4" @submit.prevent="create">
+      <form v-if="canWrite" class="card vstack gap-3" @submit.prevent="create">
         <h2 class="font-medium">{{ t('inboxFields.add') }}</h2>
-        <div class="grid gap-2 sm:grid-cols-2">
+        <div class="field-grid">
           <label>{{ t('inboxFields.label') }} <input v-model.trim="form.label" maxlength="100" required /></label>
           <label>{{ t('inboxFields.key') }} <input v-model.trim="form.key" pattern="[a-z][a-z0-9_]*" maxlength="64" required /></label>
           <label>{{ t('inboxFields.appliesTo') }} <select v-model="form.scope"><option value="case">{{ t('inboxFields.scope.case') }}</option><option value="contact">{{ t('inboxFields.scope.contact') }}</option></select></label>
@@ -64,15 +64,15 @@ onMounted(load)
         </div>
         <label v-if="form.kind === 'select'">{{ t('inboxFields.choices') }} <textarea v-model="choices" rows="4" required /></label>
         <label><input v-model="form.required_on_resolve" type="checkbox" /> {{ t('inboxFields.required') }}</label>
-        <button :disabled="busy" type="submit" class="justify-self-start">{{ t('common.save') }}</button>
+        <button :disabled="busy" type="submit" class="field-submit">{{ t('common.save') }}</button>
       </form>
-      <ul class="grid gap-2">
-        <li v-for="d in definitions" :key="d.id" class="rounded-lg border border-border p-3">
-          <form class="grid gap-2" @submit.prevent="update(d)">
+      <ul class="field-list vstack gap-3">
+        <li v-for="d in definitions" :key="d.id" class="card">
+          <form class="vstack gap-2" @submit.prevent="update(d)">
             <p class="text-sm text-muted-foreground">{{ d.key }} · {{ t('inboxFields.scope.' + d.scope) }} · {{ t('inboxFields.kind.' + d.kind) }} <span v-if="d.archived_at"> · {{ t('inboxFields.archived') }}</span></p>
             <label>{{ t('inboxFields.label') }} <input v-model.trim="d.label" maxlength="100" required :disabled="!canWrite || !!d.archived_at" /></label>
             <label><input v-model="d.required_on_resolve" type="checkbox" :disabled="!canWrite || !!d.archived_at" /> {{ t('inboxFields.required') }}</label>
-            <div v-if="canWrite && !d.archived_at" class="flex flex-wrap items-center gap-2">
+            <div v-if="canWrite && !d.archived_at" class="field-actions hstack gap-2">
               <button type="submit" :disabled="busy" class="outline small">{{ t('common.save') }}</button>
               <button v-if="archive !== d.id" type="button" @click="archive = d.id" class="ghost small">{{ t('inboxFields.archive') }}</button>
               <template v-else>
@@ -89,5 +89,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-input:not([type="checkbox"]), select, textarea { @apply block w-full rounded-md border border-input bg-background px-2 py-1; }
+.field-settings { width: 100%; max-width: 64rem; margin-inline: auto; }
+.field-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field-submit { align-self: flex-start; }
+.field-list { list-style: none; margin: 0; padding: 0; }
+.field-actions { flex-wrap: wrap; }
+input:not([type="checkbox"]), select, textarea { display: block; width: 100%; margin-top: 0.25rem; }
+@media (max-width: 640px) { .field-grid { grid-template-columns: 1fr; } }
 </style>

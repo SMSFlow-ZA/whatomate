@@ -110,7 +110,7 @@ func TestInboxHardeningWorkerQueryScansProcessedHistory(t *testing.T) {
             AND o.inbox_workflows_enabled AND o.deleted_at IS NULL)
         ORDER BY created_at,id LIMIT 50`).Rows()
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { require.NoError(t, rows.Close()) }()
 	var plan strings.Builder
 	for rows.Next() {
 		var line string
