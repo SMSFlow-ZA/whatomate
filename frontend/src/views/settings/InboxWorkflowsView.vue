@@ -4,12 +4,56 @@ import { useI18n } from 'vue-i18n'
 import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
-import { accountsService, tagsService, templatesService, usersService } from '@/services/api'
-import { inboxService, type InboxAction, type InboxWorkflow, type InboxWorkflowInput, type InboxWorkflowPreview, type InboxWorkflowRun, type QueueCase } from '@/services/inbox'
+import { PageHeader } from '@/components/shared'
+import InboxTabs from '@/components/shared/InboxTabs.vue'
+import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
+import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import {
+  ArrowLeft,
+  ArrowUp,
+  ArrowDown,
+  Plus,
+  Search,
+  Trash2,
+  Workflow,
+  ShieldCheck,
+  History,
+  Pencil,
+} from 'lucide-vue-next'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
+import InboxActionEditor from '@/components/settings/InboxActionEditor.vue'
+import '@/assets/inbox.css'
+import {
+  accountsService,
+  tagsService,
+  templatesService,
+  usersService,
+} from '@/services/api'
+import {
+  inboxService,
+  type InboxWorkflow,
+  type InboxWorkflowInput,
+  type InboxWorkflowPreview,
+  type InboxWorkflowRun,
+  type QueueCase,
+} from '@/services/inbox'
 import InboxFieldMatchers from '@/components/chat/InboxFieldMatchers.vue'
 import InboxWorkflowPreviewPanel from '@/components/chat/InboxWorkflowPreview.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const auth = useAuthStore()
+const showTargets = ref(false)
 const teamsStore = useTeamsStore()
 const mode = ref<'macro' | 'rule'>('rule')
 const list = ref<InboxWorkflow[]>([])
@@ -25,49 +69,116 @@ const caseId = ref('')
 const cases = ref<QueueCase[]>([])
 const dryRunId = ref('')
 const preview = ref<InboxWorkflowPreview | null>(null)
+function closePreview() {
+  dryRunId.value = ''
+  preview.value = null
+}
 const accounts = ref<{ id: string; name: string }[]>([])
 const teams = ref<{ id: string; name: string }[]>([])
 const users = ref<{ id: string; full_name: string }[]>([])
 const tags = ref<{ name: string }[]>([])
-const templates = ref<{ id: string; name: string; language: string; whats_app_account?: string }[]>([])
-const actions: InboxAction['type'][] = ['assign', 'tag', 'priority', 'status', 'note', 'send_text', 'send_template']
+const templates = ref<
+  { id: string; name: string; language: string; whats_app_account?: string }[]
+>([])
 const statuses = ['open', 'pending', 'waiting_customer', 'resolved']
 const priorities = ['low', 'normal', 'high', 'urgent']
 const triggers = ['case_opened', 'incoming_message', 'status_changed']
 const fresh = (): InboxWorkflowInput => ({
-  kind: mode.value, name: '', trigger: mode.value === 'rule' ? 'case_opened' : '', position: 0,
-  actions: [{ type: 'note', value: '' }], conditions: {},
+  kind: mode.value,
+  name: '',
+  trigger: mode.value === 'rule' ? 'case_opened' : '',
+  position: 0,
+  actions: [{ type: 'note', value: '' }],
+  conditions: { tags: [] },
 })
 const form = ref(fresh())
 const deleting = ref(false)
-const readyToSave = computed(() => !!form.value.name.trim() && form.value.actions.every(action => action.value.trim() && (action.type !== 'send_template' || action.consent_confirmed)) &&
-  form.value.actions.filter(action => action.type === 'send_text' || action.type === 'send_template').length <= 1)
+const editing = ref(false)
+const showHistory = ref(false)
+const confirmSends = ref(false)
+const query = ref('')
+const filtered = computed(() =>
+  list.value.filter((w) =>
+    w.name.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()),
+  ),
+)
+const hasReply = (w: InboxWorkflow) =>
+  w.actions.some((a) => ['send_text', 'send_template'].includes(a.type))
+const inboxName = (w: InboxWorkflow) =>
+  accounts.value.find((a) => a.id === w.conditions.account_id)?.name ??
+  t('inboxSla.any')
+const readyToSave = computed(
+  () =>
+    !!form.value.name.trim() &&
+    form.value.actions.every(
+      (action) =>
+        action.value.trim() &&
+        (action.type !== 'send_template' || action.consent_confirmed),
+    ) &&
+    form.value.actions.filter(
+      (action) =>
+        action.type === 'send_text' || action.type === 'send_template',
+    ).length <= 1,
+)
 async function load() {
   busy.value = true
   try {
     enabled.value = (await inboxService.settings()).data.data.enabled
     if (enabled.value) {
-      const [w, r, state] = await Promise.all([inboxService.workflowDefinitions(mode.value), inboxService.workflowRuns(), inboxService.automationState()])
+      const [w, r, state] = await Promise.all([
+        inboxService.workflowDefinitions(mode.value),
+        inboxService.workflowRuns(),
+        inboxService.automationState(),
+      ])
       list.value = w.data.data.workflows
       runs.value = r.data.data.runs
       switchState.value = state.data.data
     }
     ready.value = true
     failed.value = false
-  } catch { failed.value = true }
-  finally { busy.value = false }
+  } catch {
+    failed.value = true
+  } finally {
+    busy.value = false
+  }
 }
-function select(w?: InboxWorkflow) {
+function select(w?: InboxWorkflow, open = true) {
+  editing.value = open
   id.value = w?.id ?? ''
   deleting.value = false
   if (w) {
-    form.value = { kind: w.kind, name: w.name, trigger: w.trigger ?? '', position: w.position, actions: w.actions.map(action => ({ ...action })),
-      conditions: { ...w.conditions, tags: [...(w.conditions.tags ?? [])], fields: [...(w.conditions.fields ?? [])] }, enabled: !!w.enabled_at }
+    form.value = {
+      kind: w.kind,
+      name: w.name,
+      trigger: w.trigger ?? '',
+      position: w.position,
+      actions: w.actions.map((action) => ({ ...action })),
+      conditions: {
+        ...w.conditions,
+        tags: [...(w.conditions.tags ?? [])],
+        fields: [...(w.conditions.fields ?? [])],
+      },
+      enabled: !!w.enabled_at,
+    }
   } else form.value = fresh()
+}
+function changeTab(value: string) {
+  showTargets.value = value === 'sla'
+  if (showTargets.value) {
+    showHistory.value = false
+    return
+  }
+  if (value === 'history') {
+    showHistory.value = true
+    dryRunId.value = ''
+    void load()
+  } else void changeMode(value as 'macro' | 'rule')
 }
 async function changeMode(next: typeof mode.value) {
   mode.value = next
-  select()
+  select(undefined, false)
+  showHistory.value = false
+  query.value = ''
   dryRunId.value = ''
   preview.value = null
   await load()
@@ -79,32 +190,53 @@ async function save(remove = false) {
     if (remove) await inboxService.deleteWorkflow(target)
     else if (target) await inboxService.updateWorkflow(target, form.value)
     else await inboxService.createWorkflow(form.value)
-    select()
+    select(undefined, false)
     await load()
     toast.success(t('settings.saved'))
-  } catch { toast.error(t('inboxRules.saveError')) }
-  finally { busy.value = false }
+  } catch {
+    toast.error(t('inboxRules.saveError'))
+  } finally {
+    busy.value = false
+  }
 }
 async function stopOrStart() {
+  if (!switchState.value.enabled && !confirmSends.value) {
+    confirmSends.value = true
+    return
+  }
   busy.value = true
   try {
-    const { data } = await inboxService.setAutomation(!switchState.value.enabled)
+    const { data } = await inboxService.setAutomation(
+      !switchState.value.enabled,
+    )
+    confirmSends.value = false
     switchState.value = data.data
     await load()
-  } catch { toast.error(t('inboxRules.saveError')) }
-  finally { busy.value = false }
+  } catch {
+    toast.error(t('inboxRules.saveError'))
+  } finally {
+    busy.value = false
+  }
 }
 async function prepare(w: InboxWorkflow) {
   dryRunId.value = w.id
   preview.value = null
   caseId.value = ''
-  try { cases.value = (await inboxService.queue({})).data.data.cases }
-  catch { toast.error(t('inboxRules.previewError')) }
+  try {
+    cases.value = (await inboxService.queue({})).data.data.cases
+  } catch {
+    toast.error(t('inboxRules.previewError'))
+  }
 }
 async function runPreview() {
   preview.value = null
-  try { preview.value = (await inboxService.previewWorkflow(dryRunId.value, caseId.value)).data.data }
-  catch { toast.error(t('inboxRules.previewError')) }
+  try {
+    preview.value = (
+      await inboxService.previewWorkflow(dryRunId.value, caseId.value)
+    ).data.data
+  } catch {
+    toast.error(t('inboxRules.previewError'))
+  }
 }
 function move(index: number, delta: number) {
   const items = form.value.actions
@@ -115,13 +247,51 @@ function move(index: number, delta: number) {
 }
 function loadLookups() {
   lookupFailed.value = false
-  void accountsService.list().then(r => { accounts.value = r.data.data?.accounts ?? [] }).catch(() => { lookupFailed.value = true })
-  void teamsStore.fetchTeams().then(result => { teams.value = result.teams }).catch(() => { lookupFailed.value = true })
-  void usersService.list().then(r => { users.value = (r.data as any).data?.users ?? (r.data as any).users ?? [] }).catch(() => { lookupFailed.value = true })
-  void tagsService.list().then(r => { tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? [] }).catch(() => { lookupFailed.value = true })
-  void templatesService.list({ status: 'APPROVED', category: 'UTILITY', limit: 100 }).then(r => { templates.value = (r.data as any).data?.templates ?? (r.data as any).templates ?? [] }).catch(() => { lookupFailed.value = true })
+  void accountsService
+    .list()
+    .then((r) => {
+      accounts.value = r.data.data?.accounts ?? []
+    })
+    .catch(() => {
+      lookupFailed.value = true
+    })
+  void teamsStore
+    .fetchTeams()
+    .then((result) => {
+      teams.value = result.teams
+    })
+    .catch(() => {
+      lookupFailed.value = true
+    })
+  void usersService
+    .list()
+    .then((r) => {
+      users.value = (r.data as any).data?.users ?? (r.data as any).users ?? []
+    })
+    .catch(() => {
+      lookupFailed.value = true
+    })
+  void tagsService
+    .list()
+    .then((r) => {
+      tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? []
+    })
+    .catch(() => {
+      lookupFailed.value = true
+    })
+  void templatesService
+    .list({ status: 'APPROVED', category: 'UTILITY', limit: 100 })
+    .then((r) => {
+      templates.value =
+        (r.data as any).data?.templates ?? (r.data as any).templates ?? []
+    })
+    .catch(() => {
+      lookupFailed.value = true
+    })
 }
 onMounted(async () => {
+  if (route.query.tab === 'sla' && auth.hasPermission('accounts', 'write'))
+    showTargets.value = true
   await load()
   if (!enabled.value) return
   loadLookups()
@@ -129,101 +299,546 @@ onMounted(async () => {
 </script>
 
 <template>
-  <p v-if="lookupFailed" role="alert" class="p-4 text-destructive">{{ t('inboxQueue.loadFiltersError') }}
-    <button type="button" class="underline" @click="loadLookups">{{ t('common.retry') }}</button>
-  </p>
-  <main class="mx-auto grid max-w-5xl gap-4 p-4">
-    <h1 class="text-xl font-semibold">{{ t('inboxRules.title') }}</h1>
-    <p v-if="failed" role="alert">{{ t('inboxRules.loadError') }}</p>
-    <p v-else-if="ready && !enabled"><RouterLink to="/settings" class="underline">{{ t('inboxRules.enableFirst') }}</RouterLink></p>
-    <template v-else-if="ready">
-      <div class="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3">
-        <p class="mr-auto">{{ t(!switchState.dispatch_available ? 'inboxRules.dispatchHeld' : switchState.enabled ? 'inboxRules.sendsEnabled' : 'inboxRules.sendsHeld') }}</p>
-        <Button type="button" variant="outline" :disabled="busy || !switchState.dispatch_available" @click="stopOrStart">{{ t(switchState.enabled ? 'inboxRules.stopSends' : 'inboxRules.allowSends') }}</Button>
-      </div>
-      <div class="flex gap-2">
-        <Button type="button" variant="outline" :aria-pressed="mode === 'rule'" :disabled="busy" @click="changeMode('rule')">{{ t('inboxRules.rules') }}</Button>
-        <Button type="button" variant="outline" :aria-pressed="mode === 'macro'" :disabled="busy" @click="changeMode('macro')">{{ t('inboxRules.macros') }}</Button>
-      </div>
-      <ul class="divide-y divide-border">
-        <li v-for="w in list" :key="w.id" class="flex flex-wrap items-center gap-2 py-2">
-          <span class="mr-auto">{{ w.name }} <span v-if="w.kind === 'rule'" class="text-sm text-muted-foreground"> Â· {{ w.position }} Â· {{ t(w.enabled_at ? 'inboxRules.enabled' : 'inboxRules.disabled') }}</span></span>
-          <Button type="button" variant="outline" size="sm" @click="select(w)">{{ t('common.edit') }}</Button>
-          <Button type="button" variant="ghost" size="sm" @click="prepare(w)">{{ t('inboxRules.dryRun') }}</Button>
-        </li>
-      </ul>
-      <section v-if="dryRunId" class="grid gap-2 rounded-lg border border-border p-4">
-        <h2 class="font-medium">{{ t('inboxRules.dryRun') }}</h2>
-        <p class="text-sm">{{ t('inboxRules.dryRunHelp') }}</p>
-        <label>{{ t('inboxRules.chooseCase') }}
-          <select v-model="caseId" @change="preview = null"><option value="">â€”</option><option v-for="c in cases" :key="c.id" :value="c.id">{{ c.contact_name || t('inboxQueue.unnamed') }} Â· {{ c.account_name }}</option></select>
-        </label>
-        <Button type="button" variant="outline" :disabled="!caseId" class="justify-self-start" @click="runPreview">{{ t('inboxRules.review') }}</Button>
-        <InboxWorkflowPreviewPanel v-if="preview" :preview="preview" />
-      </section>
-      <form class="grid gap-3 rounded-lg border border-border p-4" @submit.prevent="save()">
-        <h2 class="font-medium">{{ t(id ? 'inboxRules.edit' : 'inboxRules.add') }}</h2>
-        <label>{{ t('inboxRules.name') }} <input v-model.trim="form.name" maxlength="100" required /></label>
-        <div v-if="mode === 'rule'" class="grid gap-2 sm:grid-cols-2">
-          <label>{{ t('inboxRules.trigger') }} <select v-model="form.trigger"><option v-for="trigger in triggers" :key="trigger" :value="trigger">{{ t('inboxRules.event.' + trigger) }}</option></select></label>
-          <label>{{ t('inboxRules.position') }} <input v-model.number="form.position" type="number" min="-10000" max="10000" required /></label>
+  <main class="inbox-ui inbox-page">
+    <PageHeader
+      :title="t('inboxRules.title')"
+      :description="t('inboxUX.workflowsDescription')"
+    >
+      <template #actions
+        ><Button
+          v-if="editing"
+          form="inbox-workflow-editor"
+          type="submit"
+          :disabled="busy || !readyToSave"
+          >{{ t('common.save') }}</Button
+        ><Button
+          v-if="ready && enabled && !editing && !showHistory && !showTargets"
+          :disabled="busy"
+          @click="select()"
+          ><Plus class="mr-2 h-4 w-4" aria-hidden="true" />{{
+            t(mode === 'rule' ? 'inboxUX.newRule' : 'inboxUX.newMacro')
+          }}</Button
+        ></template
+      >
+    </PageHeader>
+    <div class="inbox-page-scroll">
+      <div class="inbox-container">
+        <div v-if="failed" role="alert" class="inbox-notice">
+          {{ t('inboxRules.loadError')
+          }}<Button variant="outline" size="sm" @click="load">{{
+            t('common.retry')
+          }}</Button>
         </div>
-        <label v-if="mode === 'rule' && id"><input v-model="form.enabled" type="checkbox" /> {{ t('inboxRules.enableRule') }}</label>
-        <details class="rounded-md border border-border p-3">
-          <summary>{{ t('inboxRules.conditions') }}</summary>
-          <div class="mt-2 grid gap-2 sm:grid-cols-2">
-            <label>{{ t('inboxQueue.account') }} <select v-model="form.conditions.account_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
-            <label>{{ t('inboxQueue.team') }} <select v-model="form.conditions.team_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="item in teams" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-            <label>{{ t('inboxQueue.assignee') }} <select v-model="form.conditions.assignee_id"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="u in users" :key="u.id" :value="u.id">{{ u.full_name }}</option></select></label>
-            <label>{{ t('inboxWorkflow.caseStatus') }} <select v-model="form.conditions.status"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="s in [...statuses, 'snoozed']" :key="s" :value="s">{{ t('inboxWorkflow.status.' + s) }}</option></select></label>
-            <label>{{ t('inboxWorkflow.casePriority') }} <select v-model="form.conditions.priority"><option :value="undefined">{{ t('inboxSla.any') }}</option><option v-for="p in priorities" :key="p" :value="p">{{ t('inboxWorkflow.priority.' + p) }}</option></select></label>
-            <label v-if="tags.length">{{ t('contacts.tags') }} <select :value="form.conditions.tags ?? []" multiple @change="form.conditions.tags = Array.from(($event.target as HTMLSelectElement).selectedOptions, item => item.value)"><option v-for="tag in tags" :key="tag.name" :value="tag.name">{{ tag.name }}</option></select></label>
-            <InboxFieldMatchers class="sm:col-span-2" :model-value="form.conditions.fields ?? []" @update:model-value="form.conditions.fields = $event" />
-          </div>
-        </details>
-        <fieldset class="grid gap-2">
-          <legend>{{ t('inboxRules.actions') }}</legend>
-          <div v-for="(action, i) in form.actions" :key="i" class="grid gap-2 rounded-md border border-border p-2">
-            <label>{{ t('inboxRules.actionType') }}
-              <select v-model="action.type" @change="action.value = ''; action.consent_confirmed = false">
-                <option v-for="type in actions" :key="type" :value="type">{{ t('inboxRules.action.' + type) }}</option>
-              </select>
-            </label>
-            <select v-if="action.type === 'priority' || action.type === 'status'" v-model="action.value" :aria-label="t('inboxRules.actionValue')">
-              <option value="">â€”</option><option v-for="value in action.type === 'priority' ? priorities : statuses" :key="value" :value="value">{{ t('inboxWorkflow.' + action.type + '.' + value) }}</option>
-            </select>
-            <select v-else-if="action.type === 'assign'" v-model="action.value" :aria-label="t('inboxQueue.assignee')"><option value="">â€”</option><option v-for="user in users" :key="user.id" :value="user.id">{{ user.full_name }}</option></select>
-            <select v-else-if="action.type === 'tag'" v-model="action.value" :aria-label="t('contacts.tags')"><option value="">â€”</option><option v-for="tag in tags" :key="tag.name" :value="tag.name">{{ tag.name }}</option></select>
-            <template v-else-if="action.type === 'send_template'">
-              <select v-model="action.value" :aria-label="t('inboxRules.action.send_template')"><option value="">â€”</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.name }} Â· {{ item.language }}</option></select>
-              <label><input v-model="action.consent_confirmed" type="checkbox" /> {{ t('inboxRules.consent') }}</label>
-            </template>
-            <textarea v-else v-model="action.value" rows="2" maxlength="4096" :aria-label="t('inboxRules.actionValue')" />
-            <div class="flex flex-wrap gap-1">
-              <Button size="sm" variant="ghost" type="button" :disabled="!i" @click="move(i, -1)">{{ t('inboxRules.moveUp') }}</Button>
-              <Button size="sm" variant="ghost" type="button" :disabled="i === form.actions.length - 1" @click="move(i, 1)">{{ t('inboxRules.moveDown') }}</Button>
-              <Button size="sm" variant="ghost" type="button" :disabled="form.actions.length <= 1" @click="form.actions.splice(i, 1)">{{ t('common.remove') }}</Button>
+        <p v-else-if="ready && !enabled">
+          <RouterLink to="/settings" class="underline">{{
+            t('inboxRules.enableFirst')
+          }}</RouterLink>
+        </p>
+        <template v-else-if="ready && enabled">
+          <div v-if="!editing" class="inbox-notice" role="status">
+            <ShieldCheck class="h-5 w-5" aria-hidden="true" />
+            <div>
+              <strong>{{
+                t(
+                  switchState.enabled
+                    ? 'inboxRules.sendsEnabled'
+                    : 'inboxRules.sendsHeld',
+                )
+              }}</strong>
+              <p class="inbox-caption">{{ t('inboxUX.replySafety') }}</p>
             </div>
           </div>
-        </fieldset>
-        <div class="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" :disabled="form.actions.length >= 10" @click="form.actions.push({ type: 'note', value: '' })">{{ t('inboxRules.addAction') }}</Button>
-          <Button type="submit" :disabled="busy || !readyToSave">{{ t('common.save') }}</Button>
-          <Button v-if="id" type="button" variant="ghost" @click="select()">{{ t('common.cancel') }}</Button>
-          <Button v-if="id" type="button" variant="ghost" :disabled="busy" @click="deleting ? save(true) : deleting = true">{{ t(deleting ? 'inboxRules.confirmDelete' : 'common.delete') }}</Button>
-        </div>
-      </form>
-      <section class="rounded-lg border border-border p-4">
-        <div class="mb-2 flex items-center justify-between gap-2"><h2 class="font-medium">{{ t('inboxRules.history') }}</h2><Button type="button" size="sm" variant="outline" :disabled="busy" @click="load">{{ t('inboxQueue.retry') }}</Button></div>
-        <p v-if="!runs.length">{{ t('inboxRules.noRuns') }}</p>
-        <ul v-else class="divide-y divide-border text-sm">
-          <li v-for="run in runs" :key="run.id" class="py-2">{{ run.workflow_name }} Â· {{ t('inboxRules.runState.' + run.state) }} <span v-if="run.outcome"> Â· {{ t('inboxRules.outcome.' + run.outcome) }}</span> Â· {{ new Date(run.created_at).toLocaleString() }}</li>
-        </ul>
-      </section>
-    </template>
+          <div v-if="lookupFailed" role="alert" class="inbox-notice">
+            {{ t('inboxQueue.loadFiltersError')
+            }}<Button variant="outline" size="sm" @click="loadLookups">{{
+              t('common.retry')
+            }}</Button>
+          </div>
+          <template v-if="!editing">
+            <InboxTabs
+              :model-value="
+                showTargets ? 'sla' : showHistory ? 'history' : mode
+              "
+              :label="t('inboxRules.title')"
+              :items="[
+                { value: 'rule', label: t('inboxRules.rules') },
+                { value: 'macro', label: t('inboxRules.macros') },
+                { value: 'history', label: t('inboxUX.historyTab') },
+                ...(auth.hasPermission('accounts', 'write')
+                  ? [{ value: 'sla', label: t('inboxUX.responseTargets') }]
+                  : []),
+              ]"
+              @update:model-value="changeTab"
+            />
+            <InboxSLASettings v-if="showTargets" />
+            <template v-else-if="!showHistory">
+              <div class="inbox-toolbar">
+                <p class="inbox-caption">
+                  {{
+                    t(
+                      mode === 'rule'
+                        ? 'inboxUX.rulesHelp'
+                        : 'inboxUX.macrosHelp',
+                    )
+                  }}
+                </p>
+                <label class="inbox-search"
+                  ><Search class="h-4 w-4 shrink-0" aria-hidden="true" /><input
+                    v-model="query"
+                    :aria-label="t('inboxUX.searchWorkflows')"
+                    :placeholder="t('inboxUX.searchWorkflows')"
+                /></label>
+              </div>
+              <div class="inbox-panel">
+                <ul v-if="filtered.length" class="inbox-list">
+                  <li v-for="w in filtered" :key="w.id" class="inbox-list-row">
+                    <div class="inbox-list-copy">
+                      <p class="inbox-list-title">{{ w.name }}</p>
+                      <p class="inbox-caption mt-1">
+                        {{
+                          w.kind === 'rule'
+                            ? t('inboxRules.event.' + w.trigger)
+                            : t('inboxUX.manualOnly')
+                        }}<span class="mx-2" aria-hidden="true">/</span
+                        >{{ inboxName(w) }}
+                      </p>
+                      <p class="inbox-caption">
+                        {{
+                          w.actions
+                            .map((a) => t('inboxRules.action.' + a.type))
+                            .join(', ')
+                        }}
+                      </p>
+                    </div>
+                    <span
+                      v-if="w.kind === 'rule'"
+                      class="inbox-badge"
+                      :data-state="w.enabled_at ? 'active' : 'disabled'"
+                      >{{
+                        t(
+                          w.enabled_at
+                            ? 'inboxRules.enabled'
+                            : 'inboxRules.disabled',
+                        )
+                      }}</span
+                    ><span v-else class="inbox-badge">{{
+                      t(
+                        hasReply(w)
+                          ? 'inboxUX.manualReply'
+                          : 'inboxUX.internalActions',
+                      )
+                    }}</span>
+                    <div class="flex gap-1">
+                      <Button variant="outline" size="sm" @click="select(w)"
+                        ><Pencil
+                          class="mr-1.5 h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />{{ t('common.edit') }}</Button
+                      ><Button variant="ghost" size="sm" @click="prepare(w)">{{
+                        t('inboxRules.dryRun')
+                      }}</Button>
+                    </div>
+                  </li>
+                </ul>
+                <div v-else class="inbox-empty">
+                  <Workflow class="h-8 w-8" aria-hidden="true" />
+                  <h2>
+                    {{
+                      t(
+                        query
+                          ? 'inboxUX.noMatches'
+                          : mode === 'rule'
+                            ? 'inboxUX.noRules'
+                            : 'inboxUX.noMacros',
+                      )
+                    }}
+                  </h2>
+                  <p>
+                    {{
+                      t(
+                        mode === 'rule'
+                          ? 'inboxUX.rulesEmptyHelp'
+                          : 'inboxUX.macrosEmptyHelp',
+                      )
+                    }}
+                  </p>
+                  <Button v-if="!query" variant="outline" @click="select()">{{
+                    t(mode === 'rule' ? 'inboxUX.newRule' : 'inboxUX.newMacro')
+                  }}</Button>
+                </div>
+              </div>
+              <section
+                v-if="dryRunId"
+                class="inbox-panel mt-5 p-5"
+                :aria-label="t('inboxRules.dryRun')"
+              >
+                <div class="inbox-toolbar">
+                  <h2 class="inbox-section-heading">
+                    {{ t('inboxRules.dryRun') }}
+                  </h2>
+                  <Button size="sm" variant="ghost" @click="closePreview">{{
+                    t('common.close')
+                  }}</Button>
+                </div>
+                <p class="inbox-caption mb-4">
+                  {{ t('inboxRules.dryRunHelp') }}
+                </p>
+                <label class="inbox-label"
+                  >{{ t('inboxRules.chooseCase')
+                  }}<select v-model="caseId" @change="preview = null">
+                    <option value="">{{ t('inboxRules.chooseCase') }}</option>
+                    <option v-for="c in cases" :key="c.id" :value="c.id">
+                      {{ c.contact_name || t('inboxQueue.unnamed') }} ({{
+                        c.account_name
+                      }})
+                    </option>
+                  </select></label
+                >
+                <p v-if="!cases.length" class="inbox-caption mt-2">
+                  {{ t('inboxUX.noCasesHelp') }}
+                </p>
+                <Button
+                  class="my-3"
+                  variant="outline"
+                  :disabled="!caseId"
+                  @click="runPreview"
+                  >{{ t('inboxRules.review') }}</Button
+                ><InboxWorkflowPreviewPanel
+                  v-if="preview"
+                  :preview="preview"
+                  :users="users"
+                />
+              </section>
+              <details class="mt-6">
+                <summary class="cursor-pointer text-sm font-medium">
+                  {{ t('inboxUX.replyControls') }}
+                </summary>
+                <div class="inbox-notice mt-3">
+                  <div class="flex-1">
+                    <p>
+                      {{
+                        t(
+                          !switchState.dispatch_available
+                            ? 'inboxRules.dispatchHeld'
+                            : switchState.enabled
+                              ? 'inboxRules.sendsEnabled'
+                              : 'inboxRules.sendsHeld',
+                        )
+                      }}
+                    </p>
+                    <p class="inbox-caption">
+                      {{ t('inboxUX.replyControlHelp') }}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    :disabled="busy || !switchState.dispatch_available"
+                    @click="stopOrStart"
+                    >{{
+                      t(
+                        switchState.enabled
+                          ? 'inboxRules.stopSends'
+                          : 'inboxRules.allowSends',
+                      )
+                    }}</Button
+                  >
+                </div>
+              </details>
+            </template>
+            <div v-else class="inbox-panel">
+              <div v-if="!runs.length" class="inbox-empty">
+                <History class="h-8 w-8" aria-hidden="true" />
+                <h2>{{ t('inboxRules.noRuns') }}</h2>
+                <p>{{ t('inboxUX.historyHelp') }}</p>
+              </div>
+              <ul v-else class="inbox-list">
+                <li v-for="run in runs" :key="run.id" class="inbox-list-row">
+                  <div class="inbox-list-copy">
+                    <p class="inbox-list-title">{{ run.workflow_name }}</p>
+                    <p class="inbox-caption">
+                      {{ new Date(run.created_at).toLocaleString()
+                      }}<span v-if="run.outcome">
+                        / {{ t('inboxRules.outcome.' + run.outcome) }}</span
+                      >
+                    </p>
+                  </div>
+                  <span class="inbox-badge">{{
+                    t('inboxRules.runState.' + run.state)
+                  }}</span>
+                </li>
+              </ul>
+            </div>
+          </template>
+          <template v-else>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="mb-4 -ml-2"
+              @click="select(undefined, false)"
+              ><ArrowLeft class="mr-2 h-4 w-4" aria-hidden="true" />{{
+                t('inboxUX.back')
+              }}</Button
+            >
+            <form
+              id="inbox-workflow-editor"
+              class="inbox-form"
+              @submit.prevent="save()"
+            >
+              <section class="inbox-form-section">
+                <h2>{{ t(id ? 'inboxRules.edit' : 'inboxRules.add') }}</h2>
+                <p>
+                  {{
+                    t(
+                      mode === 'rule'
+                        ? 'inboxUX.ruleEditorHelp'
+                        : 'inboxUX.macroEditorHelp',
+                    )
+                  }}
+                </p>
+                <label class="inbox-label"
+                  >{{ t('inboxRules.name')
+                  }}<input
+                    v-model.trim="form.name"
+                    maxlength="100"
+                    required
+                    :placeholder="t('inboxUX.nameExample')"
+                /></label>
+                <div v-if="mode === 'rule'" class="inbox-grid mt-4">
+                  <label class="inbox-label"
+                    >{{ t('inboxRules.trigger')
+                    }}<select v-model="form.trigger">
+                      <option
+                        v-for="trigger in triggers"
+                        :key="trigger"
+                        :value="trigger"
+                      >
+                        {{ t('inboxRules.event.' + trigger) }}
+                      </option>
+                    </select></label
+                  ><label class="inbox-label"
+                    >{{ t('inboxRules.position')
+                    }}<input
+                      v-model.number="form.position"
+                      type="number"
+                      min="-10000"
+                      max="10000"
+                      required
+                    /><span class="inbox-caption">{{
+                      t('inboxUX.orderHelp')
+                    }}</span></label
+                  >
+                </div>
+                <label v-if="mode === 'rule' && id" class="inbox-check mt-4"
+                  ><input v-model="form.enabled" type="checkbox" />{{
+                    t('inboxRules.enableRule')
+                  }}</label
+                >
+                <p v-if="mode === 'rule' && !id" class="inbox-caption mt-4">
+                  {{ t('inboxUX.newRulesDisabled') }}
+                </p>
+              </section>
+              <section class="inbox-form-section">
+                <h2>{{ t('inboxRules.conditions') }}</h2>
+                <p>{{ t('inboxUX.conditionsHelp') }}</p>
+                <div class="inbox-grid">
+                  <label class="inbox-label"
+                    >{{ t('inboxQueue.account')
+                    }}<select v-model="form.conditions.account_id">
+                      <option :value="undefined">
+                        {{ t('inboxSla.any') }}
+                      </option>
+                      <option v-for="a in accounts" :key="a.id" :value="a.id">
+                        {{ a.name }}
+                      </option>
+                    </select></label
+                  >
+                  <label class="inbox-label"
+                    >{{ t('inboxQueue.team')
+                    }}<select v-model="form.conditions.team_id">
+                      <option :value="undefined">
+                        {{ t('inboxSla.any') }}
+                      </option>
+                      <option v-for="a in teams" :key="a.id" :value="a.id">
+                        {{ a.name }}
+                      </option>
+                    </select></label
+                  >
+                  <label class="inbox-label"
+                    >{{ t('inboxWorkflow.caseStatus')
+                    }}<select v-model="form.conditions.status">
+                      <option :value="undefined">
+                        {{ t('inboxSla.any') }}
+                      </option>
+                      <option v-for="s in statuses" :key="s" :value="s">
+                        {{ t('inboxWorkflow.status.' + s) }}
+                      </option>
+                    </select></label
+                  >
+                  <label class="inbox-label"
+                    >{{ t('inboxWorkflow.casePriority')
+                    }}<select v-model="form.conditions.priority">
+                      <option :value="undefined">
+                        {{ t('inboxSla.any') }}
+                      </option>
+                      <option v-for="p in priorities" :key="p" :value="p">
+                        {{ t('inboxWorkflow.priority.' + p) }}
+                      </option>
+                    </select></label
+                  >
+                  <label class="inbox-label"
+                    >{{ t('inboxQueue.assignee')
+                    }}<select v-model="form.conditions.assignee_id">
+                      <option :value="undefined">
+                        {{ t('inboxSla.any') }}
+                      </option>
+                      <option v-for="a in users" :key="a.id" :value="a.id">
+                        {{ a.full_name }}
+                      </option>
+                    </select></label
+                  >
+                  <fieldset>
+                    <legend class="mb-2 text-xs font-medium">
+                      {{ t('contacts.tags') }}
+                    </legend>
+                    <p v-if="!tags.length" class="inbox-caption">
+                      {{ t('inboxUX.noTags') }}
+                    </p>
+                    <div class="flex flex-wrap gap-3">
+                      <label
+                        v-for="tag in tags"
+                        :key="tag.name"
+                        class="inbox-check"
+                        ><input
+                          v-model="form.conditions.tags"
+                          type="checkbox"
+                          :value="tag.name"
+                        />{{ tag.name }}</label
+                      >
+                    </div>
+                  </fieldset>
+                </div>
+                <div class="mt-4">
+                  <InboxFieldMatchers
+                    :model-value="form.conditions.fields ?? []"
+                    @update:model-value="form.conditions.fields = $event"
+                  />
+                </div>
+              </section>
+              <section class="inbox-form-section">
+                <h2>{{ t('inboxRules.actions') }}</h2>
+                <p>{{ t('inboxUX.actionsHelp') }}</p>
+                <div
+                  v-for="(action, i) in form.actions"
+                  :key="i"
+                  class="inbox-action-row"
+                >
+                  <span class="inbox-action-number" aria-hidden="true">{{
+                    i + 1
+                  }}</span
+                  ><InboxActionEditor
+                    :model-value="action"
+                    @update:model-value="(value) => (form.actions[i] = value)"
+                    :users="users"
+                    :tags="tags"
+                    :templates="templates"
+                  />
+                  <div class="inbox-action-controls">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      type="button"
+                      :aria-label="t('inboxRules.moveUp')"
+                      :disabled="!i"
+                      @click="move(i, -1)"
+                      ><ArrowUp class="h-4 w-4" aria-hidden="true" /></Button
+                    ><Button
+                      size="icon"
+                      variant="ghost"
+                      type="button"
+                      :aria-label="t('inboxRules.moveDown')"
+                      :disabled="i === form.actions.length - 1"
+                      @click="move(i, 1)"
+                      ><ArrowDown class="h-4 w-4" aria-hidden="true" /></Button
+                    ><Button
+                      size="icon"
+                      variant="ghost"
+                      type="button"
+                      :aria-label="t('common.remove')"
+                      :disabled="form.actions.length <= 1"
+                      @click="form.actions.splice(i, 1)"
+                      ><Trash2 class="h-4 w-4" aria-hidden="true"
+                    /></Button>
+                  </div>
+                </div>
+                <Button
+                  class="mt-3"
+                  type="button"
+                  variant="outline"
+                  :disabled="form.actions.length >= 10"
+                  @click="form.actions.push({ type: 'note', value: '' })"
+                  ><Plus class="mr-2 h-4 w-4" aria-hidden="true" />{{
+                    t('inboxRules.addAction')
+                  }}</Button
+                >
+              </section>
+              <footer class="inbox-form-footer">
+                <Button type="submit" :disabled="busy || !readyToSave">{{
+                  t('common.save')
+                }}</Button
+                ><Button
+                  type="button"
+                  variant="outline"
+                  :disabled="busy"
+                  @click="select(undefined, false)"
+                  >{{ t('common.cancel') }}</Button
+                ><Button
+                  v-if="id"
+                  class="ml-auto text-destructive"
+                  type="button"
+                  variant="ghost"
+                  :disabled="busy"
+                  @click="deleting = true"
+                  >{{ t('common.delete') }}</Button
+                >
+              </footer>
+            </form>
+          </template>
+        </template>
+        <p v-else-if="!failed" role="status" class="inbox-caption">
+          {{ t('common.loading') }}
+        </p>
+      </div>
+    </div>
+    <AlertDialog v-model:open="deleting"
+      ><AlertDialogContent
+        ><AlertDialogHeader
+          ><AlertDialogTitle
+            >{{ t('common.delete') }} {{ form.name }}?</AlertDialogTitle
+          ><AlertDialogDescription>{{
+            t('inboxUX.deleteHelp')
+          }}</AlertDialogDescription></AlertDialogHeader
+        ><AlertDialogFooter
+          ><AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel
+          ><AlertDialogAction :disabled="busy" @click="save(true)">{{
+            t('common.delete')
+          }}</AlertDialogAction></AlertDialogFooter
+        ></AlertDialogContent
+      ></AlertDialog
+    >
+    <AlertDialog v-model:open="confirmSends"
+      ><AlertDialogContent
+        ><AlertDialogHeader
+          ><AlertDialogTitle>{{ t('inboxRules.allowSends') }}</AlertDialogTitle
+          ><AlertDialogDescription>{{
+            t('inboxUX.allowRepliesConfirm')
+          }}</AlertDialogDescription></AlertDialogHeader
+        ><AlertDialogFooter
+          ><AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel
+          ><AlertDialogAction :disabled="busy" @click="stopOrStart">{{
+            t('inboxRules.allowSends')
+          }}</AlertDialogAction></AlertDialogFooter
+        ></AlertDialogContent
+      ></AlertDialog
+    >
   </main>
 </template>
-
-<style scoped>
-input:not([type="checkbox"]), select, textarea { @apply block w-full rounded-md border border-input bg-background px-2 py-1; }
-</style>
