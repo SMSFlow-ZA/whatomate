@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import InboxFieldPanel from './InboxFieldPanel.vue'
+import InboxFieldPanel from "./InboxFieldPanel.vue"
 import { Check, Flag, Clock, History, RotateCcw } from '@/lib/icons'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -190,14 +190,17 @@ function saveSnooze() {
         <p v-else class="inbox-caption py-3">
           {{ t('inboxUX.caseHistoryEmpty') }}
         </p>
-      </details><InboxFieldPanel v-if="current" :contact="contactId" :account="accountId" :case-id="current.id" :can-write="canWrite" />
-
+      </details>
+      <InboxFieldPanel v-if="current" :contact="contactId" :account="accountId" :case-id="current.id" :can-write="canWrite" />
     </template>
     <template v-else-if="current">
       <div class="inbox-case-controls">
         <template v-if="canWrite"
           ><label class="inbox-case-select"
-            ><Clock class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+            ><Clock
+              class="inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            /><select
               :aria-label="t('inboxWorkflow.caseStatus')"
               :value="current.status"
               :disabled="busy"
@@ -214,7 +217,10 @@ function saveSnooze() {
               </option>
             </select></label
           ><label v-if="current.status !== 'resolved'" class="inbox-case-select"
-            ><Flag class="inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" /><select
+            ><Flag
+              class="inbox-icon-height-small inbox-icon-width-small"
+              aria-hidden="true"
+            /><select
               :aria-label="t('inboxWorkflow.casePriority')"
               :value="current.priority"
               :disabled="busy"
@@ -236,7 +242,6 @@ function saveSnooze() {
         <button
           v-if="canWrite"
           type="button"
-
           class="small ml-auto"
           :class="{ outline: isResolved }"
           :disabled="busy"
@@ -245,17 +250,23 @@ function saveSnooze() {
               status: current.status === 'resolved' ? 'open' : 'resolved',
             })
           "
-          ><RotateCcw
+        >
+          <RotateCcw
             v-if="current.status === 'resolved'"
             class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
             aria-hidden="true"
-          /><Check v-else class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small" aria-hidden="true" />{{
+          /><Check
+            v-else
+            class="inbox-icon-gap inbox-icon-height-small inbox-icon-width-small"
+            aria-hidden="true"
+          />{{
             t(
               current.status === 'resolved'
                 ? 'inboxWorkflow.reopen'
                 : 'inboxUX.resolveAction',
             )
-          }}</button>
+          }}
+        </button>
       </div>
 
       <time
@@ -268,11 +279,13 @@ function saveSnooze() {
     </template>
     <button
       v-else-if="canWrite"
-
-
       :disabled="busy"
       @click="update({ status: 'open' })"
-       class="outline small" type="button">{{ t('inboxWorkflow.startCase') }}</button>
+      class="outline small"
+      type="button"
+    >
+      {{ t('inboxWorkflow.startCase') }}
+    </button>
     <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
       <label class="inbox-label"
         >{{ t('inboxWorkflow.snoozeUntil')
@@ -283,15 +296,16 @@ function saveSnooze() {
           :disabled="busy"
       /></label>
       <div class="flex gap-2">
-        <button type="submit" :disabled="busy" class="small">{{
-          t('common.save')
-        }}</button><button
+        <button type="submit" :disabled="busy" class="small">
+          {{ t('common.save') }}</button
+        ><button
           type="button"
-
-
           :disabled="busy"
           @click="snoozing = false"
-           class="outline small">{{ t('common.cancel') }}</button>
+          class="outline small"
+        >
+          {{ t('common.cancel') }}
+        </button>
       </div>
     </form>
   </section>
