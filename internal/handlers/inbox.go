@@ -58,6 +58,18 @@ func appendInboxActivity(tx *gorm.DB, c models.InboxCase, event models.InboxCase
 	event.OrganizationID = c.OrganizationID
 	event.AccountID = c.AccountID
 	event.CaseID = c.ID
+	switch {
+	case event.Kind == "opened" && event.EventKey == nil, event.Kind == "reopened":
+		event.WorkflowTrigger = "case_opened"
+	case event.Kind == "opened" && strings.HasPrefix(*event.EventKey, "handoff:"):
+		event.WorkflowTrigger = "case_opened"
+	case event.Kind == "opened":
+		event.WorkflowTrigger = "entry_message"
+	case event.Kind == "incoming_message" && event.OccurredAt != nil, event.Kind == "customer_replied":
+		event.WorkflowTrigger = "incoming_message"
+	case event.Kind == "updated" && event.ActorID != nil && event.FromStatus != event.ToStatus:
+		event.WorkflowTrigger = "status_changed"
+	}
 	return tx.Create(&event).Error
 }
 
@@ -352,6 +364,8 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, errInboxDisabled.Error(), nil, "")
 	case errors.Is(err, errInboxConflict):
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
+	case errors.Is(err, errInboxSendIneligible):
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
 	case errors.Is(err, errInboxTransition):
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxTransition.Error(), nil, "")
 	default:

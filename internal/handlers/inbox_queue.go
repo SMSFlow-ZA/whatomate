@@ -344,46 +344,56 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 			if input.AssigneeID == nil {
 				return errInboxTransition
 			}
-			var member models.UserOrganization
-			if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
-				Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", org, input.AssigneeID).First(&member).Error; err != nil {
-				return err
-			}
-			if c.TeamID != nil {
-				var teamMember models.TeamMember
-				if err := tx.Where("team_id = ? AND user_id = ?", c.TeamID, input.AssigneeID).First(&teamMember).Error; err != nil {
-					return err
-				}
-			}
-			c.AssigneeID = input.AssigneeID
-			c.Version++
-			if err := tx.Save(&c).Error; err != nil {
-				return err
-			}
-			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: "assigned"})
+			return assignInboxCase(tx, &c, user, *input.AssigneeID)
 		case "tag":
-			var tag models.Tag
-			if err := tx.Where("organization_id = ? AND name = ?", org, input.Tag).First(&tag).Error; err != nil {
-				return err
-			}
 			var contact models.Contact
-			if err := tx.Where("organization_id = ? AND id = ?", org, c.ContactID).First(&contact).Error; err != nil {
+			if err := tx.First(&contact, "organization_id = ? AND id = ?", org, c.ContactID).Error; err != nil {
 				return err
 			}
-			for _, value := range contact.Tags {
-				if value == tag.Name {
-					return nil
-				}
-			}
-			if err := tx.Model(&contact).Update("tags", append(contact.Tags, tag.Name)).Error; err != nil {
-				return err
-			}
-			c.Version++
-			if err := tx.Save(&c).Error; err != nil {
-				return err
-			}
-			return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: "tagged"})
+			return tagInboxCase(tx, &c, &contact, user, input.Tag)
 		}
 		return errInboxTransition
 	})
+}
+
+func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID) error {
+	var member models.UserOrganization
+	if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
+		Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", c.OrganizationID, assignee).First(&member).Error; err != nil {
+		return err
+	}
+	if c.TeamID != nil {
+		var teamMember models.TeamMember
+		if err := tx.Where("team_id = ? AND user_id = ?", c.TeamID, assignee).First(&teamMember).Error; err != nil {
+			return err
+		}
+	}
+	c.AssigneeID = &assignee
+	c.Version++
+	if err := tx.Save(c).Error; err != nil {
+		return err
+	}
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: "assigned"})
+}
+
+func tagInboxCase(tx *gorm.DB, c *models.InboxCase, contact *models.Contact, user uuid.UUID, name string) error {
+	var tag models.Tag
+	if err := tx.Where("organization_id = ? AND name = ?", c.OrganizationID, name).First(&tag).Error; err != nil {
+		return err
+	}
+	for _, value := range contact.Tags {
+		if value == tag.Name {
+			return nil
+		}
+	}
+	values := append(contact.Tags, tag.Name)
+	if err := tx.Model(contact).Update("tags", values).Error; err != nil {
+		return err
+	}
+	contact.Tags = values
+	c.Version++
+	if err := tx.Save(c).Error; err != nil {
+		return err
+	}
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: "tagged"})
 }

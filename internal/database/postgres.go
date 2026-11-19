@@ -75,6 +75,8 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxCaseActivity", &models.InboxCaseActivity{}},
 		{"InboxSavedView", &models.InboxSavedView{}},
 		{"InboxSLAPolicy", &models.InboxSLAPolicy{}},
+		{"InboxWorkflow", &models.InboxWorkflow{}},
+		{"InboxWorkflowRun", &models.InboxWorkflowRun{}},
 		{"Template", &models.Template{}},
 		{"WhatsAppFlow", &models.WhatsAppFlow{}},
 
@@ -130,7 +132,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return nil
+	return MigrateInboxWorkflowAuthority(db)
 }
 
 // RunMigrationWithProgress runs migrations with a progress bar display
@@ -166,6 +168,10 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 			return fmt.Errorf("failed to migrate %s: %w", m.Name, err)
 		}
 		currentStep++
+	}
+
+	if err := MigrateInboxWorkflowAuthority(silentDB); err != nil {
+		return err
 	}
 
 	// Create indexes
@@ -235,7 +241,7 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
-	return []string{
+	return append([]string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE chatbot_sessions ALTER COLUMN phone_number TYPE varchar(50)`,
@@ -293,7 +299,7 @@ func getIndexes() []string {
 		// IVR flows
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
-	}
+	}, inboxWorkflowIndexSQL...)
 }
 
 // CreateIndexes creates additional indexes not handled by GORM tags

@@ -1,5 +1,10 @@
 import { api } from '@/services/api'
 
+export interface InboxAction { type: 'assign' | 'tag' | 'priority' | 'status' | 'note' | 'send_text' | 'send_template'; value: string; consent_confirmed?: boolean }
+export interface InboxWorkflowInput { kind: 'macro' | 'rule'; name: string; trigger: string; position: number; actions: InboxAction[]; conditions: InboxFilters; enabled?: boolean }
+export interface InboxWorkflow extends InboxWorkflowInput { id: string; enabled_at?: string }
+export interface InboxWorkflowRun { id: string; workflow_name: string; state: string; created_at: string; outcome?: string }
+export interface InboxWorkflowPreview { matches: boolean; confirmation: string; actions: InboxAction[]; send_unavailable: boolean; recipient: { name: string; phone: string }; account: string; reply?: { text: string; header?: string; footer?: string; template?: string; template_key?: string; language?: string } }
 export type CaseStatus = 'open' | 'pending' | 'waiting_customer' | 'snoozed' | 'resolved'
 export type CasePriority = 'low' | 'normal' | 'high' | 'urgent'
 
@@ -51,11 +56,21 @@ type Envelope<T> = { data: T }
 const conversationPath = (accountId: string, contactId: string) =>
   '/inbox/accounts/' + encodeURIComponent(accountId) + '/contacts/' + encodeURIComponent(contactId)
 
+const workflowPath = (id: string) => '/inbox/workflow-definitions/' + encodeURIComponent(id)
 export const inboxService = {
   slaPolicies: () => api.get<Envelope<{ policies: InboxSLAPolicy[] }>>('/inbox/sla/policies'),
   setSlaPolicy: (id: string, policy: InboxSLAPolicy) => api.put('/inbox/sla/policies/' + encodeURIComponent(id), policy),
   deleteSlaPolicy: (id: string) => api.delete('/inbox/sla/policies/' + encodeURIComponent(id)),
   slaReport: (account: string, team: string, offset: number) => api.get<Envelope<{ cases: QueueCase[]; has_more: boolean }>>('/inbox/sla/report', { params: { account_id: account || undefined, team_id: team || undefined, offset } }),
+  workflowDefinitions: (kind: 'macro' | 'rule') => api.get<Envelope<{ workflows: InboxWorkflow[] }>>('/inbox/workflow-definitions', { params: {kind} }),
+  createWorkflow: (input: InboxWorkflowInput) => api.post('/inbox/workflow-definitions', input),
+  updateWorkflow: (id: string, input: InboxWorkflowInput) => api.put(workflowPath(id), input),
+  deleteWorkflow: (id: string) => api.delete(workflowPath(id)),
+  previewWorkflow: (id: string, case_id: string) => api.post<Envelope<InboxWorkflowPreview>>(workflowPath(id) + '/preview', { case_id }),
+  executeMacro: (id: string, case_id: string, run_id: string, confirmation: string) => api.post<Envelope<{ run: InboxWorkflowRun }>>(workflowPath(id) + '/execute', { case_id, run_id, confirmation }),
+  workflowRuns: (case_id?: string) => api.get<Envelope<{ runs: InboxWorkflowRun[] }>>('/inbox/workflow-runs', { params: {case_id} }),
+  automationState: () => api.get<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation'),
+  setAutomation: (enabled: boolean) => api.put<Envelope<{ enabled: boolean; dispatch_available: boolean }>>('/inbox/automation', { enabled }),
   settings: () => api.get<Envelope<{ enabled: boolean }>>('/inbox/workflows'),
   queue: (filters: InboxFilters, offset = 0) =>
     api.get<Envelope<{ cases: QueueCase[]; has_more: boolean }>>('/inbox/queue', {

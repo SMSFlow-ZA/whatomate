@@ -221,6 +221,14 @@ Use **Saved views** to name a filter you use regularly. A personal view is avail
 
 Select cases to resolve them, assign them to an agent or add a contact tag. Review and apply the action, then check the outcome for each case. An item can become unavailable or change before you apply an action. Case assignments apply to the selected WhatsApp account; tags remain contact-wide.
 
+### Workflow review and dispatch safety
+
+Rules run with the last editor's current permissions. After upgrading an earlier workflow release, review and enable existing rules again to record their responsible editor. Queued replies from an older release are held. Subsequent case or tag changes also hold queued replies for review; a workflow's own actions are part of its saved snapshot. Uncertain sends are reconciled rather than submitted again.
+
+![Inbox workflow editor with a synthetic rule](/whatomate/images/inbox-automation-desktop.png)
+
+![Inbox workflow editor on a mobile screen](/whatomate/images/inbox-automation-mobile.png)
+
 ![Synthetic lifecycle workflow on desktop](/whatomate/images/inbox-case-desktop.png)
 
 ![Synthetic lifecycle workflow on mobile](/whatomate/images/inbox-case-mobile.png)
@@ -251,3 +259,18 @@ The clock begins when the case enters the human queue, including chatbot handoff
 ![Synthetic response targets on desktop](/whatomate/images/inbox-response-targets-desktop.png)
 
 ![Synthetic response targets on mobile](/whatomate/images/inbox-response-targets-mobile.png)
+### Macros and rules
+
+Use **Macros** beside the composer to search by name and review the action sequence. Assignment previews display the agent’s name. Applying a non-sending macro still requires confirmation; opening its preview changes nothing. A macro that sends a reply identifies the recipient and exact content before confirmation. Use **Rules**, **Macros** and **History** in **Settings → Inbox workflows** to find definitions and run outcomes. Create or edit a definition in its focused editor. Use **Dry run** to select a case and review matching actions without applying them. New rules start disabled. Automatic replies remain paused until an administrator explicitly enables them and dispatch is available.
+
+Service text requires an active WhatsApp reply window. Outside that window, configure an eligible, approved utility template. The run history records the results. A send with an uncertain outcome stays in reconciliation with its original message ID.
+
+
+![Synthetic rule editor on desktop](/whatomate/images/inbox-rule-editor-desktop.png)
+
+![Synthetic rule editor on mobile](/whatomate/images/inbox-rule-editor-mobile.png)
+
+
+![Synthetic macro review on desktop](/whatomate/images/inbox-macro-review-desktop.png)
+
+![Synthetic macro review on mobile](/whatomate/images/inbox-macro-review-mobile.png)

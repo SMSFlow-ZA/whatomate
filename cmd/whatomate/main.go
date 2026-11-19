@@ -281,6 +281,7 @@ func runServer(args []string) {
 	slaCtx, slaCancel := context.WithCancel(context.Background())
 	go slaProcessor.Start(slaCtx)
 	go app.RunInboxSnoozes(slaCtx, time.Minute)
+	go app.RunInboxWorkflows(slaCtx, 3*time.Second)
 	lo.Info("SLA processor started")
 
 	// Start embedded workers
@@ -647,6 +648,15 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/inbox/sla/policies", app.ListInboxSLAPolicies)
 	g.PUT("/api/inbox/sla/policies/{account_id}", app.SetInboxSLAPolicy)
 	g.DELETE("/api/inbox/sla/policies/{account_id}", app.DeleteInboxSLAPolicy)
+	g.GET("/api/inbox/workflow-definitions", app.ListInboxWorkflows)
+	g.POST("/api/inbox/workflow-definitions", app.CreateInboxWorkflow)
+	g.PUT("/api/inbox/workflow-definitions/{id}", app.UpdateInboxWorkflow)
+	g.DELETE("/api/inbox/workflow-definitions/{id}", app.DeleteInboxWorkflow)
+	g.POST("/api/inbox/workflow-definitions/{id}/preview", app.PreviewInboxWorkflow)
+	g.POST("/api/inbox/workflow-definitions/{id}/execute", app.ExecuteInboxMacro)
+	g.GET("/api/inbox/workflow-runs", app.ListInboxWorkflowRuns)
+	g.GET("/api/inbox/automation", app.InboxAutomationState)
+	g.PUT("/api/inbox/automation", app.SetInboxAutomationState)
 	g.GET("/api/inbox/views", app.ListInboxSavedViews)
 	g.POST("/api/inbox/views", app.CreateInboxSavedView)
 	g.DELETE("/api/inbox/views/{id}", app.DeleteInboxSavedView)

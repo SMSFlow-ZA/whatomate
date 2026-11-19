@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/inbox-workflows',
+          name: 'inbox-workflows',
+          component: () => import('@/views/settings/InboxWorkflowsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
           component: () => import('@/views/settings/ChatbotSettingsView.vue'),

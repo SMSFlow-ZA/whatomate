@@ -49,15 +49,18 @@ type InboxCase struct {
 
 type InboxCaseActivity struct {
 	BaseModel
-	OrganizationID uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:1" json:"-"`
-	AccountID      uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:2" json:"-"`
-	CaseID         uuid.UUID         `gorm:"type:uuid;not null;index" json:"case_id"`
-	OccurredAt     *time.Time        `json:"occurred_at,omitempty"`
-	EventKey       *string           `gorm:"size:255;uniqueIndex:idx_inbox_event,priority:3" json:"-"`
-	ActorID        *uuid.UUID        `gorm:"type:uuid" json:"actor_id,omitempty"`
-	Kind           string            `gorm:"size:32;not null" json:"kind"`
-	FromStatus     InboxCaseStatus   `gorm:"size:24" json:"from_status,omitempty"`
-	ToStatus       InboxCaseStatus   `gorm:"size:24" json:"to_status,omitempty"`
-	FromPriority   InboxCasePriority `gorm:"size:12" json:"from_priority,omitempty"`
-	ToPriority     InboxCasePriority `gorm:"size:12" json:"to_priority,omitempty"`
+	OccurredAt          *time.Time        `json:"occurred_at,omitempty"`
+	OrganizationID      uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:1" json:"-"`
+	AccountID           uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:2" json:"-"`
+	CaseID              uuid.UUID         `gorm:"type:uuid;not null;index" json:"case_id"`
+	EventKey            *string           `gorm:"size:255;uniqueIndex:idx_inbox_event,priority:3" json:"-"`
+	ActorID             *uuid.UUID        `gorm:"type:uuid" json:"actor_id,omitempty"`
+	Kind                string            `gorm:"size:32;not null" json:"kind"`
+	FromStatus          InboxCaseStatus   `gorm:"size:24" json:"from_status,omitempty"`
+	ToStatus            InboxCaseStatus   `gorm:"size:24" json:"to_status,omitempty"`
+	FromPriority        InboxCasePriority `gorm:"size:12" json:"from_priority,omitempty"`
+	ToPriority          InboxCasePriority `gorm:"size:12" json:"to_priority,omitempty"`
+	WorkflowTrigger     string            `gorm:"size:24;not null;default:''" json:"-"`
+	WorkflowProcessedAt *time.Time        `json:"-"`
+	Detail              string            `gorm:"type:text" json:"detail,omitempty"`
 }
