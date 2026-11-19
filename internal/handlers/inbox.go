@@ -372,6 +372,8 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, errInboxDisabled.Error(), nil, "")
 	case errors.Is(err, errInboxConflict):
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
+	case errors.Is(err, errInboxAgentAtCapacity):
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxAgentAtCapacity.Error(), nil, "inbox_capacity")
 	case errors.Is(err, errInboxSendIneligible):
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
 	case errors.Is(err, errInboxTransition):
