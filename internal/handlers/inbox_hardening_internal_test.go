@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	"testing"
-	"time"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/require"
+	"testing"
+	"time"
 )
 
 func TestInboxHardeningHandoffStartsSLAAtHumanQueue(t *testing.T) {
@@ -39,4 +39,3 @@ func TestInboxHardeningHandoffStartsSLAAtHumanQueue(t *testing.T) {
 	require.NoError(t, db.Model(&models.InboxCase{}).Where("contact_id = ?", contact.ID).Count(&count).Error)
 	require.EqualValues(t, 1, count)
 }
-
