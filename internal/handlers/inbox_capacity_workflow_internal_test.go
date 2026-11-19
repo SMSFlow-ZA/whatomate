@@ -34,6 +34,9 @@ func TestInboxMacroAssignmentRespectsCapacity(t *testing.T) {
 		return app.runInboxWorkflowActions(tx, &current, contact, actor.ID, workflow, now)
 	})
 	require.ErrorIs(t, err, errInboxAgentAtCapacity)
+	request := testutil.NewJSONRequest(t, map[string]any{})
+	require.NoError(t, app.inboxError(request, err))
+	require.Equal(t, 409, testutil.GetResponseStatusCode(request))
 	require.NoError(t, db.First(&current, "id = ?", current.ID).Error)
 	require.Nil(t, current.AssigneeID)
 	// The explicit supervisor path retains its recorded capacity exception.
