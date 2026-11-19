@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
@@ -311,6 +312,22 @@ func TestApp_ServeMedia_AgentViaTeamTransfer(t *testing.T) {
 	testutil.SetPathParam(other, "message_id", msg.ID.String())
 	require.NoError(t, app.ServeMedia(other))
 	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(other))
+
+	// Team membership cannot bypass the current case's explicit assignee.
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(account).Update("name", "media-fixture").Error)
+	require.NoError(t, app.DB.Model(org).Update("inbox_workflows_enabled", true).Error)
+	require.NoError(t, app.DB.Model(msg).Update("whats_app_account", "media-fixture").Error)
+	assignee := uuid.New()
+	now := time.Now().UTC()
+	require.NoError(t, app.DB.Create(&models.InboxCase{OrganizationID: org.ID, AccountID: account.ID,
+		ContactID: contact.ID, AssigneeID: &assignee, Status: models.InboxCaseOpen,
+		Priority: models.InboxPriorityNormal, Version: 1, OpenedAt: now, StatusChangedAt: now}).Error)
+	assignedElsewhere := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(assignedElsewhere, org.ID, user.ID)
+	testutil.SetPathParam(assignedElsewhere, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(assignedElsewhere))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(assignedElsewhere))
 
 }
 
