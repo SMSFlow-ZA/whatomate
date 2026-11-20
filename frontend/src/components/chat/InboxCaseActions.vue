@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
-import { Check, Flag, Clock3, History, RotateCcw } from 'lucide-vue-next'
+import {
+  Check,
+  Flag,
+  Clock3,
+  History,
+  RotateCcw,
+  HelpCircle,
+} from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import InboxFieldPanel from './InboxFieldPanel.vue'
+import InboxResolutionDialog from './InboxResolutionDialog.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
-import { computed, ref, watch } from 'vue'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { isAxiosError } from 'axios'
 import {
@@ -25,11 +39,22 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [value: InboxCase]; 'needs-fields': [] }>()
 const { t, locale } = useI18n()
+const route = useRoute()
+const activityGroups = computed(() => {
+  const groups = new Map<string, CaseActivity[]>()
+  for (const item of activity.value) {
+    groups.set(item.case_id, [...(groups.get(item.case_id) ?? []), item])
+  }
+  return [...groups.entries()]
+})
 const current = ref<InboxCase | null>(null)
 const activity = ref<CaseActivity[]>([])
 const ready = ref(false)
+const loading = ref(false)
+const failed = ref(false)
 const busy = ref(false)
 const snoozing = ref(false)
+const resolving = ref(false)
 const snoozeUntil = ref('')
 let sequence = 0
 
@@ -52,6 +77,8 @@ const format = (value: string) =>
 
 async function load(reset = false) {
   const request = ++sequence
+  loading.value = true
+  failed.value = false
   if (reset) {
     current.value = null
     activity.value = []
@@ -63,18 +90,21 @@ async function load(reset = false) {
     const { data } = await inboxService.conversation(
       props.accountId,
       props.contactId,
+      typeof route.query.case_id === 'string' ? route.query.case_id : undefined,
     )
     if (request !== sequence) return
     current.value = data.data.case
-    activity.value = data.data.activity
+    activity.value = data.data.activity ?? []
     ready.value = true
   } catch {
-    if (request === sequence) ready.value = false
+    if (request === sequence) failed.value = true
+  } finally {
+    if (request === sequence) loading.value = false
   }
 }
 
 watch(
-  () => [props.accountId, props.contactId],
+  () => [props.accountId, props.contactId, route.query.case_id],
   () => {
     void load(true)
   },
@@ -96,6 +126,10 @@ async function update(input: {
   priority?: CasePriority
   snoozed_until?: string
 }) {
+  if (input.status === 'resolved') {
+    resolving.value = true
+    return
+  }
   const accountId = props.accountId
   const contactId = props.contactId
   busy.value = true
@@ -152,9 +186,65 @@ function saveSnooze() {
   }
   void update({ status: 'snoozed', snoozed_until: deadline.toISOString() })
 }
+function shortcut(event: KeyboardEvent) {
+  if (
+    props.history ||
+    !props.canWrite ||
+    busy.value ||
+    loading.value ||
+    event.repeat ||
+    event.isComposing ||
+    !event.ctrlKey ||
+    !event.altKey
+  )
+    return
+  const target = event.target as HTMLElement | null
+  if (
+    target?.closest(
+      'input,textarea,select,[contenteditable="true"],[role="dialog"]',
+    ) ||
+    document.querySelector('[role="dialog"][data-state="open"]')
+  )
+    return
+  const actions: Record<string, CaseStatus> = {
+    p: 'pending',
+    w: 'waiting_customer',
+    s: 'snoozed',
+    o: 'open',
+    Enter: current.value?.status === 'resolved' ? 'open' : 'resolved',
+  }
+  const status = actions[event.key]
+  if (
+    !status ||
+    (!current.value && status !== 'open') ||
+    (current.value?.status === 'resolved' && status !== 'open')
+  )
+    return
+  event.preventDefault()
+  if (status === 'snoozed') snoozing.value = true
+  else void update({ status })
+}
+onMounted(() => window.addEventListener('keydown', shortcut))
+onUnmounted(() => {
+  sequence++
+  window.removeEventListener('keydown', shortcut)
+})
+function resolvedCase(value: InboxCase) {
+  emit('changed', value)
+  void load()
+}
 </script>
 
 <template>
+  <div v-if="failed" role="alert" class="inbox-ui inbox-notice">
+    {{ t('inboxQuality.caseLoadError') }}
+    <Button type="button" size="sm" variant="outline" @click="load()">{{
+      t('common.retry')
+    }}</Button>
+  </div>
+  <p v-else-if="loading && !ready" role="status" class="inbox-caption">
+    {{ t('common.loading') }}
+  </p>
   <section
     v-if="ready"
     class="inbox-ui"
@@ -168,28 +258,69 @@ function saveSnooze() {
             t('inboxWorkflow.activity')
           }}
         </summary>
-        <ol v-if="activity.length">
-          <li v-for="item in activity" :key="item.id">
-            <time :datetime="item.created_at" class="inbox-caption">{{
-              format(item.created_at)
-            }}</time>
-            <p>
-              {{ t('inboxWorkflow.event.' + item.kind)
-              }}<span v-if="item.detail"> / {{ item.detail }}</span
-              ><span
-                v-if="item.to_status && item.to_status !== item.from_status"
-              >
-                / {{ t('inboxWorkflow.status.' + item.to_status) }}</span
-              ><span
-                v-if="
-                  item.to_priority && item.to_priority !== item.from_priority
-                "
-              >
-                / {{ t('inboxWorkflow.priority.' + item.to_priority) }}</span
-              >
-            </p>
-          </li>
-        </ol>
+        <div v-if="activity.length">
+          <section
+            v-for="[caseId, entries] in activityGroups"
+            :key="caseId"
+            :id="'case-' + caseId"
+          >
+            <RouterLink
+              class="inbox-caption mt-3 block underline"
+              :to="{ query: { ...route.query, case_id: caseId } }"
+              >{{ t('inboxQuality.caseLabel') }}
+              {{ caseId.slice(0, 8) }}</RouterLink
+            >
+            <ol>
+              <li v-for="item in entries" :key="item.id">
+                <time :datetime="item.created_at" class="inbox-caption">{{
+                  format(item.created_at)
+                }}</time>
+                <p>
+                  {{
+                    item.actor_name ||
+                    t(
+                      item.actor_id
+                        ? 'inboxQuality.formerUser'
+                        : 'inboxQuality.systemActor',
+                    )
+                  }}
+                  · {{ t('inboxWorkflow.event.' + item.kind)
+                  }}<span v-if="item.detail"> / {{ item.detail }}</span
+                  ><span
+                    v-if="item.to_status && item.to_status !== item.from_status"
+                  >
+                    /
+                    {{
+                      item.from_status
+                        ? t('inboxWorkflow.status.' + item.from_status) + ' → '
+                        : ''
+                    }}{{ t('inboxWorkflow.status.' + item.to_status) }}</span
+                  ><span
+                    v-if="
+                      item.to_priority &&
+                      item.to_priority !== item.from_priority
+                    "
+                  >
+                    /
+                    {{
+                      item.from_priority
+                        ? t('inboxWorkflow.priority.' + item.from_priority) +
+                          ' → '
+                        : ''
+                    }}{{
+                      t('inboxWorkflow.priority.' + item.to_priority)
+                    }}</span
+                  >
+                  <span v-if="item.assignee_name || item.team_name">
+                    / {{ item.team_name
+                    }}{{ item.team_name && item.assignee_name ? ' · ' : ''
+                    }}{{ item.assignee_name }}</span
+                  >
+                </p>
+              </li>
+            </ol>
+          </section>
+        </div>
         <p v-else class="inbox-caption py-3">
           {{ t('inboxUX.caseHistoryEmpty') }}
         </p>
@@ -247,6 +378,7 @@ function saveSnooze() {
           type="button"
           size="sm"
           class="ml-auto"
+          aria-keyshortcuts="Control+Alt+Enter"
           :variant="current.status === 'resolved' ? 'outline' : 'default'"
           :disabled="busy"
           @click="
@@ -267,7 +399,43 @@ function saveSnooze() {
           }}</Button
         >
       </div>
-      <InboxSLAIndicators v-if="current.sla" class="mt-2" :sla="current.sla" />
+      <div class="mt-1 flex items-start gap-2">
+        <details v-if="current.sla" class="min-w-0 flex-1">
+          <summary class="inbox-caption min-h-8 cursor-pointer py-1">
+            {{ t('inboxQuality.responseDetails') }}
+          </summary>
+          <InboxSLAIndicators v-if="current.sla" :sla="current.sla" />
+        </details>
+        <Popover
+          ><PopoverTrigger as-child
+            ><Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              :aria-label="t('inboxQuality.statusHelpTitle')"
+              ><HelpCircle
+                class="h-4 w-4"
+                aria-hidden="true" /></Button></PopoverTrigger
+          ><PopoverContent
+            class="inbox-ui max-h-[75dvh] w-80 max-w-[calc(100vw-2rem)] overflow-auto"
+            align="end"
+            ><h3 class="font-medium">
+              {{ t('inboxQuality.statusHelpTitle') }}
+            </h3>
+            <dl class="inbox-caption grid gap-2 py-2">
+              <template
+                v-for="state in ['pending', 'waiting_customer', 'snoozed']"
+                :key="state"
+                ><dt class="font-medium">
+                  {{ t('inboxWorkflow.status.' + state) }}
+                </dt>
+                <dd>{{ t('inboxQuality.statusHelp.' + state) }}</dd></template
+              >
+            </dl>
+            <p class="inbox-caption py-2">{{ t('inboxQuality.shortcuts') }}</p>
+          </PopoverContent></Popover
+        >
+      </div>
       <time
         v-if="current.snoozed_until"
         class="inbox-caption mt-2 block"
@@ -307,5 +475,12 @@ function saveSnooze() {
         >
       </div>
     </form>
+    <InboxResolutionDialog
+      v-if="!history"
+      v-model="resolving"
+      :account="accountId"
+      :contact="contactId"
+      @resolved="resolvedCase($event)"
+    />
   </section>
 </template>

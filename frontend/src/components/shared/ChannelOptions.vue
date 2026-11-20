@@ -6,7 +6,7 @@ const model = defineModel<ChannelOptions>({ required: true })
 const draft = reactive<ChannelOptions>({ ...initialChannelOptions(), ...model.value })
 watch(() => model.value, value => Object.assign(draft,value), { deep: true })
 watch(draft, value => { model.value = { ...value } }, { deep: true })
-const props = withDefaults(defineProps<{ text?: string; rich?: boolean; allowDirectSms?: boolean; disabled?: boolean }>(), { text: '', rich: false, allowDirectSms: false, disabled: false })
+const props = withDefaults(defineProps<{ text?: string; rich?: boolean; allowDirectSms?: boolean; disabled?: boolean; showSetupHint?: boolean }>(), { text: '', rich: false, allowDirectSms: false, disabled: false,showSetupHint:true })
 const connections = ref<ChannelConnection[]>([]), loaded = ref(false), preview = ref(''), previewError = ref('')
 const active = computed(() => draft.channel === 'sms' || draft.fallback_enabled)
 let previewGeneration = 0
@@ -63,5 +63,5 @@ onUnmounted(() => clearTimeout(timer))
       <p v-if="previewError" class="text-xs text-destructive" role="alert">{{ previewError }}</p>
     </template>
   </fieldset>
-  <p v-else-if="loaded" class="mb-2 text-xs text-muted-foreground">SMS is available after an administrator connects SMSFlow in Settings → Channels.</p>
+  <p v-else-if="loaded && showSetupHint" class="mb-2 text-xs text-muted-foreground">SMS is available after an administrator connects SMSFlow in Settings → Channels.</p>
 </template>

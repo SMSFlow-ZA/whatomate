@@ -7,10 +7,70 @@ const mocks = vi.hoisted(() => ({
   queue: vi.fn(),
   teams: vi.fn(),
   views: vi.fn(),
+  fields: vi.fn(),
 }))
 vi.mock('@/services/inbox', () => ({
-  inboxService: { queue: mocks.queue, views: mocks.views },
+  inboxService: {
+    queue: mocks.queue,
+    views: mocks.views,
+    fieldDefinitions: mocks.fields,
+  },
 }))
+
+it('isolates saved-view drafts and detaches its scope when the team changes', async () => {
+  const view = {
+    id: 'shared-view',
+    name: 'Team view',
+    team_id: 'team-a',
+    filters: {
+      predicates: [{ field: 'priority', operator: 'eq', value: 'high' }],
+    },
+  }
+  mocks.queue.mockResolvedValue({
+    data: { data: { cases: [], has_more: false } },
+  })
+  mocks.views.mockResolvedValue({ data: { data: { views: [view] } } })
+  mocks.fields.mockResolvedValue({ data: { data: { definitions: [] } } })
+  mocks.teams.mockResolvedValue({ teams: [{ id: 'team-a', name: 'Team A' }] })
+  const root = document.createElement('div')
+  document.body.append(root)
+  const app = createApp({ render: () => h(InboxQueues, { active: true }) })
+  const vm = app.mount(root)
+  const state = (
+    vm.$.subTree.component as unknown as {
+      setupState: {
+        activeView: string
+        filters: { team_id?: string; predicates?: unknown[] }
+        chooseView: () => void
+        changeTeam: () => void
+      }
+    }
+  ).setupState
+  const settle = async () => {
+    for (let i = 0; i < 15; i++) {
+      await Promise.resolve()
+      await nextTick()
+    }
+  }
+  try {
+    await settle()
+    state.activeView = view.id
+    state.chooseView()
+    expect(state.filters.team_id).toBe('team-a')
+    state.filters.predicates!.splice(0, 1)
+    expect(view.filters.predicates).toHaveLength(1)
+    state.chooseView()
+    expect(state.filters.predicates).toHaveLength(1)
+    state.filters.team_id = undefined
+    state.changeTeam()
+    await settle()
+    expect(state.activeView).toBe('')
+    expect(mocks.queue.mock.lastCall![3]).toBeUndefined()
+  } finally {
+    app.unmount()
+    root.remove()
+  }
+})
 vi.mock('@/services/api', () => ({
   accountsService: {
     list: vi.fn().mockResolvedValue({ data: { data: { accounts: [] } } }),
@@ -149,5 +209,50 @@ it('marks only the selected account thread as current for a shared contact', asy
   } finally {
     app.unmount()
     root.remove()
+  }
+})
+
+it('restores saved queue filters only within the same user and organization context', async () => {
+  const key = 'inbox-navigation:quality-user:org-a'
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      filters: { queue: 'follow_ups', priority: 'high' },
+      view: '',
+    }),
+  )
+  mocks.queue.mockResolvedValue({
+    data: { data: { cases: [], has_more: false } },
+  })
+  mocks.views.mockResolvedValue({ data: { data: { views: [] } } })
+  mocks.teams.mockResolvedValue({ teams: [] })
+  const context = ref('quality-user:org-a'),
+    root = document.createElement('div')
+  document.body.append(root)
+  const app = createApp({
+    render: () => h(InboxQueues, { active: true, contextKey: context.value }),
+  })
+  app.mount(root)
+  try {
+    for (let i = 0; i < 15; i++) {
+      await Promise.resolve()
+      await nextTick()
+    }
+    expect(mocks.queue.mock.calls[0]![0]).toMatchObject({
+      queue: 'follow_ups',
+      priority: 'high',
+    })
+    context.value = 'quality-user:org-b'
+    for (let i = 0; i < 15; i++) {
+      await Promise.resolve()
+      await nextTick()
+    }
+    expect(mocks.queue.mock.lastCall![0]).toMatchObject({ queue: 'mine' })
+    expect(mocks.queue.mock.lastCall![0].priority).toBeUndefined()
+  } finally {
+    app.unmount()
+    root.remove()
+    localStorage.removeItem(key)
+    localStorage.removeItem('inbox-navigation:quality-user:org-b')
   }
 })

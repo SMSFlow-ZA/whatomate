@@ -8,6 +8,7 @@ import {
 import { Filter, Bookmark, Inbox, RotateCw } from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import InboxFieldMatchers from './InboxFieldMatchers.vue'
+import InboxConditionBuilder from './InboxConditionBuilder.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -28,6 +29,7 @@ import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 
 const props = defineProps<{
+  contextKey?: string
   active: boolean
   selectedContact?: string
   selectedAccount?: string
@@ -38,9 +40,10 @@ let lookupsLoaded = false
 const emit = defineEmits<{ open: [row: QueueCase]; changed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
-const filters = ref<InboxFilters>({ tags: [] })
+const filters = ref<InboxFilters>({ tags: [], queue: 'mine' })
 const rows = ref<QueueCase[]>([])
 const views = ref<SavedInboxView[]>([])
+const publishTeams = ref<{ id: string; name: string }[]>([])
 const accounts = ref<{ id: string; name: string }[]>([])
 const teams = ref<{ id: string; name: string }[]>([])
 const agents = ref<{ id: string; full_name: string }[]>([])
@@ -48,6 +51,29 @@ const tags = ref<{ name: string }[]>([])
 const selected = ref<string[]>([])
 const results = ref<Record<string, BulkInboxResult>>({})
 const resultContacts = ref<Record<string, string>>({})
+const resultRows = ref<Record<string, QueueCase>>({})
+const counts = ref<Record<string, number>>({})
+const updatedAt = ref('')
+const editingView = ref(false)
+const currentView = computed(() =>
+  views.value.find((view) => view.id === activeView.value),
+)
+const storageKey = computed(() =>
+  props.contextKey ? 'inbox-navigation:' + props.contextKey : '',
+)
+function restoreNavigation() {
+  try {
+    const raw = storageKey.value ? localStorage.getItem(storageKey.value) : null
+    const state = raw ? JSON.parse(raw) : null
+    filters.value =
+      state?.filters && typeof state.filters === 'object'
+        ? state.filters
+        : { tags: [], queue: 'mine' }
+    activeView.value = typeof state?.view === 'string' ? state.view : ''
+  } catch {
+    filters.value = { tags: [], queue: 'mine' }
+  }
+}
 const loading = ref(false)
 const failed = ref(false)
 const offset = ref(0)
@@ -56,6 +82,7 @@ const saving = ref(false)
 const viewName = ref('')
 const viewTeam = ref('')
 const activeView = ref('')
+restoreNavigation()
 const action = ref<BulkInboxAction>('resolve')
 const actionValue = ref('')
 const overrideReason = ref('')
@@ -110,8 +137,15 @@ async function refresh() {
   loading.value = true
   failed.value = false
   try {
-    const { data } = await inboxService.queue(selectedFilters(), offset.value)
+    const { data } = await inboxService.queue(
+      selectedFilters(),
+      offset.value,
+      true,
+      activeView.value || undefined,
+    )
     if (id !== revision) return
+    counts.value = data.data.counts ?? {}
+    updatedAt.value = new Date().toLocaleTimeString()
     rows.value = data.data.cases
     hasMore.value = data.data.has_more
     selected.value = selected.value.filter((selectedId) =>
@@ -126,7 +160,16 @@ async function refresh() {
 
 async function refreshViews() {
   try {
-    views.value = (await inboxService.views()).data.data.views
+    const response = (await inboxService.views()).data.data
+    views.value = response.views
+    publishTeams.value = response.publish_teams ?? []
+    if (
+      activeView.value &&
+      !views.value.some((view) => view.id === activeView.value)
+    ) {
+      activeView.value = ''
+      filters.value = { tags: [], queue: 'mine' }
+    }
   } catch {
     toast.error(t('inboxQueue.loadViewsError'))
   }
@@ -135,6 +178,15 @@ async function refreshViews() {
 watch(
   filters,
   () => {
+    if (storageKey.value)
+      try {
+        localStorage.setItem(
+          storageKey.value,
+          JSON.stringify({ filters: filters.value, view: activeView.value }),
+        )
+      } catch {
+        /* Storage can be disabled by the browser. */
+      }
     offset.value = 0
     selected.value = []
     results.value = {}
@@ -149,9 +201,23 @@ async function loadLookups() {
   const results = await Promise.allSettled([
     accountsService.list().then((res) => {
       accounts.value = res.data.data?.accounts ?? []
+      if (
+        filters.value.account_id &&
+        !accounts.value.some((item) => item.id === filters.value.account_id)
+      ) {
+        filters.value.account_id = undefined
+        activeView.value = ''
+      }
     }),
     teamsStore.fetchTeams({ limit: 100 }).then((result) => {
       teams.value = result.teams
+      if (
+        filters.value.team_id &&
+        !teams.value.some((item) => item.id === filters.value.team_id)
+      ) {
+        filters.value.team_id = undefined
+        activeView.value = ''
+      }
     }),
     usersService.list({ limit: 100 }).then((res) => {
       agents.value = res.data.data?.users ?? []
@@ -160,6 +226,18 @@ async function loadLookups() {
       tags.value = (res.data as any).data?.tags ?? []
     }),
   ])
+  if (
+    accounts.value.length &&
+    filters.value.account_id &&
+    !accounts.value.some((item) => item.id === filters.value.account_id)
+  )
+    filters.value.account_id = undefined
+  if (
+    teams.value.length &&
+    filters.value.team_id &&
+    !teams.value.some((item) => item.id === filters.value.team_id)
+  )
+    filters.value.team_id = undefined
   lookupsLoaded = results.every((result) => result.status === 'fulfilled')
   lookupFailed.value = !lookupsLoaded
 }
@@ -183,6 +261,18 @@ watch(
     }
   },
 )
+watch(
+  () => props.contextKey,
+  () => {
+    revision++
+    rows.value = []
+    selected.value = []
+    offset.value = 0
+    lookupsLoaded = false
+    restoreNavigation()
+    activate()
+  },
+)
 watch(selected, () => {
   reviewing.value = false
 })
@@ -196,8 +286,19 @@ onUnmounted(() => {
 })
 
 function chooseView() {
+  editingView.value = false
   const view = views.value.find((view) => view.id === activeView.value)
-  filters.value = view ? { tags: [], ...view.filters } : { tags: [] }
+  filters.value = view
+    ? {
+        tags: [],
+        ...JSON.parse(JSON.stringify(view.filters)),
+        ...(view.team_id ? { team_id: view.team_id } : {}),
+      }
+    : { tags: [], queue: 'mine' }
+}
+function changeTeam() {
+  activeView.value = ''
+  editingView.value = false
 }
 
 function pageBy(delta: number) {
@@ -207,6 +308,36 @@ function pageBy(delta: number) {
   void refresh()
 }
 
+function editView() {
+  const view = currentView.value
+  if (!view?.capabilities?.edit) return
+  editingView.value = true
+  viewName.value = view.name
+  viewTeam.value = view.team_id ?? ''
+}
+async function updateView() {
+  if (
+    !currentView.value?.capabilities?.edit ||
+    !viewName.value.trim() ||
+    saving.value
+  )
+    return
+  saving.value = true
+  try {
+    await inboxService.updateView(
+      activeView.value,
+      viewName.value.trim(),
+      selectedFilters(),
+      viewTeam.value || undefined,
+    )
+    editingView.value = false
+    await refreshViews()
+  } catch {
+    toast.error(t('inboxQueue.saveError'))
+  } finally {
+    saving.value = false
+  }
+}
 async function saveView() {
   if (!viewName.value.trim() || saving.value) return
   saving.value = true
@@ -242,7 +373,9 @@ async function applyBulk() {
   if (!actionReady.value || saving.value) return
   saving.value = true
   try {
-    const selection = selectedCases.value.map((row) => ({
+    const snapshot = [...selectedCases.value]
+    resultRows.value = Object.fromEntries(snapshot.map((row) => [row.id, row]))
+    const selection = snapshot.map((row) => ({
       id: row.id,
       version: row.version,
     }))
@@ -258,7 +391,7 @@ async function applyBulk() {
       data.data.results.map((item) => [item.id, item.result]),
     )
     resultContacts.value = Object.fromEntries(
-      selectedCases.value.map((row) => [
+      snapshot.map((row) => [
         row.id,
         row.contact_name || t('inboxQueue.unnamed'),
       ]),
@@ -289,9 +422,15 @@ async function applyBulk() {
           :key="queue"
           type="button"
           :aria-pressed="(filters.queue || '') === queue"
+          :aria-label="t('inboxQueue.queue.' + (queue || 'all'))"
           @click="filters.queue = queue"
         >
           {{ t('inboxQueue.queue.' + (queue || 'all')) }}
+          <span
+            v-if="counts[queue || 'all'] !== undefined"
+            class="tabular-nums"
+            >{{ counts[queue || 'all'] }}</span
+          >
         </button>
       </nav>
       <div class="mt-3 flex items-center gap-1">
@@ -326,7 +465,7 @@ async function applyBulk() {
               >
               <label class="inbox-label"
                 >{{ t('inboxQueue.team')
-                }}<select v-model="filters.team_id">
+                }}<select v-model="filters.team_id" @change="changeTeam">
                   <option :value="undefined">
                     {{ t('inboxQueue.allTeams') }}
                   </option>
@@ -398,7 +537,7 @@ async function applyBulk() {
               <InboxFieldMatchers
                 :model-value="filters.fields ?? []"
                 @update:model-value="filters.fields = $event"
-              /><Button
+              /><InboxConditionBuilder v-model="filters" /><Button
                 variant="outline"
                 size="sm"
                 @click="filters = { tags: [], queue: filters.queue }"
@@ -424,32 +563,52 @@ async function applyBulk() {
               >{{ t('inboxQueue.chooseView')
               }}<select v-model="activeView" @change="chooseView">
                 <option value="">{{ t('inboxQueue.chooseView') }}</option>
-                <option v-for="view in views" :key="view.id" :value="view.id">
-                  {{ view.name }}
-                </option>
+                <optgroup
+                  v-for="group in ['personal', 'team']"
+                  :key="group"
+                  :label="t('inboxQueue.' + group)"
+                >
+                  <option
+                    v-for="view in views.filter((view) =>
+                      group === 'team' ? !!view.team_id : !view.team_id,
+                    )"
+                    :key="view.id"
+                    :value="view.id"
+                  >
+                    {{ view.name }}
+                  </option>
+                </optgroup>
               </select></label
             ><Button
-              v-if="activeView"
+              v-if="currentView?.capabilities?.remove"
               class="mt-2 text-destructive"
               variant="ghost"
               size="sm"
               @click="removeView"
               >{{ t('inboxQueue.deleteView') }}</Button
             >
+            <Button
+              v-if="currentView?.capabilities?.edit"
+              variant="outline"
+              size="sm"
+              class="mt-2"
+              @click="editView"
+              >{{ t('common.edit') }}</Button
+            >
             <form
               class="mt-4 grid gap-3 border-t border-border pt-4"
-              @submit.prevent="saveView"
+              @submit.prevent="editingView ? updateView() : saveView()"
             >
               <p class="inbox-caption">{{ t('inboxUX.viewSaveHelp') }}</p>
               <label class="inbox-label"
                 >{{ t('inboxQueue.viewName')
                 }}<input v-model="viewName" maxlength="100" required /></label
-              ><label v-if="teams.length" class="inbox-label"
+              ><label v-if="publishTeams.length" class="inbox-label"
                 >{{ t('inboxQueue.visibility')
                 }}<select v-model="viewTeam">
                   <option value="">{{ t('inboxQueue.personal') }}</option>
                   <option
-                    v-for="entry in teams"
+                    v-for="entry in publishTeams"
                     :key="entry.id"
                     :value="entry.id"
                   >
@@ -460,7 +619,9 @@ async function applyBulk() {
                 type="submit"
                 size="sm"
                 :disabled="saving || !viewName.trim()"
-                >{{ t('inboxQueue.saveView') }}</Button
+                >{{
+                  t(editingView ? 'common.save' : 'inboxQueue.saveView')
+                }}</Button
               >
             </form></PopoverContent
           ></Popover
@@ -469,12 +630,15 @@ async function applyBulk() {
           variant="ghost"
           size="icon"
           class="ml-auto h-8 w-8"
-          :aria-label="t('inboxQueue.retry')"
+          :aria-label="t('inboxQuality.refresh')"
           :disabled="loading"
           @click="refresh"
           ><RotateCw class="h-3.5 w-3.5" aria-hidden="true"
         /></Button>
       </div>
+      <p v-if="updatedAt" class="inbox-caption mt-2" role="status">
+        {{ t('inboxQuality.lastUpdated', { time: updatedAt }) }}
+      </p>
       <p v-if="activeView" class="inbox-caption mt-2">
         {{ views.find((v) => v.id === activeView)?.name }}
       </p>
@@ -487,7 +651,13 @@ async function applyBulk() {
     </div>
     <div v-if="canEdit && selectedCases.length" class="inbox-queue-bulk">
       <p class="mb-2 text-sm font-medium">
-        {{ t('inboxQueue.confirmCount', { count: selectedCases.length }) }}
+        {{
+          t(
+            'inboxQueue.confirmCount',
+            { count: selectedCases.length },
+            selectedCases.length,
+          )
+        }}
       </p>
       <div class="flex gap-2">
         <select
@@ -572,7 +742,16 @@ async function applyBulk() {
         </summary>
         <ul class="mt-2 text-xs">
           <li v-for="(result, id) in results" :key="id">
-            {{ resultContacts[id] }}: {{ t('inboxQueue.result.' + result) }}
+            <button
+              v-if="resultRows[id]"
+              type="button"
+              class="min-h-10 text-left underline"
+              @click="emit('open', resultRows[id]!)"
+            >
+              {{ resultContacts[id] }} · {{ resultRows[id]!.account_name }} ·
+              {{ id.slice(0, 8) }}</button
+            ><span v-else>{{ resultContacts[id] }}</span
+            >: {{ t('inboxQueue.result.' + result) }}
           </li>
         </ul>
       </details>
@@ -627,6 +806,16 @@ async function applyBulk() {
             ><span class="inbox-caption mt-1 block truncate">{{
               row.account_name
             }}</span
+            ><span
+              v-if="row.message_preview"
+              class="mt-1 block truncate text-sm"
+              >{{ row.message_preview }}</span
+            ><span class="inbox-caption mt-1 block truncate"
+              >{{ row.team_name || t('inboxQuality.noTeam') }} ·
+              {{ row.assignee_name || t('inboxQueue.queue.unassigned') }}</span
+            ><span v-if="row.last_inbound_at" class="inbox-caption mt-1 block"
+              >{{ t('inboxQuality.waitingSince') }}
+              {{ new Date(row.last_inbound_at).toLocaleString() }}</span
             ><span class="mt-2 flex flex-wrap gap-1.5"
               ><span class="inbox-badge">{{
                 t('inboxWorkflow.status.' + row.status)
@@ -636,11 +825,7 @@ async function applyBulk() {
                 :class="{ 'text-destructive': row.priority === 'urgent' }"
                 >{{ t('inboxWorkflow.priority.' + row.priority) }}</span
               ></span
-            ><InboxSLAIndicators
-              v-if="row.sla"
-              class="mt-2"
-              :sla="row.sla"
-            /><small
+            ><small
               v-if="!row.assignee_id && row.routing_reason"
               class="inbox-caption mt-2 block"
               >{{ t('inboxCapacity.reason.' + row.routing_reason) }}</small
@@ -648,6 +833,12 @@ async function applyBulk() {
               t('inboxQueue.result.' + results[row.id])
             }}</small>
           </button>
+          <InboxSLAIndicators
+            v-if="row.sla"
+            class="inbox-queue-deadlines mt-2"
+            compact
+            :sla="row.sla"
+          />
         </li>
       </ul>
     </div>

@@ -10,6 +10,7 @@ import { useOrganizationsStore } from '@/stores/organizations'
 import { inboxService, type InboxCase } from '@/services/inbox'
 import InboxMacroPicker from '@/components/chat/InboxMacroPicker.vue'
 import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
+import InboxAssignmentDialog from '@/components/chat/InboxAssignmentDialog.vue'
 import InboxQueues from '@/components/chat/InboxQueues.vue'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
@@ -157,7 +158,8 @@ const isBusinessCallingEnabled = computed(() =>
 
 const organizationsStore = useOrganizationsStore()
 const inboxEnabled = ref(false)
-const showInboxQueues = ref(false)
+const inboxSettingsFailed = ref(false)
+const showInboxQueues = ref(true)
 const queueAccountId = computed(() => typeof route.query.inbox_account_id === 'string' ? route.query.inbox_account_id : undefined)
 const queueAccount = computed(() => typeof route.query.inbox_account === 'string' ? route.query.inbox_account : undefined)
 const inboxSummaries = ref<Record<string, InboxCase>>({})
@@ -166,6 +168,23 @@ const inboxAccountId = computed<string | undefined>(() =>
   orgAccounts.value.find(account => account.name === selectedAccount.value)?.id ??
   (selectedAccount.value === queueAccount.value ? queueAccountId.value : undefined)
 )
+const inboxNavigationKey=computed(()=>['inbox-conversation',authStore.user?.id,inboxOrg.value].join(':'))
+watch(()=>[contactsStore.currentContact?.id,inboxAccountId.value,selectedAccount.value],([contact,accountId,accountName])=>{
+ if(!inboxEnabled.value||!contact||!accountId||!accountName)return
+ try{localStorage.setItem(inboxNavigationKey.value,JSON.stringify({contact,accountId,accountName}))}catch{/* Browser storage is optional. */}
+})
+async function restoreInboxConversation(){
+ if(contactId.value||!inboxEnabled.value)return
+ try{
+  const raw=localStorage.getItem(inboxNavigationKey.value);if(!raw)return
+  const saved=JSON.parse(raw)
+  if(!orgAccounts.value.some(account=>account.id===saved.accountId&&account.name===saved.accountName)){localStorage.removeItem(inboxNavigationKey.value);return}
+  const reply=await inboxService.conversation(saved.accountId,saved.contact)
+  if(!reply.data.data.case){localStorage.removeItem(inboxNavigationKey.value);return}
+  if(contactId.value)return
+  await router.replace({name:'chat-conversation',params:{contactId:saved.contact},query:{inbox_account:saved.accountName,inbox_account_id:saved.accountId}})
+ }catch{localStorage.removeItem(inboxNavigationKey.value)}
+}
 const inboxContactIds = computed(() => [...new Set([...contactsStore.sortedContacts.map(contact => contact.id), contactsStore.currentContact?.id].filter(Boolean))].join(','))
 const inboxCaseKey = (contactId: string, accountId: string) => contactId + '/' + accountId
 
@@ -185,9 +204,9 @@ async function refreshInboxSettings() {
   const request = ++inboxSettingsRequest
   try {
     const { data } = await inboxService.settings()
-    if (request === inboxSettingsRequest) inboxEnabled.value = data.data.enabled
+    if (request === inboxSettingsRequest) {inboxEnabled.value = data.data.enabled;inboxSettingsFailed.value=false}
   } catch {
-    if (request === inboxSettingsRequest) inboxEnabled.value = false
+    if (request === inboxSettingsRequest) inboxSettingsFailed.value=true
   }
 }
 
@@ -557,7 +576,7 @@ onMounted(async () => {
 
   if (contactId.value) {
     await selectContact(contactId.value)
-  }
+  } else { await refreshInboxSettings(); await restoreInboxConversation() }
 
   // Auto-scroll to the unread divider and mark messages read when the agent
   // returns — covers both tab-switch (visibilitychange) and OS window focus
@@ -1814,21 +1833,23 @@ async function sendMediaMessage() {
   <div class="flex h-full min-w-0 bg-[#0a0a0b] light:bg-gray-50">
     <!-- Contacts List -->
     <div data-testid="contacts" class="w-full shrink-0 border-r border-white/[0.08] light:border-gray-200 flex-col bg-[#0a0a0b] light:bg-white md:flex md:w-80" :class="contactsStore.currentContact ? 'hidden' : 'flex'">
+      <div v-if="inboxSettingsFailed" role="alert" class="inbox-ui inbox-notice m-2">{{t('inboxQuality.settingsLoadError')}}<Button type="button" size="sm" variant="outline" @click="refreshInboxSettings">{{t('common.retry')}}</Button></div>
       <div v-if="inboxEnabled" class="flex gap-2 px-2 pt-2">
-        <Button type="button" size="sm" :variant="showInboxQueues ? 'ghost' : 'outline'" :aria-pressed="!showInboxQueues" @click="showInboxQueues = false">
-          {{ $t('inboxQueue.contacts') }}
-        </Button>
         <Button type="button" size="sm" :variant="showInboxQueues ? 'outline' : 'ghost'" :aria-pressed="showInboxQueues" @click="showInboxQueues = true">
           {{ $t('inboxQueue.title') }}
         </Button>
+        <Button type="button" size="sm" :variant="showInboxQueues ? 'ghost' : 'outline'" :aria-pressed="!showInboxQueues" @click="showInboxQueues = false">
+          {{ $t('inboxQueue.contacts') }}
+        </Button>
       </div>
       <InboxQueues
-        v-if="inboxEnabled"
         :key="inboxOrg"
+        :context-key="[authStore.user?.id,inboxOrg].join(':')"
+        v-if="inboxEnabled"
         :active="showInboxQueues"
         :selected-contact="contactsStore.currentContact?.id"
         :selected-account="inboxAccountId || undefined"
-        @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id } })"
+        @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id, case_id: row.id } })"
         @changed="refreshInboxSummaries"
       />
       <template v-if="!inboxEnabled || !showInboxQueues">
@@ -2626,7 +2647,7 @@ async function sendMediaMessage() {
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
           <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
-          <ChannelOptions v-model="deliveryOptions" :text="messageInput" />
+          <ChannelOptions v-model="deliveryOptions" :text="messageInput" :show-setup-hint="false" />
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>
@@ -2862,7 +2883,8 @@ async function sendMediaMessage() {
     </Dialog>
 
     <!-- Assign Contact Dialog -->
-    <Dialog v-model:open="isAssignDialogOpen" @update:open="(open) => !open && (assignSearchQuery = '')">
+    <InboxAssignmentDialog v-if="inboxEnabled && inboxAccountId && contactsStore.currentContact" v-model="isAssignDialogOpen" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @assigned="updateInboxSummary($event);refreshInboxSummaries()"/>
+    <Dialog v-else v-model:open="isAssignDialogOpen" @update:open="(open) => !open && (assignSearchQuery = '')">
       <DialogContent class="max-w-sm">
         <DialogHeader>
           <DialogTitle>{{ $t('chat.assignContact') }}</DialogTitle>

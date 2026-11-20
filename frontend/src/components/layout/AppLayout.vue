@@ -273,13 +273,16 @@ const handleLogout = async () => {
         </template>
       </div>
 
+      <details v-if="!isCollapsed || isMobileMenuOpen" class="mx-2 border-t border-white/10 light:border-gray-200 text-xs">
+        <summary class="min-h-11 cursor-pointer px-3 py-3 text-muted-foreground">{{ $t('inboxQuality.planUsage') }}</summary>
+        <ManagedPlanStatus />
+      </details>
       <!-- User Menu -->
       <UserMenu :collapsed="isCollapsed" @logout="handleLogout" />
     </aside>
 
     <!-- Main content -->
     <main id="main-content" class="flex flex-col flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
-      <ManagedPlanStatus />
       <div class="flex-1 min-h-0">
       <RouterView v-slot="{ Component, route: viewRoute }">
         <Transition name="page" mode="out-in">
