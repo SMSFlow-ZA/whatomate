@@ -173,7 +173,16 @@ it('keeps a preset draft when switching is cancelled and supports confirmed disc
   await settle()
   expect(state.selected).toBe('b')
   expect(state.editing).toBe(false)
-  mocks.remove.mockResolvedValue({})
+  state.removing = true
+  mocks.remove
+    .mockRejectedValueOnce(new Error('synthetic deletion outage'))
+    .mockResolvedValue({})
+  await state.remove()
+  await settle()
+  expect(state.removing).toBe(true)
+  expect(
+    document.querySelector('[role="alertdialog"] [role="alert"]')?.textContent,
+  ).toContain('inboxReview.presetDeleteError')
   await state.remove()
   expect(mocks.remove).toHaveBeenCalledWith('b')
   expect(state.selected).toBe('')

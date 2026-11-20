@@ -150,6 +150,7 @@ function changePreset(event: Event) {
 async function remove() {
   if (!selected.value || busy.value) return
   busy.value = true
+  error.value = ''
   try {
     await inboxService.deleteCapacityPreset(selected.value)
     selected.value = ''
@@ -183,7 +184,11 @@ async function remove() {
         ><AlertDialogDescription>{{
           t('inboxReview.removePresetHelp')
         }}</AlertDialogDescription></AlertDialogHeader
-      ><AlertDialogFooter
+      >
+      <p v-if="error" role="alert" class="text-sm text-destructive">
+        {{ error }}
+      </p>
+      <AlertDialogFooter
         ><AlertDialogCancel :disabled="busy">{{
           t('common.cancel')
         }}</AlertDialogCancel
@@ -228,6 +233,7 @@ async function remove() {
         @click="
           requestDiscard(() => {
             editing = false
+            error = ''
             removing = true
           })
         "
