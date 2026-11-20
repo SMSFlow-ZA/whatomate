@@ -487,7 +487,8 @@
   overflow: auto;
 }
 .inbox-queue-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   padding: 0.875rem 0.75rem;
   gap: 0.625rem;
@@ -582,4 +583,47 @@
 }
 .inbox-tabs button[aria-selected='true'] {
   font-weight: 600;
+}
+
+/* Keep dense desktop controls while giving touch users an adequate hit area. */
+@media (max-width: 640px), (pointer: coarse) {
+  .inbox-ui button,
+  .inbox-ui summary,
+  .inbox-ui select,
+  .inbox-ui input:not([type='checkbox']):not([type='radio']) {
+    min-height: 44px;
+  }
+  .inbox-ui button {
+    min-width: 44px;
+  }
+  .inbox-ui .inbox-check {
+    min-height: 44px;
+  }
+}
+
+.inbox-queue-row > input {
+  grid-column: 1;
+  grid-row: 1;
+}
+.inbox-queue-row > .inbox-queue-open {
+  grid-column: 2;
+  grid-row: 1;
+}
+.inbox-queue-deadlines {
+  grid-column: 2;
+}
+
+/* Strengthen muted feature text on both card and muted surfaces using existing
+   theme tokens, while retaining semantic error and deadline colours. */
+.inbox-ui {
+  --inbox-muted: color-mix(
+    in srgb,
+    hsl(var(--muted-foreground)) 85%,
+    hsl(var(--foreground))
+  );
+}
+.inbox-ui .inbox-caption,
+.inbox-ui .text-muted-foreground,
+.inbox-ui .inbox-queue-shortcuts button {
+  color: var(--inbox-muted);
 }
