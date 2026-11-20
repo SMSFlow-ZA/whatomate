@@ -207,10 +207,10 @@ function pageBy(delta: number) {
       <p v-if="exportError" role="alert" class="inbox-notice mt-3">
         {{ t('inboxQuality.exportError') }}
       </p>
-      <p class="inbox-caption mt-4" role="status">
+      <p v-if="!busy && !failed" class="inbox-caption mt-4" role="status">
         {{ t('inboxQuality.historySummary', summary) }}
       </p>
-      <p v-if="summary.legacy" class="inbox-caption mt-2">
+      <p v-if="!busy && !failed && summary.legacy" class="inbox-caption mt-2">
         {{ t('inboxQuality.legacyHelp') }}
       </p>
     </div>

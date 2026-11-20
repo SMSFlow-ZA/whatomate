@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { createApp, nextTick } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
+import InboxWorkload from './InboxWorkload.vue'
 import InboxCaseActions from './InboxCaseActions.vue'
 import InboxFieldsView from '@/views/settings/InboxFieldsView.vue'
 import InboxSLAReport from './InboxSLAReport.vue'
@@ -10,6 +11,7 @@ import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 
 const mocks = vi.hoisted(() => ({
   report: vi.fn(),
+  workload: vi.fn(),
   conversation: vi.fn(),
   createField: vi.fn(),
   accounts: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock('@/services/inbox', () => ({
   inboxService: {
     settings: async () => ({ data: { data: { enabled: true } } }),
     slaReport: mocks.report,
+    workload: mocks.workload,
     conversation: mocks.conversation,
     createFieldDefinition: mocks.createField,
     fieldDefinitions: mocks.fields,
@@ -56,6 +59,7 @@ const settle = async () => {
   }
 }
 let app: ReturnType<typeof createApp> | undefined, root: HTMLElement
+let mountedVm: any
 function mount(component: Parameters<typeof createApp>[0], props = {}) {
   root = document.createElement('div')
   document.body.append(root)
@@ -63,6 +67,7 @@ function mount(component: Parameters<typeof createApp>[0], props = {}) {
   app.component('RouterLink', { template: '<a><slot /></a>' })
   app.config.globalProperties.$t = (key: string) => key
   const vm = app.mount(root)
+  mountedVm = vm
   return (vm.$ as unknown as { setupState: Record<string, any> }).setupState
 }
 afterEach(() => {
@@ -282,4 +287,57 @@ it('rejects invalid choices with a specific correction before issuing a create r
   state.choices = 'New\nComplete'
   await nextTick()
   expect(state.choiceError).toBe('')
+})
+
+it('clears workload rows and totals when scope changes and never labels pending or failed data as empty', async () => {
+  const account = ref('a')
+  const reply = (name: string) => ({
+    data: {
+      data: {
+        agents: [
+          {
+            agent_id: name,
+            name,
+            team_id: 'team',
+            team_name: 'Team',
+            account_id: name,
+            account_name: name,
+            active: 1,
+            max_active: 4,
+            available: true,
+          },
+        ],
+        unique_agents: 1,
+        has_more: false,
+        updated_at: new Date().toISOString(),
+      },
+    },
+  })
+  mocks.workload.mockResolvedValueOnce(reply('Original'))
+  mount({ render: () => h(InboxWorkload, { account: account.value }) })
+  await settle()
+  const state = mountedVm.$.subTree.component.setupState
+  expect(root.textContent).toContain('Original')
+  let finish!: (value: unknown) => void
+  mocks.workload.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  account.value = 'b'
+  await settle()
+  expect(state.loading).toBe(true)
+  expect(state.rows).toHaveLength(0)
+  expect(root.textContent).not.toContain('Original')
+  expect(root.textContent).not.toContain('inboxReview.workloadSummary')
+  finish(reply('Current'))
+  await settle()
+  expect(root.textContent).toContain('Current')
+  mocks.workload.mockRejectedValueOnce(new Error('synthetic report outage'))
+  account.value = 'c'
+  await settle()
+  expect(state.failed).toBe(true)
+  expect(root.textContent).not.toContain('inboxReview.workloadSummary')
+  expect(root.textContent).not.toContain('inboxUX.capacityEmptyHelp')
 })

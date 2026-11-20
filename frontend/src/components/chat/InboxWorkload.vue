@@ -43,6 +43,11 @@ async function load() {
 watch(
   () => [props.team, props.account],
   () => {
+    generation++
+    rows.value = []
+    uniqueAgents.value = 0
+    updated.value = ''
+    failed.value = false
     offset.value = 0
     void load()
   },
@@ -68,7 +73,7 @@ onUnmounted(() => {
         <h3 class="inbox-section-heading">
           {{ t('inboxQuality.liveWorkload') }}
         </h3>
-        <p class="inbox-caption mt-1">
+        <p v-if="updated && !failed" class="inbox-caption mt-1">
           {{
             t(
               'inboxReview.workloadSummary',
