@@ -44,7 +44,7 @@ func (a *App) GetInboxWorkload(r *fastglue.Request) error {
 		}
 	}
 	var rows []struct {
-		inboxCapacityRow
+		InboxCapacityRow
 		TeamID      uuid.UUID `json:"team_id"`
 		TeamName    string    `json:"team_name"`
 		AccountID   uuid.UUID `json:"account_id"`

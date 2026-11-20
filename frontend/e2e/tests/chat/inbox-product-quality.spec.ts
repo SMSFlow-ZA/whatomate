@@ -313,6 +313,31 @@ test('qualifies queues, routing previews, required resolution, workload presets 
     await expect(
       page.getByRole('heading', { name: 'Agent workload', exact: true }),
     ).toBeVisible()
+    await expect(
+      page
+        .locator('.inbox-list-title')
+        .filter({ hasText: profile.full_name })
+        .first(),
+    ).toBeVisible()
+    const workload = (
+      await (
+        await api.get(
+          '/api/inbox/workload?account_id=' + account.id + '&team_id=' + team,
+        )
+      ).json()
+    ).data.agents
+    expect(workload).toContainEqual(
+      expect.objectContaining({
+        agent_id: profile.id,
+        name: profile.full_name,
+        max_active: 4,
+      }),
+    )
+    if (process.env.INBOX_CAPTURE)
+      await page.screenshot({
+        path: testInfo.outputPath('quality-workload-desktop.png'),
+        fullPage: true,
+      })
     await page
       .getByRole('tab', { name: 'Completed response targets', exact: true })
       .click()

@@ -442,3 +442,46 @@ func TestInboxQualityRevokedContactFieldAccessDoesNotPoisonRules(t *testing.T) {
 	require.NoError(t, db.Model(&models.InboxWorkflowRun{}).Where("organization_id=?", org.ID).Count(&count).Error)
 	require.EqualValues(t, 2, count)
 }
+
+func TestInboxQualityWorkloadReturnsAgentIdentityAndActualCapacity(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	a := &App{DB: db, Log: testutil.NopLogger()}
+	user := testutil.CreateTestUser(t, db, org.ID, testutil.WithSuperAdmin())
+	account := testutil.CreateTestWhatsAppAccount(t, db, org.ID)
+	contact := testutil.CreateTestContact(t, db, org.ID)
+	require.NoError(t, db.Model(org).Update("inbox_workflows_enabled", true).Error)
+	require.NoError(t, db.Model(user).Updates(map[string]any{"full_name": "Synthetic workload agent", "is_available": true}).Error)
+	team := models.Team{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, Name: "Synthetic workload team"}
+	require.NoError(t, db.Create(&team).Error)
+	require.NoError(t, db.Create(&models.TeamMember{TeamID: team.ID, UserID: user.ID}).Error)
+	require.NoError(t, db.Create(&models.InboxAgentCapacity{OrganizationID: org.ID, AccountID: account.ID, AgentID: user.ID, MaxActive: 7}).Error)
+	c := newInboxCase(inboxThread{org.ID, account.ID, contact.ID}, time.Now().UTC(), &user.ID, &team.ID)
+	require.NoError(t, db.Create(&c).Error)
+	r := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(r, org.ID, user.ID)
+	testutil.SetQueryParam(r, "team_id", team.ID.String())
+	testutil.SetQueryParam(r, "account_id", account.ID.String())
+	require.NoError(t, a.GetInboxWorkload(r))
+	var response struct {
+		Agents []struct {
+			AgentID   uuid.UUID `json:"agent_id"`
+			Name      string    `json:"name"`
+			Available bool      `json:"available"`
+			Active    int64     `json:"active"`
+			MaxActive int       `json:"max_active"`
+			TeamID    uuid.UUID `json:"team_id"`
+			AccountID uuid.UUID `json:"account_id"`
+		} `json:"agents"`
+	}
+	testutil.ParseEnvelopeResponse(t, r, &response)
+	require.Len(t, response.Agents, 1)
+	row := response.Agents[0]
+	require.Equal(t, user.ID, row.AgentID)
+	require.Equal(t, "Synthetic workload agent", row.Name)
+	require.True(t, row.Available)
+	require.EqualValues(t, 1, row.Active)
+	require.Equal(t, 7, row.MaxActive)
+	require.Equal(t, team.ID, row.TeamID)
+	require.Equal(t, account.ID, row.AccountID)
+}

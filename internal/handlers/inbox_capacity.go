@@ -67,7 +67,8 @@ func protectInboxActiveAssignment(tx *gorm.DB, c *models.InboxCase) error {
 	}
 }
 
-type inboxCapacityRow struct {
+// InboxCapacityRow is exported so GORM can populate embedded report rows.
+type InboxCapacityRow struct {
 	AgentID   uuid.UUID `json:"agent_id"`
 	Name      string    `json:"name"`
 	MaxActive int       `json:"max_active"`
@@ -100,7 +101,7 @@ func (a *App) GetInboxTeamCapacity(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	rows := []inboxCapacityRow{}
+	rows := []InboxCapacityRow{}
 	err = a.DB.Table("team_members tm").
 		Joins("JOIN users u ON u.id = tm.user_id AND u.deleted_at IS NULL").
 		Joins("JOIN user_organizations uo ON uo.user_id=u.id AND uo.organization_id=?", org).
