@@ -287,3 +287,17 @@ Resolving opens **Complete required details** when values are needed. The form i
 - [Roles & Permissions](/whatomate/features/roles-permissions) — the `chat`, `chat.assign`, `contacts`, and `tags` permissions
 - [Contacts API](/whatomate/api-reference/contacts) — contact, assignment, tags, and notes endpoints
 - [Messages API](/whatomate/api-reference/messages) — send text, media, templates, and reactions
+
+
+## Inbox review refinements
+
+- **Filters** shows the active-filter count. A readable scope summary and **Reset filters** stay visible when the popover is closed. Advanced conditions are grouped separately. Quick filters and legacy field equality are always ANDed with the additional all/any condition group; both editors share a maximum of 20 conditions.
+- Search agents by name before choosing a filter, workflow assignment or bulk assignment. **Select all eligible cases on this page** selects only the visible non-resolved cases; review each intended case before applying. It never selects unseen pages.
+- Queue rows show relative customer waiting age for an outstanding reply, alongside the original message timestamp. Repeated unanswered messages do not restart the displayed reply-cycle age.
+- Snooze suggestions include **In two hours**, **Tomorrow at 09:00** and, for cases with a working calendar, **Next working day**. Working-day suggestions use the policy version assigned to that case. Review the exact local date/time and select **Save**; a suggestion alone changes nothing.
+- Open conversations refresh response targets every 30 seconds while visible. Counts and deadlines come from the same server calculation, including working hours and pauses. Reports show an updating state when scope changes, and failed filter lookups have their own retry.
+- Workload includes active case owners without teams. An agent belonging to several teams can appear on several rows, but each row repeats that agent's full inbox workload. Do not add those rows together; the summary reports unique agents in the selected scope.
+- Applying historical-report filters updates both results and CSV scope. Editing filters without applying them disables CSV export and displays a reminder. Completed results remain separate from outstanding work.
+- Capacity preset drafts have discard protection. Removing a preset requires confirmation and does not change previously applied agent limits.
+- Single-select field definitions accept 1–100 unique choices, each at most 100 characters. Duplicate and overlong lines receive specific errors. Choices remain immutable after creation.
+- A workflow's condition and action summary explains its intended effect before saving. This summary does not replace dry-run preflight or dispatch-time checks. New rules remain disabled, and reply review is mandatory for sending macros.

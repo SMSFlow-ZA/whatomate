@@ -112,3 +112,21 @@ Before promoting a managed inbox image:
 6. Publish the exact corresponding AGPL source and deploy only the scanned image
    digest. Verify sign-in, support identity, branding, plan limits, domain health
    and monitoring. Rollout to any additional instance is a separate operation.
+
+
+### Inbox review regression gate
+
+The managed release must cover membership revocation in routing, assignment
+options, preflight, capacity and workload queries. Keep soft-deleted organization
+members out of candidate lists even when old team memberships remain.
+
+Verify quiet-conversation response-target refresh without a case-version change;
+report scope/loading and failed-lookup recovery; post-save policy draft isolation;
+preset discard protection and removal; combined condition budgets; specific field
+validation; shift-specific accessible names; text-entry shortcut boundaries; and
+workload for owners without teams. Include a synthetic 1,000-case queue/report
+measurement without interpreting local timings as a production capacity promise.
+
+Inspect advanced-filter summaries, page selection, agent search, calendar-aware
+snooze suggestions and export with unapplied filters at desktop/mobile widths in
+both themes. Keep synthetic messaging dispatch held through restore and rollback.
