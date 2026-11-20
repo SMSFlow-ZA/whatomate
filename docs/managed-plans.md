@@ -96,11 +96,15 @@ Before promoting a managed inbox image:
    `inbox_sla_versions`, `inbox_sla_obligations`, `inbox_capacity_presets`, case
    policy references, saved views, workflow metadata and run outcomes. Older
    backups without these additive structures migrate normally. Legacy policy
-   snapshots are labelled; missing historical cycles are not invented.
+   snapshots are labelled. Reply cycles reconstructed from durable activity are
+   labelled legacy and omit unproven historical ownership; missing evidence is
+   never replaced with fabricated events.
 4. Recreate the application and verify that configuration, branding and policy
    references survive. Rehearse the previous digest with outbound work held,
    then return to the candidate. Startup refreshes projections whose stored case
-   version is stale without changing their assigned policy.
+   version is stale without changing their assigned policy. If the previous image
+   edited the active policy, a fresh snapshot is used for future cases instead of
+   silently reusing an outdated version reference.
 5. Reconcile submitting/unknown outbound runs before allowing dispatch in a
    restored instance. Completed runs retain their identifiers and must not be
    submitted again. Preserve the previous image digest and matching configuration

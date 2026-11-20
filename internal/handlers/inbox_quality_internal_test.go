@@ -139,3 +139,31 @@ func TestInboxQualityRecoveryReconstructsEachReplyCycle(t *testing.T) {
 	require.NoError(t, db.Model(&models.InboxSLAObligation{}).Where("case_id=? AND kind='next_reply'", c.ID).Count(&count).Error)
 	require.EqualValues(t, 2, count)
 }
+
+func TestInboxQualitySnapshotsPolicyEditedByPreviousImage(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	account := testutil.CreateTestWhatsAppAccount(t, db, org.ID)
+	contact := testutil.CreateTestContact(t, db, org.ID)
+	p := models.InboxSLAPolicy{OrganizationID: org.ID, AccountID: account.ID, FirstReplyMinutes: 30, NextReplyMinutes: 60, ResolutionMinutes: 480, Timezone: "UTC"}
+	require.NoError(t, db.Create(&p).Error)
+	first := newInboxCase(inboxThread{org.ID, account.ID, contact.ID}, time.Now().UTC(), nil, nil)
+	require.NoError(t, db.Create(&first).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return inboxquality.Sync(tx, &first, time.Now().UTC()) }))
+	original := *first.SLAPolicyID
+	// The old editor updates only columns it knows and leaves version_id intact.
+	require.NoError(t, db.Model(&p).Update("first_reply_minutes", 45).Error)
+	other := testutil.CreateTestContact(t, db, org.ID)
+	next := newInboxCase(inboxThread{org.ID, account.ID, other.ID}, time.Now().UTC(), nil, nil)
+	require.NoError(t, db.Create(&next).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return inboxquality.Sync(tx, &next, time.Now().UTC()) }))
+	require.NotEqual(t, original, *next.SLAPolicyID)
+	var policy models.InboxSLAVersion
+	require.NoError(t, db.First(&policy, "id=?", next.SLAPolicyID).Error)
+	require.Equal(t, 45, policy.Policy.FirstReplyMinutes)
+	policy = models.InboxSLAVersion{}
+	require.NoError(t, db.First(&policy, "id=?", original).Error)
+	require.Equal(t, 30, policy.Policy.FirstReplyMinutes)
+	require.NoError(t, db.First(&first, "id=?", first.ID).Error)
+	require.Equal(t, original, *first.SLAPolicyID)
+}

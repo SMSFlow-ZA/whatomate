@@ -3,6 +3,7 @@ package inboxquality
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
@@ -26,9 +27,21 @@ func PolicyLock(tx *gorm.DB, org, account uuid.UUID) error {
 
 func EnsureVersion(tx *gorm.DB, p *models.InboxSLAPolicy, legacy bool) error {
 	if p.VersionID != nil {
-		return nil
+		var existing models.InboxSLAVersion
+		if err := tx.First(&existing, "id=? AND organization_id=? AND account_id=?", p.VersionID, p.OrganizationID, p.AccountID).Error; err != nil {
+			return err
+		}
+		known := existing.Policy
+		if known.FirstReplyMinutes == p.FirstReplyMinutes && known.NextReplyMinutes == p.NextReplyMinutes && known.ResolutionMinutes == p.ResolutionMinutes && known.Timezone == p.Timezone && known.BusinessHours == p.BusinessHours && slices.Equal(known.Shifts, p.Shifts) {
+			return nil
+		}
+		// An older application can edit the active policy without knowing about
+		// version references. Snapshot that edit for future cases, preserving
+		// every policy already assigned to a case.
 	}
-	v := models.InboxSLAVersion{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: p.OrganizationID, AccountID: p.AccountID, Policy: *p, Legacy: legacy}
+	snapshot := *p
+	snapshot.VersionID = nil
+	v := models.InboxSLAVersion{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: p.OrganizationID, AccountID: p.AccountID, Policy: snapshot, Legacy: legacy}
 	if err := tx.Create(&v).Error; err != nil {
 		return err
 	}
