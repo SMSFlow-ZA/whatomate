@@ -16,12 +16,12 @@ import (
 const inboxWorkflowSettingsResource = models.ResourceSettingsGeneral
 
 func validInboxWorkflow(w models.InboxWorkflow) bool {
-	if strings.TrimSpace(w.Name) == "" || utf8.RuneCountInString(w.Name) > 100 || len(w.Actions) == 0 || len(w.Actions) > 10 || w.Position < -10000 || w.Position > 10000 {
+	if strings.TrimSpace(w.Name) == "" || utf8.RuneCountInString(w.Name) > 100 || utf8.RuneCountInString(w.Description) > 1000 || len(w.Actions) == 0 || len(w.Actions) > 10 || w.Position < -10000 || w.Position > 10000 {
 		return false
 	}
 	switch w.Kind {
 	case "macro":
-		if w.Trigger != "" {
+		if w.Trigger != "" || w.Conditions.MessageContains != "" || (w.Visibility != "" && w.Visibility != "organization" && w.Visibility != "personal" && w.Visibility != "team") || (w.Visibility == "team" && w.TeamID == nil) || (w.Visibility != "team" && w.TeamID != nil) {
 			return false
 		}
 	case "rule":
@@ -39,7 +39,11 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 	sends := 0
 	for _, action := range w.Actions {
 		switch action.Type {
-		case "assign", "send_template":
+		case "snooze":
+			if action.DurationMinutes < 1 || action.DurationMinutes > 43200 || action.Value != "" {
+				return false
+			}
+		case "assign", "assign_team", "send_template":
 			if action.Type == "send_template" && !action.ConsentConfirmed {
 				return false
 			}
@@ -76,7 +80,7 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 }
 
 func (a *App) ListInboxWorkflows(r *fastglue.Request) error {
-	org, _, ok := a.inboxFeatureAuth(r, models.ActionRead)
+	org, user, ok := a.inboxFeatureAuth(r, models.ActionRead)
 	if !ok {
 		return nil
 	}
@@ -90,7 +94,7 @@ func (a *App) ListInboxWorkflows(r *fastglue.Request) error {
 		}
 	}
 	workflows := []models.InboxWorkflow{}
-	if err := a.DB.Where("organization_id = ? AND kind = ?", org, kind).
+	if err := a.visibleInboxWorkflows(a.DB, org, user).Where("kind = ?", kind).
 		Order("position, created_at, id").Find(&workflows).Error; err != nil {
 		return a.inboxError(r, err)
 	}
@@ -98,13 +102,16 @@ func (a *App) ListInboxWorkflows(r *fastglue.Request) error {
 }
 
 type inboxWorkflowRequest struct {
-	Enabled    bool                    `json:"enabled"`
-	Name       string                  `json:"name"`
-	Kind       string                  `json:"kind"`
-	Trigger    string                  `json:"trigger"`
-	Position   int                     `json:"position"`
-	Conditions models.InboxQueueFilter `json:"conditions"`
-	Actions    []models.InboxAction    `json:"actions"`
+	Description string                  `json:"description"`
+	Visibility  string                  `json:"visibility"`
+	TeamID      *uuid.UUID              `json:"team_id"`
+	Enabled     bool                    `json:"enabled"`
+	Name        string                  `json:"name"`
+	Kind        string                  `json:"kind"`
+	Trigger     string                  `json:"trigger"`
+	Position    int                     `json:"position"`
+	Conditions  models.InboxQueueFilter `json:"conditions"`
+	Actions     []models.InboxAction    `json:"actions"`
 }
 
 func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
@@ -123,12 +130,22 @@ func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
 		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org, CreatedByID: user,
 		Name: strings.TrimSpace(input.Name), Kind: input.Kind, Trigger: input.Trigger,
 		Position: input.Position, Conditions: input.Conditions, Actions: input.Actions,
+		Description: strings.TrimSpace(input.Description), Visibility: input.Visibility, TeamID: input.TeamID,
+	}
+	if w.Visibility == "" {
+		w.Visibility = "organization"
+	}
+	if !a.validInboxWorkflowTeam(a.DB, org, w) {
+		return a.inboxError(r, errInboxTransition)
 	}
 	if !validInboxWorkflow(w) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid inbox workflow", nil, "")
 	}
 	if err := validateInboxFieldMatchers(a.DB, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 		return a.inboxError(r, errInboxTransition)
+	}
+	if err := validateInboxPredicates(a.DB, org, w.Conditions, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+		return a.inboxError(r, err)
 	}
 	if err := a.DB.Create(&w).Error; err != nil {
 		return a.inboxError(r, err)
@@ -181,13 +198,20 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 		}
 		w.Name, w.Trigger, w.Position = strings.TrimSpace(input.Name), input.Trigger, input.Position
 		w.Actions, w.Conditions = input.Actions, input.Conditions
+		w.Description, w.Visibility, w.TeamID = strings.TrimSpace(input.Description), input.Visibility, input.TeamID
+		if w.Visibility == "" {
+			w.Visibility = "organization"
+		}
 		// Rules execute as their last editor, never with an earlier author's rights.
 		w.UpdatedByID = &user
-		if input.Kind != w.Kind || !validInboxWorkflow(w) {
+		if input.Kind != w.Kind || !validInboxWorkflow(w) || !a.validInboxWorkflowTeam(tx, org, w) {
 			return errInboxTransition
 		}
 		if err := validateInboxFieldMatchers(tx, org, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 			return errInboxTransition
+		}
+		if err := validateInboxPredicates(tx, org, w.Conditions, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+			return err
 		}
 		w.EnabledAt = nil
 		if w.Kind == "rule" && input.Enabled {

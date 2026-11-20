@@ -181,9 +181,9 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 				}
 			} else if method != "GET" && (path == "/api/inbox/fields" || strings.HasPrefix(path, "/api/inbox/fields/")) {
 				resource = models.ResourceSettingsGeneral
-			} else if strings.HasPrefix(path, "/api/inbox/teams/") {
+			} else if strings.HasPrefix(path, "/api/inbox/teams/") || strings.HasPrefix(path, "/api/inbox/capacity-presets") {
 				resource = models.ResourceTeams
-			} else if path == "/api/inbox/sla/report" {
+			} else if path == "/api/inbox/sla/report" || path == "/api/inbox/sla/history" || path == "/api/inbox/workload" {
 				resource = models.ResourceAnalyticsAgents
 			}
 		case "messages", "media":

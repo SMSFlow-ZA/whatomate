@@ -54,7 +54,7 @@ func (a *App) CreateInboxFieldDefinition(r *fastglue.Request) error {
 	}
 	d := models.InboxFieldDefinition{BaseModel: models.BaseModel{ID: uuid.New()},
 		OrganizationID: org, Scope: input.Scope, Key: input.Key, Label: strings.TrimSpace(input.Label),
-		Kind: input.Kind, Options: input.Options, RequiredOnResolve: input.RequiredOnResolve}
+		Description: strings.TrimSpace(input.Description), Kind: input.Kind, Options: input.Options, RequiredOnResolve: input.RequiredOnResolve}
 	if err := d.Validate(); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
@@ -93,6 +93,7 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
+		Description       *string `json:"description"`
 		Label             *string `json:"label"`
 		RequiredOnResolve *bool   `json:"required_on_resolve"`
 		Archive           bool    `json:"archive"`
@@ -114,6 +115,9 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 		if input.Archive {
 			now := time.Now().UTC()
 			d.ArchivedAt = &now
+		}
+		if input.Description != nil {
+			d.Description = strings.TrimSpace(*input.Description)
 		}
 		if input.Label != nil {
 			d.Label = strings.TrimSpace(*input.Label)
@@ -269,12 +273,7 @@ func emptyInboxField(value json.RawMessage) bool {
 
 func checkInboxRequiredFields(tx *gorm.DB, c models.InboxCase) error {
 	var missing int64
-	err := tx.Model(&models.InboxFieldDefinition{}).
-		Where("organization_id = ? AND required_on_resolve AND archived_at IS NULL", c.OrganizationID).
-		Where("NOT EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id = inbox_field_definitions.organization_id "+
-			"AND v.definition_id = inbox_field_definitions.id AND v.subject_id = CASE WHEN inbox_field_definitions.scope = 'case' THEN ?::uuid ELSE ?::uuid END)",
-			c.ID, c.ContactID).
-		Count(&missing).Error
+	err := inboxMissingDefinitions(tx, c).Count(&missing).Error
 	if err != nil {
 		return err
 	}
@@ -286,26 +285,27 @@ func checkInboxRequiredFields(tx *gorm.DB, c models.InboxCase) error {
 
 func queryInboxFieldMatchers(q *gorm.DB, org uuid.UUID, matches []models.InboxFieldMatch, allowContact bool) (*gorm.DB, error) {
 	for _, match := range matches {
-		if match.DefinitionID == uuid.Nil || !json.Valid(match.Value) || len(match.Value) > 32768 {
-			return nil, errInboxTransition
+		id := match.DefinitionID
+		query, args, err := inboxPredicateSQL(q, org, models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: match.Operator, Value: match.Value}, allowContact)
+		if err != nil {
+			return nil, err
 		}
-		q = q.Where("EXISTS (SELECT 1 FROM inbox_field_definitions d WHERE d.organization_id = ? AND d.id = ? AND d.deleted_at IS NULL "+
-			"AND (d.scope = 'case' OR ?) AND EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id = d.organization_id "+
-			"AND v.definition_id = d.id AND v.subject_id = CASE WHEN d.scope = 'case' THEN inbox_cases.id ELSE inbox_cases.contact_id END "+
-			"AND v.value = ?::jsonb))", org, match.DefinitionID, allowContact, string(bytes.TrimSpace(match.Value)))
+		q = q.Where(query, args...)
 	}
 	return q, nil
 }
 
 func validateInboxFieldMatchers(db *gorm.DB, org uuid.UUID, matches []models.InboxFieldMatch, allowContact bool) error {
 	for _, match := range matches {
-		var d models.InboxFieldDefinition
-		if err := db.First(&d, "id = ? AND organization_id = ? AND (scope = 'case' OR ?)", match.DefinitionID, org, allowContact).Error; err != nil {
-			return err
-		}
-		if err := d.ValidateValue(match.Value); err != nil || emptyInboxField(match.Value) {
+		id := match.DefinitionID
+		if _, _, err := inboxPredicateSQL(db, org, models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: match.Operator, Value: match.Value}, allowContact); err != nil {
 			return fmt.Errorf("%w: invalid field match", errInboxTransition)
 		}
 	}
 	return nil
+}
+
+func inboxMissingDefinitions(db *gorm.DB, c models.InboxCase) *gorm.DB {
+	return db.Model(&models.InboxFieldDefinition{}).Where("organization_id=? AND required_on_resolve AND archived_at IS NULL", c.OrganizationID).
+		Where("NOT EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id=inbox_field_definitions.organization_id AND v.definition_id=inbox_field_definitions.id AND v.subject_id=CASE WHEN inbox_field_definitions.scope='case' THEN ?::uuid ELSE ?::uuid END AND v.value IS NOT NULL AND v.value <> 'null'::jsonb AND (jsonb_typeof(v.value) <> 'string' OR btrim(v.value #>> '{}') <> ''))", c.ID, c.ContactID)
 }

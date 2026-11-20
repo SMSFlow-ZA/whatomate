@@ -51,52 +51,73 @@ func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccou
 	return previewInboxReplyWithDB(a.DB, c, account, contact, action, now)
 }
 
-func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
-	// A customer message on another business number cannot open this account's
-	// service window. Keep the check tied to the same thread as the intended send.
-	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID ||
-		contact.OrganizationID != c.OrganizationID || account.Status != "active" || !eligibleInboxNumber(contact.PhoneNumber) {
-		return inboxReplyPreview{}, errInboxSendIneligible
+type inboxEligibilityError struct{ reason string }
+
+func (e inboxEligibilityError) Error() string { return errInboxSendIneligible.Error() }
+func (e inboxEligibilityError) Unwrap() error { return errInboxSendIneligible }
+func inboxEligibilityReason(err error) string {
+	var problem inboxEligibilityError
+	if errors.As(err, &problem) {
+		return problem.reason
 	}
-	switch action.Type {
-	case "send_text":
-		var inbound models.Message
-		err := db.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ? AND COALESCE(channel, '') IN ('', 'whatsapp')",
-			c.OrganizationID, c.ContactID, account.Name, models.DirectionIncoming).Order("created_at DESC, id DESC").First(&inbound).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return inboxReplyPreview{}, errInboxSendIneligible
-		}
-		if err != nil {
-			return inboxReplyPreview{}, err
-		}
-		if now.Before(inbound.CreatedAt) || !now.Before(inbound.CreatedAt.Add(24*time.Hour)) {
-			return inboxReplyPreview{}, errInboxSendIneligible
-		}
-		return inboxReplyPreview{Type: "text", Text: action.Value}, nil
-	case "send_template":
+	return "unavailable"
+}
+
+func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
+	intent := inboxReplyPreview{Type: "text", Text: action.Value}
+	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
+		return intent, inboxEligibilityError{"unavailable"}
+	}
+	if action.Type == "send_template" {
+		intent = inboxReplyPreview{Type: "template", TemplateKey: action.Value}
 		id, err := uuid.Parse(action.Value)
-		if err != nil || !action.ConsentConfirmed || contact.MarketingOptOut {
-			return inboxReplyPreview{}, errInboxSendIneligible
+		if err != nil {
+			return intent, inboxEligibilityError{"template_unavailable"}
 		}
 		var template models.Template
-		err = db.Where("organization_id = ? AND whats_app_account = ? AND id = ? AND status = ? AND category = ?",
-			c.OrganizationID, account.Name, id, "APPROVED", "UTILITY").First(&template).Error
+		err = db.Where("organization_id = ? AND whats_app_account = ? AND id = ?", c.OrganizationID, account.Name, id).First(&template).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return inboxReplyPreview{}, errInboxSendIneligible
+			return intent, inboxEligibilityError{"template_unavailable"}
 		}
 		if err != nil {
-			return inboxReplyPreview{}, err
+			return intent, err
 		}
-		// Preview only payloads whose delivered copy can be shown in full.
-		if (template.HeaderType != "" && template.HeaderType != "TEXT") ||
-			strings.Contains(template.HeaderContent, "{{") || strings.Contains(template.BodyContent, "{{") ||
-			strings.Contains(template.FooterContent, "{{") || len(template.Buttons) != 0 {
-			return inboxReplyPreview{}, errInboxSendIneligible
+		intent = inboxReplyPreview{Type: "template", Text: template.BodyContent, Header: template.HeaderContent, Footer: template.FooterContent, Template: template.DisplayName, TemplateKey: template.Name, Language: template.Language}
+		if template.Status != "APPROVED" || template.Category != "UTILITY" {
+			return intent, inboxEligibilityError{"template_not_approved"}
 		}
-		return inboxReplyPreview{Type: "template", Text: template.BodyContent, Header: template.HeaderContent,
-			Footer: template.FooterContent, Template: template.DisplayName, TemplateKey: template.Name, Language: template.Language}, nil
+		if !action.ConsentConfirmed || contact.MarketingOptOut {
+			return intent, inboxEligibilityError{"consent_missing"}
+		}
+		if (template.HeaderType != "" && template.HeaderType != "TEXT") || strings.Contains(template.HeaderContent, "{{") || strings.Contains(template.BodyContent, "{{") || strings.Contains(template.FooterContent, "{{") || len(template.Buttons) != 0 {
+			return intent, inboxEligibilityError{"template_not_supported"}
+		}
 	}
-	return inboxReplyPreview{}, errInboxSendIneligible
+	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
+		return intent, inboxEligibilityError{"unavailable"}
+	}
+	if account.Status != "active" {
+		return intent, inboxEligibilityError{"account_inactive"}
+	}
+	if !eligibleInboxNumber(contact.PhoneNumber) {
+		return intent, inboxEligibilityError{"recipient_invalid"}
+	}
+	if action.Type == "send_text" {
+		var inbound models.Message
+		err := db.Select("created_at").Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ? AND COALESCE(channel, '') IN ('', 'whatsapp')", c.OrganizationID, c.ContactID, account.Name, models.DirectionIncoming).Order("created_at DESC, id DESC").First(&inbound).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return intent, inboxEligibilityError{"service_window_closed"}
+		}
+		if err != nil {
+			return intent, err
+		}
+		if now.Before(inbound.CreatedAt) || !now.Before(inbound.CreatedAt.Add(24*time.Hour)) {
+			return intent, inboxEligibilityError{"service_window_closed"}
+		}
+	} else if action.Type != "send_template" {
+		return intent, inboxEligibilityError{"unavailable"}
+	}
+	return intent, nil
 }
 
 func eligibleInboxNumber(phone string) bool {
@@ -114,13 +135,17 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
-		CaseID uuid.UUID `json:"case_id"`
+		CaseID      uuid.UUID `json:"case_id"`
+		TriggerText string    `json:"trigger_text"`
 	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
 	}
+	if len(input.TriggerText) > 4096 {
+		return a.inboxError(r, errInboxTransition)
+	}
 	var workflow models.InboxWorkflow
-	if err := a.DB.Where("organization_id = ? AND id = ?", org, id).First(&workflow).Error; err != nil {
+	if err := a.visibleInboxWorkflows(a.DB, org, user).Where("id = ?", id).First(&workflow).Error; err != nil {
 		return a.inboxError(r, err)
 	}
 	if workflow.Kind == "rule" {
@@ -147,13 +172,14 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		name = utils.MaskIfPhoneNumber(name)
 		phone = utils.MaskPhoneNumber(phone)
 	}
-	preview, err := a.evaluateInboxWorkflow(a.DB, workflow, c, account, contact, user, time.Now().UTC())
+	preview, err := a.evaluateInboxWorkflow(a.DB, workflow, c, account, contact, user, time.Now().UTC(), input.TriggerText)
 	if err != nil {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{
 		"matches": preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
 		"recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name,
-		"reply": preview.Reply, "send_unavailable": preview.SendUnavailable, "confirmation": preview.Confirmation,
+		"reply": preview.Reply, "send_unavailable": preview.SendUnavailable, "send_unavailable_reason": preview.SendUnavailableReason, "confirmation": preview.Confirmation,
+		"condition_outcomes": preview.ConditionOutcomes, "action_outcomes": preview.ActionOutcomes, "actions_eligible": preview.ActionsEligible, "trigger_text_is_synthetic": input.TriggerText != "",
 	})
 }

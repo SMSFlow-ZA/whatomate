@@ -9,6 +9,19 @@ import (
 	"gorm.io/gorm"
 )
 
+// Historical reports must not turn a former case assignment into current
+// conversation access. Supervisors retain their ordinary contact-read scope.
+func (a *App) scopeInboxCaseHistory(q *gorm.DB, user, org uuid.UUID) *gorm.DB {
+	base := a.scopeInboxCases(q, user, org)
+	if a.HasPermission(user, models.ResourceContacts, models.ActionRead, org) {
+		return base
+	}
+	current := a.scopeInboxCases(q.Session(&gorm.Session{NewDB: true}).Model(&models.InboxCase{}), user, org).
+		Where("NOT EXISTS (SELECT 1 FROM inbox_cases newer WHERE newer.organization_id=inbox_cases.organization_id AND newer.account_id=inbox_cases.account_id AND newer.contact_id=inbox_cases.contact_id AND newer.deleted_at IS NULL AND (newer.opened_at,newer.id)>(inbox_cases.opened_at,inbox_cases.id))").
+		Select("inbox_cases.account_id,inbox_cases.contact_id")
+	return base.Where("(inbox_cases.account_id,inbox_cases.contact_id) IN (?)", current)
+}
+
 // latestInboxAssignment limits case-based access to the current case for one
 // contact and WhatsApp account. Previous assignees cannot use historical cases
 // to regain access after assignment changes.

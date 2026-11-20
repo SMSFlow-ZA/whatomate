@@ -18,9 +18,12 @@ import (
 
 type inboxQueueRow struct {
 	models.InboxCase
-	AccountName string            `json:"account_name"`
-	SLA         *inboxSLASnapshot `gorm:"-" json:"sla,omitempty"`
-	ContactName string            `json:"contact_name"`
+	AccountName    string            `json:"account_name"`
+	SLA            *inboxSLASnapshot `gorm:"-" json:"sla,omitempty"`
+	ContactName    string            `json:"contact_name"`
+	MessagePreview string            `json:"message_preview"`
+	AssigneeName   string            `json:"assignee_name"`
+	TeamName       string            `json:"team_name"`
 }
 
 func validateInboxFilter(f models.InboxQueueFilter) bool {
@@ -37,7 +40,7 @@ func validateInboxFilter(f models.InboxQueueFilter) bool {
 	if f.Priority != "" && !(inboxCaseUpdate{Priority: f.Priority}).valid(time.Time{}) {
 		return false
 	}
-	if len(f.Fields) > 8 || len(f.Tags) > 20 {
+	if len(f.Fields)+len(f.Predicates) > 20 || len(f.Tags) > 20 || (f.Match != "" && f.Match != "all" && f.Match != "any") || len(f.MessageContains) > 500 {
 		return false
 	}
 	for _, tag := range f.Tags {
@@ -76,54 +79,32 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid inbox filters", nil, "")
 		}
 	}
-	pg := parseInboxQueuePage(args)
-	q := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, org)
-	q = q.Where("NOT EXISTS (SELECT 1 FROM inbox_cases newer WHERE newer.organization_id = inbox_cases.organization_id " +
-		"AND newer.account_id = inbox_cases.account_id AND newer.contact_id = inbox_cases.contact_id AND newer.deleted_at IS NULL " +
-		"AND (newer.opened_at, newer.id) > (inbox_cases.opened_at, inbox_cases.id))")
-	switch f.Queue {
-	case "mine":
-		q = q.Where("inbox_cases.assignee_id = ?", user)
-	case "unassigned":
-		q = q.Where("inbox_cases.assignee_id IS NULL AND inbox_cases.status <> ?", models.InboxCaseResolved)
-	case "awaiting_reply":
-		q = q.Where("inbox_cases.first_human_reply_at IS NULL AND inbox_cases.last_inbound_at IS NOT NULL AND inbox_cases.status IN ?",
-			[]models.InboxCaseStatus{models.InboxCaseOpen, models.InboxCasePending})
-	case "follow_ups":
-		q = q.Where("inbox_cases.status IN ?", []models.InboxCaseStatus{models.InboxCaseWaiting, models.InboxCaseSnoozed})
-	}
-	if f.AccountID != nil {
-		q = q.Where("inbox_cases.account_id = ?", f.AccountID)
-	}
-	if f.TeamID != nil {
-		q = q.Where("inbox_cases.team_id = ?", f.TeamID)
-	}
-	if f.AssigneeID != nil {
-		q = q.Where("inbox_cases.assignee_id = ?", f.AssigneeID)
-	}
-	if f.Status != "" {
-		q = q.Where("inbox_cases.status = ?", f.Status)
-	}
-	if f.Priority != "" {
-		q = q.Where("inbox_cases.priority = ?", f.Priority)
-	}
-	for _, tag := range f.Tags {
-		value, err := json.Marshal([]string{tag})
-		if err != nil {
+	if raw := string(args.Peek("view_id")); raw != "" {
+		id, e := uuid.Parse(raw)
+		if e != nil {
+			return a.inboxError(r, errInboxTransition)
+		}
+		var view models.InboxSavedView
+		if err := a.accessibleInboxViews(a.DB, org, user).First(&view, "id=?", id).Error; err != nil {
 			return a.inboxError(r, err)
 		}
-		q = q.Where("c.tags @> ?::jsonb", string(value))
+		if view.TeamID != nil {
+			f.TeamID = view.TeamID
+		}
 	}
-	allowContact := a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)
-	if err := validateInboxFieldMatchers(a.DB, org, f.Fields, allowContact); err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A field filter is invalid or unavailable", nil, "")
+	if f.MessageContains != "" {
+		return a.inboxError(r, errInboxTransition)
 	}
-	q, err := queryInboxFieldMatchers(q, org, f.Fields, allowContact)
+	pg := parseInboxQueuePage(args)
+	baseFilter := f
+	baseFilter.Queue = ""
+	base, err := a.inboxQueueQuery(org, user, baseFilter)
 	if err != nil {
 		return a.inboxError(r, err)
 	}
+	q := applyInboxQueueKind(base.Session(&gorm.Session{}), f.Queue, user)
 	rows := []inboxQueueRow{}
-	err = q.Select("inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name").
+	err = q.Select(inboxQueueColumns).Joins(inboxQueueOwnerJoin).Joins(inboxQueueTeamJoin).
 		Order("CASE inbox_cases.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, inbox_cases.opened_at, inbox_cases.id").
 		Offset(pg).Limit(51).Scan(&rows).Error
 	if err != nil {
@@ -133,7 +114,24 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": hasMore})
+	response := map[string]any{"cases": rows, "has_more": hasMore}
+	if string(args.Peek("include_counts")) == "true" {
+		counts := map[string]int64{}
+		for _, queue := range []string{"", "mine", "unassigned", "awaiting_reply", "follow_ups"} {
+			scoped := applyInboxQueueKind(base.Session(&gorm.Session{}), queue, user)
+			var count int64
+			if err := scoped.Count(&count).Error; err != nil {
+				return a.inboxError(r, err)
+			}
+			key := queue
+			if key == "" {
+				key = "all"
+			}
+			counts[key] = count
+		}
+		response["counts"] = counts
+	}
+	return r.SendEnvelope(response)
 }
 
 func (a *App) prepareInboxRows(org uuid.UUID, rows []inboxQueueRow) ([]inboxQueueRow, bool, error) {
@@ -175,13 +173,101 @@ func (a *App) ListInboxSavedViews(r *fastglue.Request) error {
 		return nil
 	}
 	views := []models.InboxSavedView{}
-	q := a.DB.Where("organization_id = ?", org)
-	q = q.Where("owner_id = ? OR team_id IN (SELECT tm.team_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "+
-		"WHERE tm.user_id = ? AND t.organization_id = ? AND t.deleted_at IS NULL AND tm.deleted_at IS NULL)", user, user, org)
+	q := a.accessibleInboxViews(a.DB, org, user)
 	if err := q.Order("name, id").Find(&views).Error; err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"views": views})
+	result := make([]map[string]any, 0, len(views))
+	for _, view := range views {
+		editable := view.TeamID == nil && view.OwnerID == user
+		if view.TeamID != nil {
+			permitted, err := a.canPublishInboxView(org, user, *view.TeamID)
+			if err != nil {
+				return a.inboxError(r, err)
+			}
+			editable = permitted
+		}
+		result = append(result, map[string]any{"id": view.ID, "owner_id": view.OwnerID, "team_id": view.TeamID, "name": view.Name, "filters": view.Filters, "capabilities": map[string]bool{"edit": editable, "remove": editable, "share": view.OwnerID == user && a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org)}})
+	}
+	publication := a.DB.Model(&models.Team{}).Where("teams.organization_id=? AND teams.is_active", org)
+	if !a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org) {
+		publication = publication.Where("EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id=teams.id AND tm.user_id=? AND tm.role=? AND tm.deleted_at IS NULL)", user, models.TeamRoleManager)
+	}
+	teams := []struct {
+		ID   uuid.UUID `json:"id"`
+		Name string    `json:"name"`
+	}{}
+	if err := publication.Select("id,name").Order("name,id").Scan(&teams).Error; err != nil {
+		return a.inboxError(r, err)
+	}
+	for _, view := range result {
+		capabilities := view["capabilities"].(map[string]bool)
+		capabilities["share"] = view["owner_id"] == user && len(teams) > 0
+	}
+	return r.SendEnvelope(map[string]any{"views": result, "publish_teams": teams})
+}
+
+func (a *App) UpdateInboxSavedView(r *fastglue.Request) error {
+	org, user, ok := a.inboxFeatureAuth(r, models.ActionRead)
+	if !ok {
+		return nil
+	}
+	id, err := parsePathUUID(r, "id", "saved view")
+	if err != nil {
+		return nil
+	}
+	var input struct {
+		Name    string                  `json:"name"`
+		TeamID  *uuid.UUID              `json:"team_id"`
+		Filters models.InboxQueueFilter `json:"filters"`
+	}
+	if a.decodeRequest(r, &input) != nil {
+		return nil
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) || input.Filters.MessageContains != "" {
+		return a.inboxError(r, errInboxTransition)
+	}
+	allowContact := a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)
+	if err := validateInboxFieldMatchers(a.DB, org, input.Filters.Fields, allowContact); err != nil {
+		return a.inboxError(r, err)
+	}
+	if err := validateInboxPredicates(a.DB, org, input.Filters, allowContact); err != nil {
+		return a.inboxError(r, err)
+	}
+	var view models.InboxSavedView
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&view, "organization_id=? AND id=?", org, id).Error; err != nil {
+			return err
+		}
+		if view.TeamID != nil {
+			permitted, err := a.canPublishInboxView(org, user, *view.TeamID)
+			if err != nil {
+				return err
+			}
+			if !permitted {
+				return gorm.ErrRecordNotFound
+			}
+		} else if view.OwnerID != user {
+			return gorm.ErrRecordNotFound
+		}
+		if input.TeamID != nil {
+			permitted, err := a.canPublishInboxView(org, user, *input.TeamID)
+			if err != nil {
+				return err
+			}
+			if !permitted {
+				return errInboxTransition
+			}
+			input.Filters.TeamID = input.TeamID
+		}
+		view.Name, view.TeamID, view.Filters = input.Name, input.TeamID, input.Filters
+		return tx.Save(&view).Error
+	})
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	return r.SendEnvelope(map[string]any{"view": view})
 }
 
 func (a *App) canPublishInboxView(org, user, teamID uuid.UUID) (bool, error) {
@@ -209,11 +295,14 @@ func (a *App) CreateInboxSavedView(r *fastglue.Request) error {
 		return nil
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) {
+	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) || input.Filters.MessageContains != "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A name and valid filters are required", nil, "")
 	}
 	if err := validateInboxFieldMatchers(a.DB, org, input.Filters.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A field filter is invalid or unavailable", nil, "")
+	}
+	if err := validateInboxPredicates(a.DB, org, input.Filters, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+		return a.inboxError(r, err)
 	}
 	if input.TeamID != nil {
 		permitted, err := a.canPublishInboxView(org, user, *input.TeamID)
@@ -306,6 +395,19 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 	}
 	results := make([]map[string]any, 0, len(input.Items))
 	for _, item := range input.Items {
+		result := map[string]any{"id": item.ID}
+		var identity inboxQueueRow
+		lookup := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, org).Where("inbox_cases.id = ?", item.ID).Select("inbox_cases.*,wa.name AS account_name,c.profile_name AS contact_name").Scan(&identity)
+		if lookup.Error != nil {
+			return a.inboxError(r, lookup.Error)
+		}
+		if identity.ID != uuid.Nil {
+			name := identity.ContactName
+			if a.ShouldMaskPhoneNumbers(org) {
+				name = utils.MaskIfPhoneNumber(name)
+			}
+			result["contact_id"], result["account_id"], result["account_name"], result["contact_name"] = identity.ContactID, identity.AccountID, identity.AccountName, name
+		}
 		err := a.updateInboxCaseInBulk(org, user, item, input)
 		state := "updated"
 		switch {
@@ -323,7 +425,8 @@ func (a *App) BulkUpdateInboxCases(r *fastglue.Request) error {
 			state = "failed"
 			a.Log.Error("Inbox bulk action failed", "case_id", item.ID, "error", err)
 		}
-		results = append(results, map[string]any{"id": item.ID, "result": state})
+		result["result"] = state
+		results = append(results, result)
 	}
 	return r.SendEnvelope(map[string]any{"results": results})
 }
@@ -423,4 +526,74 @@ func tagInboxCase(tx *gorm.DB, c *models.InboxCase, contact *models.Contact, use
 		return err
 	}
 	return appendInboxActivity(tx, *c, models.InboxCaseActivity{ActorID: &user, Kind: "tagged"})
+}
+
+func (a *App) inboxQueueQuery(org, user uuid.UUID, f models.InboxQueueFilter) (*gorm.DB, error) {
+	q := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, org)
+	q = q.Where("NOT EXISTS (SELECT 1 FROM inbox_cases newer WHERE newer.organization_id = inbox_cases.organization_id " +
+		"AND newer.account_id = inbox_cases.account_id AND newer.contact_id = inbox_cases.contact_id AND newer.deleted_at IS NULL " +
+		"AND (newer.opened_at, newer.id) > (inbox_cases.opened_at, inbox_cases.id))")
+	q = applyInboxQueueKind(q, f.Queue, user)
+	if f.AccountID != nil {
+		q = q.Where("inbox_cases.account_id = ?", f.AccountID)
+	}
+	if f.TeamID != nil {
+		q = q.Where("inbox_cases.team_id = ?", f.TeamID)
+	}
+	if f.AssigneeID != nil {
+		q = q.Where("inbox_cases.assignee_id = ?", f.AssigneeID)
+	}
+	if f.Status != "" {
+		q = q.Where("inbox_cases.status = ?", f.Status)
+	}
+	if f.Priority != "" {
+		q = q.Where("inbox_cases.priority = ?", f.Priority)
+	}
+	for _, tag := range f.Tags {
+		value, err := json.Marshal([]string{tag})
+		if err != nil {
+			return nil, err
+		}
+		q = q.Where("c.tags @> ?::jsonb", string(value))
+	}
+	allowContact := a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)
+	if err := validateInboxFieldMatchers(a.DB, org, f.Fields, allowContact); err != nil {
+		return nil, errInboxTransition
+	}
+	q, err := queryInboxFieldMatchers(q, org, f.Fields, allowContact)
+	if err != nil {
+		return nil, err
+	}
+	q, err = applyInboxPredicates(a.DB, q, org, f, allowContact)
+	if err != nil {
+		return nil, err
+	}
+
+	return q, nil
+}
+
+const inboxQueueOwnerJoin = "LEFT JOIN users inbox_owner ON inbox_owner.id = inbox_cases.assignee_id AND inbox_owner.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id = inbox_owner.id AND uo.organization_id = inbox_cases.organization_id)"
+const inboxQueueTeamJoin = "LEFT JOIN teams inbox_team ON inbox_team.id = inbox_cases.team_id AND inbox_team.organization_id = inbox_cases.organization_id AND inbox_team.deleted_at IS NULL"
+const inboxQueueColumns = "inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name, COALESCE(inbox_owner.full_name,'') AS assignee_name, COALESCE(inbox_team.name,'') AS team_name, COALESCE((SELECT left(m.content,160) FROM messages m WHERE m.organization_id = inbox_cases.organization_id AND m.contact_id = inbox_cases.contact_id AND m.whats_app_account = wa.name AND m.direction = 'incoming' AND COALESCE(m.channel,'') IN ('','whatsapp') AND m.deleted_at IS NULL ORDER BY m.created_at DESC,m.id DESC LIMIT 1),'') AS message_preview"
+
+func applyInboxQueueKind(q *gorm.DB, queue string, user uuid.UUID) *gorm.DB {
+	switch queue {
+	case "mine":
+		q = q.Where("inbox_cases.assignee_id = ?", user)
+	case "unassigned":
+		q = q.Where("inbox_cases.assignee_id IS NULL AND inbox_cases.status <> ?", models.InboxCaseResolved)
+	case "awaiting_reply":
+		q = q.Where("inbox_cases.first_human_reply_at IS NULL AND inbox_cases.last_inbound_at IS NOT NULL AND inbox_cases.status IN ?",
+			[]models.InboxCaseStatus{models.InboxCaseOpen, models.InboxCasePending})
+	case "follow_ups":
+		q = q.Where("inbox_cases.status IN ?", []models.InboxCaseStatus{models.InboxCaseWaiting, models.InboxCaseSnoozed})
+	}
+	return q
+}
+
+func (a *App) accessibleInboxViews(db *gorm.DB, org, user uuid.UUID) *gorm.DB {
+	q := db.Where("organization_id = ?", org)
+	q = q.Where("owner_id = ? OR team_id IN (SELECT tm.team_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "+
+		"WHERE tm.user_id = ? AND t.organization_id = ? AND t.is_active AND t.deleted_at IS NULL AND tm.deleted_at IS NULL)", user, user, org)
+	return q
 }

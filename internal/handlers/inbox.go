@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxquality"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -70,7 +71,11 @@ func appendInboxActivity(tx *gorm.DB, c models.InboxCase, event models.InboxCase
 	case event.Kind == "updated" && event.ActorID != nil && event.FromStatus != event.ToStatus:
 		event.WorkflowTrigger = "status_changed"
 	}
-	return tx.Create(&event).Error
+	event.AssigneeID, event.TeamID = c.AssigneeID, c.TeamID
+	if err := tx.Create(&event).Error; err != nil {
+		return err
+	}
+	return inboxquality.Sync(tx, &c, time.Now().UTC())
 }
 
 func inboxWorkflowEnabled(db *gorm.DB, orgID uuid.UUID, lock bool) (bool, error) {
@@ -219,11 +224,32 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	var activities []models.InboxCaseActivity
+	var activities []struct {
+		models.InboxCaseActivity
+		ActorName    string `json:"actor_name"`
+		AssigneeName string `json:"assignee_name"`
+		TeamName     string `json:"team_name"`
+	}
 	scope := a.scopeInboxCases(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).
 		Select("inbox_cases.id")
-	if err := a.DB.Where("organization_id = ? AND account_id = ? AND case_id IN (?)", t.org, t.account, scope).
-		Where("kind <> ?", "incoming_message").Order("created_at DESC, id DESC").Limit(50).Find(&activities).Error; err != nil {
+	activityQuery := a.DB.Model(&models.InboxCaseActivity{}).Where("inbox_case_activities.organization_id = ? AND inbox_case_activities.account_id = ? AND case_id IN (?)", t.org, t.account, scope)
+	if raw := string(r.RequestCtx.QueryArgs().Peek("case_id")); raw != "" {
+		id, e := uuid.Parse(raw)
+		if e != nil {
+			return a.inboxError(r, errInboxTransition)
+		}
+		var selected models.InboxCase
+		if e := a.scopeInboxCases(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).First(&selected, "inbox_cases.id=?", id).Error; e != nil {
+			return a.inboxError(r, e)
+		}
+		activityQuery = activityQuery.Where("case_id=?", id)
+	}
+	if err := activityQuery.
+		Joins("LEFT JOIN users actor ON actor.id=inbox_case_activities.actor_id AND actor.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.user_id=actor.id AND uo.organization_id=inbox_case_activities.organization_id)").
+		Joins("LEFT JOIN users owner ON owner.id=inbox_case_activities.assignee_id AND owner.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.user_id=owner.id AND uo.organization_id=inbox_case_activities.organization_id)").
+		Joins("LEFT JOIN teams team ON team.id=inbox_case_activities.team_id AND team.organization_id=inbox_case_activities.organization_id AND team.deleted_at IS NULL").
+		Select("inbox_case_activities.*, COALESCE(actor.full_name,'') AS actor_name,COALESCE(owner.full_name,'') AS assignee_name,COALESCE(team.name,'') AS team_name").
+		Where("kind <> ?", "incoming_message").Order("inbox_case_activities.created_at DESC, inbox_case_activities.id DESC").Limit(50).Scan(&activities).Error; err != nil {
 		return a.inboxError(r, err)
 	}
 	if c.AssigneeID != nil && *c.AssigneeID != user && !a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) {
@@ -361,8 +387,22 @@ func (a *App) UpdateInboxConversation(r *fastglue.Request) error {
 		if err := tx.Create(&c).Error; err != nil {
 			return err
 		}
+		if err := inboxquality.AssignPolicy(tx, &c, false); err != nil {
+			return err
+		}
 		return appendInboxActivity(tx, c, models.InboxCaseActivity{ActorID: &user, Kind: kind, ToStatus: c.Status, ToPriority: c.Priority})
 	})
+	if errors.Is(err, errRequiredInboxFields) {
+		if e := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, t.org).First(&models.InboxCase{}, "inbox_cases.id=?", c.ID).Error; e != nil {
+			return a.inboxError(r, e)
+		}
+		missing, e := a.missingInboxFields(a.DB, c, user)
+		if e != nil {
+			return a.inboxError(r, e)
+		}
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errRequiredInboxFields.Error(), map[string]any{"missing_fields": missing}, "required_inbox_fields")
+	}
+
 	if err != nil {
 		return a.inboxError(r, err)
 	}

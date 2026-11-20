@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -101,6 +102,17 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 		return err
 	}
 	sendSelected := false
+	triggerText := ""
+	if event.EventKey != nil && (event.WorkflowTrigger == "incoming_message" || event.WorkflowTrigger == "entry_message") {
+		var message models.Message
+		err := tx.Select("content").First(&message, "organization_id=? AND contact_id=? AND whats_app_account=? AND whats_app_message_id=? AND direction=? AND COALESCE(channel,'') IN ('','whatsapp')", c.OrganizationID, c.ContactID, account.Name, *event.EventKey, models.DirectionIncoming).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil {
+			triggerText = message.Content
+		}
+	}
 	for _, w := range workflows {
 		user := w.CreatedByID
 		if w.UpdatedByID != nil {
@@ -119,18 +131,37 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 		if err != nil {
 			return err
 		}
-		preview, err := a.evaluateInboxWorkflow(tx, w, c, account, contact, user, now)
+		preview, err := a.evaluateInboxWorkflow(tx, w, c, account, contact, user, now, triggerText)
 		if err != nil {
+			if errors.Is(err, errInboxTransition) || errors.Is(err, gorm.ErrRecordNotFound) {
+				run := newInboxWorkflowRun(uuid.New(), w, c, user)
+				run.EventID = &event.ID
+				run.State, run.Outcome = inboxRunBlocked, "conditions_unavailable"
+				if err := saveInboxWorkflowRun(tx, c, &run); err != nil {
+					return err
+				}
+				continue
+			}
 			return err
 		}
 		if !preview.Matches {
+			run := newInboxWorkflowRun(uuid.New(), w, c, user)
+			run.EventID = &event.ID
+			run.State, run.Outcome = "skipped", "conditions_not_matched"
+			run.ConditionsMatched, run.ActionOutcomes = &preview.Matches, preview.ActionOutcomes
+			run.ConditionOutcomes = preview.ConditionOutcomes
+			if err := saveInboxWorkflowRun(tx, c, &run); err != nil {
+				return err
+			}
 			continue
 		}
 		run := newInboxWorkflowRun(uuid.New(), w, c, user)
+		run.ActionOutcomes, run.ConditionsMatched = preview.ActionOutcomes, &preview.Matches
+		run.ConditionOutcomes = preview.ConditionOutcomes
 		run.EventID = &event.ID
 		nextCase, nextContact := c, contact
 		if err := tx.Transaction(func(inner *gorm.DB) error {
-			return a.runInboxWorkflowActions(inner, &nextCase, &nextContact, user, w, now)
+			return a.runInboxWorkflowActions(inner, &nextCase, &nextContact, user, w, now, &run.ActionOutcomes)
 		}); err != nil {
 			switch {
 			case errors.Is(err, errInboxTransition), errors.Is(err, errInboxAgentAtCapacity), errors.Is(err, errRequiredInboxFields), errors.Is(err, gorm.ErrRecordNotFound):
@@ -200,7 +231,36 @@ func finishInboxSend(tx *gorm.DB, run models.InboxWorkflowRun, state, outcome st
 	if res.Error != nil || res.RowsAffected == 0 {
 		return res.Error
 	}
-	c := models.InboxCase{BaseModel: models.BaseModel{ID: run.CaseID}, OrganizationID: run.OrganizationID, AccountID: run.AccountID}
+
+	var stored models.InboxWorkflowRun
+	if err := tx.Select("id,action_outcomes").First(&stored, "id=? AND organization_id=?", run.ID, run.OrganizationID).Error; err != nil {
+		return err
+	}
+	for i := range stored.ActionOutcomes {
+		item := &stored.ActionOutcomes[i]
+		if item.Type == "send_text" || item.Type == "send_template" {
+			item.Status = state
+			if outcome != "" {
+				item.Reason = outcome
+			}
+		}
+	}
+	if len(stored.ActionOutcomes) > 0 {
+		raw, err := json.Marshal(stored.ActionOutcomes)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&models.InboxWorkflowRun{}).Where("id=? AND organization_id=?", run.ID, run.OrganizationID).Update("action_outcomes", gorm.Expr("?::jsonb", string(raw))).Error; err != nil {
+			return err
+		}
+	}
+	var c models.InboxCase
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&c, "id = ? AND organization_id = ?", run.CaseID, run.OrganizationID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
 	return appendInboxActivity(tx, c, models.InboxCaseActivity{Kind: "workflow_" + state, ActorID: &run.ActorID, Detail: run.WorkflowName})
 }
 
@@ -209,6 +269,10 @@ func (a *App) dispatchClaimedInboxSend(ctx context.Context, run models.InboxWork
 	if err := a.DB.First(&w, "id = ? AND organization_id = ?", run.WorkflowID, run.OrganizationID).Error; err != nil ||
 		!w.UpdatedAt.Equal(run.WorkflowUpdatedAt) || (w.Kind == "rule" && w.EnabledAt == nil) {
 		return inboxRunBlocked, "workflow_changed"
+	}
+	var visible int64
+	if err := a.visibleInboxWorkflows(a.DB, run.OrganizationID, run.ActorID).Model(&models.InboxWorkflow{}).Where("id=?", w.ID).Count(&visible).Error; err != nil || visible != 1 {
+		return inboxRunBlocked, "workflow_access_changed"
 	}
 	if !a.workflowActorActive(a.DB, run.OrganizationID, run.ActorID) ||
 		!a.HasPermission(run.ActorID, models.ResourceChat, models.ActionWrite, run.OrganizationID) ||

@@ -5,10 +5,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxquality"
 	"github.com/shridarpatil/whatomate/internal/inboxsla"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -16,12 +18,15 @@ type inboxSLATarget struct {
 	Status           string     `json:"status"`
 	Deadline         *time.Time `json:"deadline,omitempty"`
 	RemainingSeconds int64      `json:"remaining_seconds"`
+	Timezone         string     `json:"timezone"`
 }
 
 type inboxSLASnapshot struct {
-	FirstReply *inboxSLATarget `json:"first_reply,omitempty"`
-	NextReply  *inboxSLATarget `json:"next_reply,omitempty"`
-	Resolution *inboxSLATarget `json:"resolution,omitempty"`
+	PolicyVersion *uuid.UUID      `json:"policy_version,omitempty"`
+	Legacy        bool            `json:"legacy"`
+	FirstReply    *inboxSLATarget `json:"first_reply,omitempty"`
+	NextReply     *inboxSLATarget `json:"next_reply,omitempty"`
+	Resolution    *inboxSLATarget `json:"resolution,omitempty"`
 }
 
 type inboxSLACase struct {
@@ -59,10 +64,7 @@ func measureInboxTarget(clock inboxsla.Clock, start time.Time, stop *time.Time, 
 	default:
 		out.Status = "on_track"
 	}
-	if stop == nil && out.Status != "paused" && out.Status != "breached" {
-		deadline := clock.Deadline(end, remaining)
-		out.Deadline = &deadline
-	}
+	out.Deadline = inboxquality.Due(clock, start, budget, pauses)
 	return &out
 }
 
@@ -97,7 +99,16 @@ func inboxSnapshot(clock inboxsla.Clock, policy models.InboxSLAPolicy, c models.
 	if c.NextReplyFrom != nil && c.ResolvedAt == nil {
 		next = measureInboxTarget(clock, *c.NextReplyFrom, nil, now, policy.NextReplyMinutes, nil)
 	}
-	return &inboxSLASnapshot{FirstReply: first, NextReply: next, Resolution: measureInboxTarget(clock, c.OpenedAt, c.ResolvedAt, now, policy.ResolutionMinutes, pauses)}
+	out := &inboxSLASnapshot{PolicyVersion: c.SLAPolicyID, Legacy: c.SLALegacy, FirstReply: first, NextReply: next, Resolution: measureInboxTarget(clock, c.OpenedAt, c.ResolvedAt, now, policy.ResolutionMinutes, pauses)}
+	for _, target := range []*inboxSLATarget{out.FirstReply, out.NextReply, out.Resolution} {
+		if target != nil {
+			target.Timezone = policy.Timezone
+			if target.Timezone == "" {
+				target.Timezone = "UTC"
+			}
+		}
+	}
+	return out
 }
 
 func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now time.Time) (map[uuid.UUID]*inboxSLASnapshot, error) {
@@ -105,32 +116,56 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 	if len(cases) == 0 {
 		return results, nil
 	}
-	accountIDs := make([]uuid.UUID, 0, len(cases))
-	for _, c := range cases {
-		accountIDs = append(accountIDs, c.AccountID)
-	}
-	var policies []models.InboxSLAPolicy
-	if err := a.DB.Where("organization_id = ? AND account_id IN ?", org, accountIDs).Find(&policies).Error; err != nil {
-		return nil, err
-	}
-	if len(policies) == 0 {
-		return results, nil
-	}
 	type configured struct {
 		policy models.InboxSLAPolicy
 		clock  inboxsla.Clock
 	}
-	byAccount := make(map[uuid.UUID]configured)
-	for _, p := range policies {
+	byCasePolicy := make(map[uuid.UUID]configured)
+	var ids []uuid.UUID
+	for _, c := range cases {
+		if c.SLAPolicyID != nil {
+			ids = append(ids, *c.SLAPolicyID)
+		}
+	}
+	var versions []models.InboxSLAVersion
+	if len(ids) > 0 {
+		if err := a.DB.Where("organization_id = ? AND id IN ?", org, ids).Find(&versions).Error; err != nil {
+			return nil, err
+		}
+	}
+	versionsByID := make(map[uuid.UUID]models.InboxSLAVersion)
+	for _, v := range versions {
+		versionsByID[v.ID] = v
+	}
+	for _, c := range cases {
+		var p models.InboxSLAPolicy
+		if c.SLAPolicyID != nil {
+			v, ok := versionsByID[*c.SLAPolicyID]
+			if !ok {
+				return nil, errors.New("case response policy version is missing")
+			}
+			p = v.Policy
+		} else if !c.SLAPolicyAssigned {
+			// Read-only compatibility for fixture/legacy records awaiting migration.
+			err := a.DB.First(&p, "organization_id = ? AND account_id = ?", org, c.AccountID).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			continue
+		}
 		clock, err := inboxPolicyClock(p)
 		if err != nil {
 			return nil, err
 		}
-		byAccount[p.AccountID] = configured{p, clock}
+		byCasePolicy[c.ID] = configured{p, clock}
 	}
 	var caseIDs []uuid.UUID
 	for _, c := range cases {
-		if _, ok := byAccount[c.AccountID]; ok {
+		if _, ok := byCasePolicy[c.ID]; ok {
 			caseIDs = append(caseIDs, c.ID)
 		}
 	}
@@ -145,7 +180,7 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 		byCase[event.CaseID] = append(byCase[event.CaseID], event)
 	}
 	for _, c := range cases {
-		if entry, ok := byAccount[c.AccountID]; ok {
+		if entry, ok := byCasePolicy[c.ID]; ok {
 			results[c.ID] = inboxSnapshot(entry.clock, entry.policy, c, byCase[c.ID], now)
 		}
 	}
@@ -153,6 +188,11 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 }
 
 func validateInboxPolicy(p models.InboxSLAPolicy) error {
+	if p.Timezone != "" {
+		if _, err := time.LoadLocation(p.Timezone); err != nil {
+			return errors.New("choose a valid IANA timezone")
+		}
+	}
 	for _, value := range []int{p.FirstReplyMinutes, p.NextReplyMinutes, p.ResolutionMinutes} {
 		if value < 1 || value > 43200 {
 			return errors.New("SLA targets must be between 1 and 43200 minutes")
@@ -191,10 +231,24 @@ func (a *App) SetInboxSLAPolicy(r *fastglue.Request) error {
 		return nil
 	}
 	input.OrganizationID, input.AccountID = org, account
+	if input.Timezone == "" {
+		input.Timezone = "UTC"
+	}
 	if err := validateInboxPolicy(input); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
-	if err := a.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&input).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := inboxquality.PolicyLock(tx, org, account); err != nil {
+			return err
+		}
+		input.VersionID = nil
+		version := models.InboxSLAVersion{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org, AccountID: account, Policy: input}
+		if err := tx.Create(&version).Error; err != nil {
+			return err
+		}
+		input.VersionID = &version.ID
+		return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&input).Error
+	}); err != nil {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{"policy": input})
@@ -209,7 +263,12 @@ func (a *App) DeleteInboxSLAPolicy(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if err := a.DB.Where("organization_id = ? AND account_id = ?", org, account).Delete(&models.InboxSLAPolicy{}).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := inboxquality.PolicyLock(tx, org, account); err != nil {
+			return err
+		}
+		return tx.Where("organization_id = ? AND account_id = ?", org, account).Delete(&models.InboxSLAPolicy{}).Error
+	}); err != nil {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]bool{"deleted": true})
@@ -224,8 +283,10 @@ func (a *App) GetInboxSLAReport(r *fastglue.Request) error {
 	if err != nil || !enabled {
 		return a.inboxError(r, errInboxDisabled)
 	}
+	now := time.Now().UTC()
 	q := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, org).
-		Where("inbox_cases.status <> ? AND EXISTS (SELECT 1 FROM inbox_sla_policies p WHERE p.organization_id = inbox_cases.organization_id AND p.account_id = inbox_cases.account_id)", models.InboxCaseResolved)
+		Where("inbox_cases.status <> ?", models.InboxCaseResolved).
+		Joins("JOIN (SELECT case_id, MIN(deadline) AS next_due, BOOL_OR(deadline <= ?) AS breached, BOOL_OR(NOT paused AND at_risk_at <= ?) AS at_risk FROM inbox_sla_obligations WHERE organization_id = ? AND completed_at IS NULL AND deleted_at IS NULL GROUP BY case_id) risk ON risk.case_id = inbox_cases.id", now, now, org)
 	for _, filter := range []string{"account_id", "team_id"} {
 		if raw := r.RequestCtx.QueryArgs().Peek(filter); len(raw) > 0 {
 			id, err := uuid.Parse(string(raw))
@@ -235,14 +296,25 @@ func (a *App) GetInboxSLAReport(r *fastglue.Request) error {
 			q = q.Where("inbox_cases."+filter+" = ?", id)
 		}
 	}
+	summary := struct {
+		Total    int64 `json:"total"`
+		Breached int64 `json:"breached"`
+		AtRisk   int64 `json:"at_risk"`
+	}{}
+	if err := q.Session(&gorm.Session{}).Select("COUNT(*) AS total, COUNT(*) FILTER (WHERE risk.breached) AS breached, COUNT(*) FILTER (WHERE NOT COALESCE(risk.breached,false) AND risk.at_risk) AS at_risk").Scan(&summary).Error; err != nil {
+		return a.inboxError(r, err)
+	}
+	if string(r.RequestCtx.QueryArgs().Peek("all")) != "true" {
+		q = q.Where("risk.breached OR risk.at_risk")
+	}
 	rows := []inboxQueueRow{}
-	if err := q.Select("inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name").
-		Order("inbox_cases.opened_at, inbox_cases.id").Offset(parseInboxQueuePage(r.RequestCtx.QueryArgs())).Limit(51).Scan(&rows).Error; err != nil {
+	if err := q.Select(inboxQueueColumns).Joins(inboxQueueOwnerJoin).Joins(inboxQueueTeamJoin).
+		Order("risk.breached DESC NULLS LAST, risk.next_due ASC NULLS LAST, inbox_cases.opened_at, inbox_cases.id").Offset(parseInboxQueuePage(r.RequestCtx.QueryArgs())).Limit(51).Scan(&rows).Error; err != nil {
 		return a.inboxError(r, err)
 	}
 	rows, more, err := a.prepareInboxRows(org, rows)
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": more})
+	return r.SendEnvelope(map[string]any{"cases": rows, "has_more": more, "summary": summary, "updated_at": now})
 }

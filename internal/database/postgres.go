@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/channelmigration"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/inboxquality"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -81,9 +82,12 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxCaseActivity", &models.InboxCaseActivity{}},
 		{"InboxSavedView", &models.InboxSavedView{}},
 		{"InboxSLAPolicy", &models.InboxSLAPolicy{}},
+		{"InboxSLAVersion", &models.InboxSLAVersion{}},
+		{"InboxSLAObligation", &models.InboxSLAObligation{}},
 		{"InboxFieldDefinition", &models.InboxFieldDefinition{}},
 		{"InboxFieldValue", &models.InboxFieldValue{}},
 		{"InboxAgentCapacity", &models.InboxAgentCapacity{}},
+		{"InboxCapacityPreset", &models.InboxCapacityPreset{}},
 		{"InboxWorkflow", &models.InboxWorkflow{}},
 		{"InboxWorkflowRun", &models.InboxWorkflowRun{}},
 		{"Template", &models.Template{}},
@@ -98,7 +102,7 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatbotSettings", &models.ChatbotSettings{}},
 		{"KeywordRule", &models.KeywordRule{}},
 		{"ChatbotFlow", &models.ChatbotFlow{}},
-		// ChatbotFlowStep table is no longer managed by AutoMigrate — the
+		// ChatbotFlowStep table is no longer managed by AutoMigrate â€” the
 		// v2 graph runner uses ChatbotFlow.Graph exclusively. The model
 		// type is retained only so BackfillChatbotFlowGraph can read
 		// existing rows once during startup, then the table can be
@@ -144,6 +148,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := MigrateInboxWorkflowAuthority(db); err != nil {
 		return err
 	}
+	if err := inboxquality.Backfill(db); err != nil {
+		return err
+	}
 	return channelmigration.Run(db)
 }
 
@@ -165,7 +172,7 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		filled := int(percent * float64(barWidth))
 		empty := barWidth - filled
 
-		bar := repeatChar("█", filled) + "\033[90m" + repeatChar("░", empty) + "\033[0m"
+		bar := repeatChar("â–ˆ", filled) + "\033[90m" + repeatChar("â–‘", empty) + "\033[0m"
 		fmt.Printf("\r  Running migrations  %s %3d%%", bar, int(percent*100))
 		_ = os.Stdout.Sync()
 	}
@@ -176,13 +183,16 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	for _, m := range migrationModels {
 		printProgress(currentStep, totalSteps)
 		if err := silentDB.AutoMigrate(m.Model); err != nil {
-			fmt.Printf("\n  \033[31m✗ Migration failed: %s\033[0m\n\n", m.Name)
+			fmt.Printf("\n  \033[31mâœ— Migration failed: %s\033[0m\n\n", m.Name)
 			return fmt.Errorf("failed to migrate %s: %w", m.Name, err)
 		}
 		currentStep++
 	}
 
 	// Create indexes
+	if err := inboxquality.Backfill(silentDB); err != nil {
+		return err
+	}
 	if err := channelmigration.Run(silentDB); err != nil {
 		return err
 	}
@@ -192,7 +202,7 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	for _, idx := range indexes {
 		printProgress(currentStep, totalSteps)
 		if err := silentDB.Exec(idx).Error; err != nil {
-			fmt.Printf("\n  \033[31m✗ Index creation failed\033[0m\n\n")
+			fmt.Printf("\n  \033[31mâœ— Index creation failed\033[0m\n\n")
 			return fmt.Errorf("failed to create index: %w", err)
 		}
 		currentStep++
@@ -201,13 +211,13 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Seed permissions (always run, will skip if already seeded)
 	printProgress(currentStep, totalSteps)
 	if err := SeedPermissionsAndRoles(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to seed permissions\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Failed to seed permissions\033[0m\n\n")
 		return err
 	}
 
 	// Fix existing organizations - link permissions to system roles if missing
 	if err := SeedSystemRolesForAllOrgs(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to fix existing role permissions\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Failed to fix existing role permissions\033[0m\n\n")
 		return err
 	}
 	if err := SeedBrandingAdminPermissions(silentDB); err != nil {
@@ -216,14 +226,14 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 
 	// Backfill user_organizations from existing users
 	if err := MigrateUserOrganizations(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to backfill user organizations\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Failed to backfill user organizations\033[0m\n\n")
 		return err
 	}
 
 	// Create default admin (only runs if no users exist)
 	printProgress(currentStep, totalSteps)
 	if err := CreateDefaultAdmin(silentDB, adminCfg); err != nil {
-		fmt.Printf("\n  \033[31m✗ Setup failed\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Setup failed\033[0m\n\n")
 		return err
 	}
 	currentStep++
@@ -231,18 +241,18 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Seed default widgets for all organizations
 	printProgress(currentStep, totalSteps)
 	if err := SeedDefaultWidgets(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to seed widgets\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Failed to seed widgets\033[0m\n\n")
 		return err
 	}
 
 	// Backfill last_inbound_at from existing messages
 	if err := BackfillLastInboundAt(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to backfill last_inbound_at\033[0m\n\n")
+		fmt.Printf("\n  \033[31mâœ— Failed to backfill last_inbound_at\033[0m\n\n")
 		return err
 	}
 
 	printProgress(currentStep, totalSteps)
-	fmt.Printf("\n  \033[32m✓ Migration completed\033[0m\n\n")
+	fmt.Printf("\n  \033[32mâœ“ Migration completed\033[0m\n\n")
 
 	return nil
 }
@@ -267,6 +277,10 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_inbound_preview ON messages (organization_id, contact_id, whats_app_account, created_at DESC, id DESC) WHERE deleted_at IS NULL AND direction = 'incoming' AND COALESCE(channel,'') IN ('','whatsapp')`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_run_history ON inbox_workflow_runs (organization_id, created_at DESC, id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_sla_history ON inbox_sla_obligations (organization_id, completed_at DESC, id) WHERE completed_at IS NOT NULL AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_waiting_transitions ON inbox_case_activities (organization_id, case_id, COALESCE(occurred_at,created_at), created_at, id) WHERE deleted_at IS NULL AND (from_status = 'waiting_customer' OR to_status = 'waiting_customer')`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_case_active ON inbox_cases (organization_id, account_id, contact_id) WHERE status <> 'resolved' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_case_snooze_due ON inbox_cases (snoozed_until) WHERE status = 'snoozed' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_inbox_overflow_retry ON inbox_cases (routing_next_attempt_at) WHERE deleted_at IS NULL AND assignee_id IS NULL AND team_id IS NOT NULL AND status IN ('open', 'pending') AND routing_reason <> ''`,

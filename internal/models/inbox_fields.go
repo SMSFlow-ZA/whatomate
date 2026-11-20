@@ -18,6 +18,7 @@ type InboxFieldDefinition struct {
 	OrganizationID    uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_field_scope,priority:1" json:"-"`
 	Scope             string     `gorm:"size:12;not null;uniqueIndex:idx_inbox_field_scope,priority:2" json:"scope"`
 	Key               string     `gorm:"size:64;not null;uniqueIndex:idx_inbox_field_scope,priority:3" json:"key"`
+	Description       string     `gorm:"size:1000;not null;default:''" json:"description"`
 	Label             string     `gorm:"size:100;not null" json:"label"`
 	Kind              string     `gorm:"size:16;not null" json:"kind"`
 	Options           []string   `gorm:"serializer:json;type:jsonb" json:"options,omitempty"`
@@ -33,6 +34,9 @@ type InboxFieldValue struct {
 }
 
 func (f InboxFieldDefinition) Validate() error {
+	if utf8.RuneCountInString(f.Description) > 1000 {
+		return errors.New("field description must be at most 1000 characters")
+	}
 	if f.Scope != "contact" && f.Scope != "case" {
 		return errors.New("invalid field scope")
 	}

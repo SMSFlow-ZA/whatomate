@@ -47,6 +47,10 @@ type InboxCase struct {
 	FirstHumanReplyAt    *time.Time        `json:"first_human_reply_at,omitempty"`
 	NextReplyFrom        *time.Time        `json:"next_reply_from,omitempty"`
 	LastHumanReplyAt     *time.Time        `json:"last_human_reply_at,omitempty"`
+	SLAPolicyID          *uuid.UUID        `gorm:"type:uuid;index" json:"sla_policy_id,omitempty"`
+	SLALegacy            bool              `gorm:"not null;default:false" json:"sla_legacy"`
+	SLAProjectionVersion int64             `gorm:"not null;default:0" json:"-"`
+	SLAPolicyAssigned    bool              `gorm:"not null;default:false" json:"-"`
 }
 
 type InboxCaseActivity struct {
@@ -60,6 +64,8 @@ type InboxCaseActivity struct {
 	WorkflowProcessedAt *time.Time        `json:"-"`
 	Detail              string            `gorm:"type:text" json:"detail,omitempty"`
 	ActorID             *uuid.UUID        `gorm:"type:uuid" json:"actor_id,omitempty"`
+	AssigneeID          *uuid.UUID        `gorm:"type:uuid" json:"assignee_id,omitempty"`
+	TeamID              *uuid.UUID        `gorm:"type:uuid" json:"team_id,omitempty"`
 	Kind                string            `gorm:"size:32;not null" json:"kind"`
 	FromStatus          InboxCaseStatus   `gorm:"size:24" json:"from_status,omitempty"`
 	ToStatus            InboxCaseStatus   `gorm:"size:24" json:"to_status,omitempty"`
