@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
@@ -43,6 +45,15 @@ const defaults = (id: string): InboxSLAPolicy => ({
   shifts: [],
 })
 const policy = ref(defaults(''))
+const baseline = ref(''),
+  saveError = ref('')
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(
+    () => !!selected.value && JSON.stringify(policy.value) !== baseline.value,
+  )
+const timezones = (
+  Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
+).supportedValuesOf?.('timeZone') ?? ['Africa/Johannesburg', 'UTC']
 const existing = computed(() =>
   policies.value.some((item) => item.account_id === selected.value),
 )
@@ -51,7 +62,17 @@ watch(selected, (id) => {
   policy.value = saved
     ? { ...saved, shifts: saved.shifts?.map((shift) => ({ ...shift })) ?? [] }
     : defaults(id)
+  baseline.value = JSON.stringify(policy.value)
 })
+function selectAccount(event: Event) {
+  const control = event.target as HTMLSelectElement
+  const value = control.value
+  control.value = selected.value
+  requestDiscard(() => {
+    selected.value = value
+  })
+}
+defineExpose({ confirmLeave: requestDiscard })
 async function load() {
   try {
     const [wa, rules] = await Promise.all([
@@ -72,11 +93,17 @@ async function save(remove = false) {
     if (remove) await inboxService.deleteSlaPolicy(id)
     else await inboxService.setSlaPolicy(id, policy.value)
     await load()
-    if (remove && selected.value === id) policy.value = defaults(id)
+    if (selected.value === id) {
+      policy.value =
+        policies.value.find((item) => item.account_id === id) ?? defaults(id)
+      baseline.value = JSON.stringify(policy.value)
+    }
+    saveError.value = ''
     removeOpen.value = false
     toast.success(t('settings.saved'))
   } catch {
-    toast.error(t('inboxSla.saveError'))
+    saveError.value = t('inboxSla.saveError')
+    toast.error(saveError.value)
   } finally {
     busy.value = false
   }
@@ -96,6 +123,11 @@ onMounted(load)
 
 <template>
   <section class="inbox-ui">
+    <UnsavedChangesDialog
+      :open="discardOpen"
+      @leave="confirmDiscard"
+      @stay="cancelDiscard"
+    />
     <div class="mb-5">
       <h2 class="inbox-section-heading">{{ t('inboxSla.title') }}</h2>
       <p class="inbox-caption mt-1">{{ t('inboxUX.slaSetupHelp') }}</p>
@@ -110,7 +142,7 @@ onMounted(load)
       <section class="inbox-form-section">
         <label class="inbox-label max-w-md"
           >{{ t('inboxQueue.account')
-          }}<select v-model="selected">
+          }}<select :value="selected" :disabled="busy" @change="selectAccount">
             <option value="">{{ t('inboxUX.selectInbox') }}</option>
             <option
               v-for="account in accounts"
@@ -122,6 +154,12 @@ onMounted(load)
           </select></label
         >
         <p class="inbox-caption mt-3">{{ t('inboxUX.slaPolicyHelp') }}</p>
+        <p class="inbox-notice mt-3">
+          {{ t('inboxQuality.policyFutureOnly') }}
+        </p>
+        <p v-if="saveError" class="inbox-notice text-destructive" role="alert">
+          {{ saveError }}
+        </p>
       </section>
       <template v-if="selected">
         <section class="inbox-form-section">
@@ -192,8 +230,11 @@ onMounted(load)
               }}<input
                 v-model.trim="policy.timezone"
                 placeholder="Africa/Johannesburg"
-                required
-            /></label>
+                list="inbox-valid-timezones"
+                required /></label
+            ><datalist id="inbox-valid-timezones">
+              <option v-for="zone in timezones" :key="zone" :value="zone" />
+            </datalist>
             <div class="mt-4 grid gap-3">
               <div
                 v-for="(shift, i) in policy.shifts"
@@ -258,6 +299,26 @@ onMounted(load)
           >
         </section>
         <footer class="inbox-form-footer">
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="busy"
+            @click="
+              requestDiscard(() => {
+                const saved = policies.find(
+                  (item) => item.account_id === selected,
+                )
+                policy = saved
+                  ? {
+                      ...saved,
+                      shifts: saved.shifts.map((shift) => ({ ...shift })),
+                    }
+                  : defaults(selected)
+                baseline = JSON.stringify(policy)
+              })
+            "
+            >{{ t('common.cancel') }}</Button
+          >
           <Button type="submit" :disabled="busy">{{ t('common.save') }}</Button
           ><Button
             v-if="existing"

@@ -10,6 +10,9 @@ import { accountsService } from '@/services/api'
 import { inboxService, type QueueCase } from '@/services/inbox'
 import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
+import InboxTabs from '@/components/shared/InboxTabs.vue'
+import InboxWorkload from './InboxWorkload.vue'
+import InboxSLAHistory from './InboxSLAHistory.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -23,19 +26,15 @@ const offset = ref(0)
 const hasMore = ref(false)
 const available = ref(false)
 const failed = ref(false)
+const settingsFailed = ref(false)
+const lastUpdated = ref('')
 const lookupFailed = ref(false)
 const all = ref(false)
+const section = ref('live')
 let timer: ReturnType<typeof setInterval> | undefined
 let sequence = 0
-const visible = computed(() =>
-  rows.value.filter(
-    (row) =>
-      all.value ||
-      Object.values(row.sla ?? {}).some((target) =>
-        ['at_risk', 'breached'].includes(target.status),
-      ),
-  ),
-)
+const visible = computed(() => rows.value)
+const summary = ref({ total: 0, breached: 0, at_risk: 0 })
 async function load() {
   if (document.visibilityState !== 'visible') return
   const request = ++sequence
@@ -44,24 +43,31 @@ async function load() {
       account.value,
       team.value,
       offset.value,
+      all.value,
     )
     if (request !== sequence) return
+    summary.value = data.data.summary ?? { total: 0, breached: 0, at_risk: 0 }
     rows.value = data.data.cases ?? []
     hasMore.value = data.data.has_more
     failed.value = false
+    lastUpdated.value = new Date(
+      data.data.updated_at || Date.now(),
+    ).toLocaleTimeString()
   } catch {
     if (request === sequence) failed.value = true
   }
 }
-watch([team, account], () => {
+watch([team, account, all], () => {
   offset.value = 0
   void load()
 })
 watch(offset, load)
-onMounted(async () => {
+async function initialize() {
+  settingsFailed.value = false
   try {
     available.value = (await inboxService.settings()).data.data.enabled
   } catch {
+    settingsFailed.value = true
     return
   }
   if (!available.value) return
@@ -82,17 +88,30 @@ onMounted(async () => {
       lookupFailed.value = true
     })
   await load()
-  timer = setInterval(load, 30000)
+  if (!timer) timer = setInterval(load, 30000)
+}
+onMounted(initialize)
+onUnmounted(() => {
+  sequence++
+  clearInterval(timer)
 })
-onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
+  <div v-if="settingsFailed" role="alert" class="inbox-ui inbox-notice">
+    {{ t('inboxQuality.settingsLoadError')
+    }}<Button size="sm" variant="outline" @click="initialize">{{
+      t('common.retry')
+    }}</Button>
+  </div>
   <section v-if="available" class="inbox-ui" :aria-label="t('inboxSla.report')">
     <div class="inbox-toolbar">
       <div>
         <h2 class="inbox-section-heading">{{ t('inboxSla.report') }}</h2>
         <p class="inbox-caption mt-1">{{ t('inboxUX.slaDescription') }}</p>
+        <p v-if="lastUpdated" class="inbox-caption mt-1" role="status">
+          {{ t('inboxQuality.lastUpdated', { time: lastUpdated }) }}
+        </p>
       </div>
       <RouterLink
         v-if="
@@ -110,6 +129,29 @@ onUnmounted(() => clearInterval(timer))
     <p v-if="lookupFailed" role="alert" class="inbox-notice text-destructive">
       {{ t('inboxQueue.loadFiltersError') }}
     </p>
+    <InboxTabs
+      v-model="section"
+      :label="t('inboxSla.report')"
+      :items="[
+        { value: 'live', label: t('inboxQuality.liveTargets') },
+        { value: 'workload', label: t('inboxQuality.liveWorkload') },
+        { value: 'history', label: t('inboxQuality.historicalTargets') },
+      ]"
+    />
+    <div v-if="section === 'live'" class="mb-4 flex flex-wrap gap-3">
+      <span class="inbox-badge">{{
+        t('inboxQuality.summaryBreached', { count: summary.breached })
+      }}</span
+      ><span class="inbox-badge">{{
+        t('inboxQuality.summaryRisk', { count: summary.at_risk })
+      }}</span
+      ><span class="inbox-badge">{{
+        t('inboxQuality.summaryOpen', { count: summary.total })
+      }}</span
+      ><Button size="sm" variant="outline" @click="load">{{
+        t('inboxQuality.refresh')
+      }}</Button>
+    </div>
     <div class="inbox-toolbar">
       <label class="inbox-label min-w-40"
         >{{ t('inboxQueue.account')
@@ -127,69 +169,80 @@ onUnmounted(() => clearInterval(timer))
             {{ entry.name }}
           </option>
         </select></label
-      ><label class="inbox-check self-end pb-2"
+      ><label v-if="section === 'live'" class="inbox-check self-end pb-2"
         ><input v-model="all" type="checkbox" />{{
           t('inboxSla.allCases')
         }}</label
       >
     </div>
-    <InboxTeamCapacity
-      v-if="team && account"
-      class="mb-5"
-      :team="team"
+    <InboxSLAHistory
+      v-if="section === 'history'"
       :account="account"
-    />
-    <div v-if="failed" role="alert" class="inbox-notice">
-      {{ t('inboxSla.loadError')
-      }}<Button variant="outline" size="sm" @click="load">{{
-        t('common.retry')
-      }}</Button>
-    </div>
-    <div v-else class="inbox-panel">
-      <div v-if="!visible.length" class="inbox-empty">
-        <Clock3 class="h-8 w-8" aria-hidden="true" />
-        <h3>{{ t('inboxSla.empty') }}</h3>
-        <p>{{ t('inboxUX.slaEmptyHelp') }}</p>
+      :team="team"
+    /><InboxWorkload
+      v-else-if="section === 'workload'"
+      :account="account"
+      :team="team"
+    /><template v-else>
+      <InboxTeamCapacity
+        v-if="team && account && auth.hasPermission('teams', 'read')"
+        class="mb-5"
+        :team="team"
+        :account="account"
+      />
+      <div v-if="failed" role="alert" class="inbox-notice">
+        {{ t('inboxSla.loadError')
+        }}<Button variant="outline" size="sm" @click="load">{{
+          t('common.retry')
+        }}</Button>
       </div>
-      <ul v-else class="inbox-list">
-        <li v-for="row in visible" :key="row.id" class="inbox-list-row">
-          <div class="inbox-list-copy">
-            <RouterLink
-              class="inbox-list-title underline-offset-4 hover:underline"
-              :to="{
-                name: 'chat-conversation',
-                params: { contactId: row.contact_id },
-                query: {
-                  inbox_account: row.account_name,
-                  inbox_account_id: row.account_id,
-                },
-              }"
-              >{{ row.contact_name || t('inboxQueue.unnamed') }}</RouterLink
-            >
-            <p class="inbox-caption mt-1">
-              {{ row.account_name }} /
-              {{ t('inboxWorkflow.status.' + row.status) }} /
-              {{ t('inboxWorkflow.priority.' + row.priority) }}
-            </p>
-          </div>
-          <InboxSLAIndicators v-if="row.sla" :sla="row.sla" />
-        </li>
-      </ul>
-    </div>
-    <div v-if="offset || hasMore" class="mt-4 flex gap-2">
-      <Button
-        :disabled="!offset"
-        variant="outline"
-        size="sm"
-        @click="offset -= 50"
-        >{{ t('inboxQueue.previous') }}</Button
-      ><Button
-        :disabled="!hasMore"
-        variant="outline"
-        size="sm"
-        @click="offset += 50"
-        >{{ t('inboxQueue.next') }}</Button
-      >
-    </div>
+      <div v-else class="inbox-panel">
+        <div v-if="!visible.length" class="inbox-empty">
+          <Clock3 class="h-8 w-8" aria-hidden="true" />
+          <h3>{{ t('inboxSla.empty') }}</h3>
+          <p>{{ t('inboxUX.slaEmptyHelp') }}</p>
+        </div>
+        <ul v-else class="inbox-list">
+          <li v-for="row in visible" :key="row.id" class="inbox-list-row">
+            <div class="inbox-list-copy">
+              <RouterLink
+                class="inbox-list-title underline-offset-4 hover:underline"
+                :to="{
+                  name: 'chat-conversation',
+                  params: { contactId: row.contact_id },
+                  query: {
+                    inbox_account: row.account_name,
+                    inbox_account_id: row.account_id,
+                    case_id: row.id,
+                  },
+                }"
+                >{{ row.contact_name || t('inboxQueue.unnamed') }}</RouterLink
+              >
+              <p class="inbox-caption mt-1">
+                {{ row.account_name }} /
+                {{ t('inboxWorkflow.status.' + row.status) }} /
+                {{ t('inboxWorkflow.priority.' + row.priority) }}
+              </p>
+            </div>
+            <InboxSLAIndicators v-if="row.sla" :sla="row.sla" />
+          </li>
+        </ul>
+      </div>
+      <div v-if="offset || hasMore" class="mt-4 flex gap-2">
+        <Button
+          :disabled="!offset"
+          variant="outline"
+          size="sm"
+          @click="offset -= 50"
+          >{{ t('inboxQueue.previous') }}</Button
+        ><Button
+          :disabled="!hasMore"
+          variant="outline"
+          size="sm"
+          @click="offset += 50"
+          >{{ t('inboxQueue.next') }}</Button
+        >
+      </div>
+    </template>
   </section>
 </template>
