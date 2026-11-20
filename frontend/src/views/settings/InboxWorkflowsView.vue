@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
@@ -8,6 +8,8 @@ import { PageHeader } from '@/components/shared'
 import InboxTabs from '@/components/shared/InboxTabs.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import { useRoute } from 'vue-router'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   ArrowLeft,
@@ -20,6 +22,7 @@ import {
   ShieldCheck,
   History,
   Pencil,
+  RotateCw,
 } from 'lucide-vue-next'
 import {
   AlertDialog,
@@ -48,12 +51,14 @@ import {
   type QueueCase,
 } from '@/services/inbox'
 import InboxFieldMatchers from '@/components/chat/InboxFieldMatchers.vue'
+import InboxConditionBuilder from '@/components/chat/InboxConditionBuilder.vue'
 import InboxWorkflowPreviewPanel from '@/components/chat/InboxWorkflowPreview.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
 const showTargets = ref(false)
+const targetEditor = ref<InstanceType<typeof InboxSLASettings>>()
 const teamsStore = useTeamsStore()
 const mode = ref<'macro' | 'rule'>('rule')
 const list = ref<InboxWorkflow[]>([])
@@ -69,6 +74,22 @@ const caseId = ref('')
 const cases = ref<QueueCase[]>([])
 const dryRunId = ref('')
 const preview = ref<InboxWorkflowPreview | null>(null)
+const previewBusy = ref(false)
+let loadSequence = 0
+let previewSequence = 0
+watch(
+  [caseId, dryRunId],
+  () => {
+    previewSequence++
+    preview.value = null
+    previewBusy.value = false
+  },
+  { flush: 'sync' },
+)
+onUnmounted(() => {
+  loadSequence++
+  previewSequence++
+})
 function closePreview() {
   dryRunId.value = ''
   preview.value = null
@@ -80,18 +101,29 @@ const tags = ref<{ name: string }[]>([])
 const templates = ref<
   { id: string; name: string; language: string; whats_app_account?: string }[]
 >([])
-const statuses = ['open', 'pending', 'waiting_customer', 'resolved']
+const statuses = ['open', 'pending', 'waiting_customer', 'snoozed', 'resolved']
 const priorities = ['low', 'normal', 'high', 'urgent']
 const triggers = ['case_opened', 'incoming_message', 'status_changed']
 const fresh = (): InboxWorkflowInput => ({
   kind: mode.value,
   name: '',
+  description: '',
+  visibility: 'organization',
   trigger: mode.value === 'rule' ? 'case_opened' : '',
   position: 0,
   actions: [{ type: 'note', value: '' }],
   conditions: { tags: [] },
 })
 const form = ref(fresh())
+const baseline = ref('')
+const saveError = ref('')
+const syntheticText = ref('')
+const historyOffset = ref(0),
+  historyMore = ref(false)
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(
+    () => editing.value && JSON.stringify(form.value) !== baseline.value,
+  )
 const deleting = ref(false)
 const editing = ref(false)
 const showHistory = ref(false)
@@ -112,7 +144,9 @@ const readyToSave = computed(
     !!form.value.name.trim() &&
     form.value.actions.every(
       (action) =>
-        action.value.trim() &&
+        (action.type === 'snooze'
+          ? (action.duration_minutes ?? 0) > 0
+          : action.value.trim()) &&
         (action.type !== 'send_template' || action.consent_confirmed),
     ) &&
     form.value.actions.filter(
@@ -121,48 +155,76 @@ const readyToSave = computed(
     ).length <= 1,
 )
 async function load() {
+  const request = ++loadSequence
+  const requestedMode = mode.value
   busy.value = true
   try {
-    enabled.value = (await inboxService.settings()).data.data.enabled
+    const settings = await inboxService.settings()
+    if (request !== loadSequence || requestedMode !== mode.value) return
+    enabled.value = settings.data.data.enabled
     if (enabled.value) {
       const [w, r, state] = await Promise.all([
-        inboxService.workflowDefinitions(mode.value),
-        inboxService.workflowRuns(),
+        inboxService.workflowDefinitions(requestedMode),
+        inboxService.workflowRuns(undefined, historyOffset.value),
         inboxService.automationState(),
       ])
-      list.value = w.data.data.workflows
-      runs.value = r.data.data.runs
+      if (request !== loadSequence || requestedMode !== mode.value) return
+      list.value = w.data.data.workflows.filter(
+        (item) => item.kind === requestedMode,
+      )
+      runs.value = r.data.data.runs ?? []
+      historyMore.value = r.data.data.has_more ?? false
       switchState.value = state.data.data
     }
     ready.value = true
     failed.value = false
   } catch {
-    failed.value = true
+    if (request === loadSequence) failed.value = true
   } finally {
-    busy.value = false
+    if (request === loadSequence) busy.value = false
   }
 }
-function select(w?: InboxWorkflow, open = true) {
+function select(w?: InboxWorkflow, open = true, force = false) {
+  if (!force) {
+    requestDiscard(() => select(w, open, true))
+    return
+  }
+  saveError.value = ''
   editing.value = open
   id.value = w?.id ?? ''
   deleting.value = false
   if (w) {
+    mode.value = w.kind
     form.value = {
       kind: w.kind,
       name: w.name,
+      description: w.description ?? '',
+      visibility: w.visibility ?? 'organization',
+      team_id: w.team_id,
       trigger: w.trigger ?? '',
       position: w.position,
       actions: w.actions.map((action) => ({ ...action })),
       conditions: {
         ...w.conditions,
         tags: [...(w.conditions.tags ?? [])],
-        fields: [...(w.conditions.fields ?? [])],
+        fields: w.conditions.fields?.map((field) => ({ ...field })) ?? [],
+        predicates:
+          w.conditions.predicates?.map((predicate) => ({ ...predicate })) ?? [],
       },
       enabled: !!w.enabled_at,
     }
   } else form.value = fresh()
+  baseline.value = JSON.stringify(form.value)
 }
-function changeTab(value: string) {
+function changeTab(value: string, force = false) {
+  if (showTargets.value && !force && targetEditor.value) {
+    targetEditor.value.confirmLeave(() => changeTab(value, true))
+    return
+  }
+  busy.value = false
+  historyOffset.value = 0
+  loadSequence++
+  closePreview()
   showTargets.value = value === 'sla'
   if (showTargets.value) {
     showHistory.value = false
@@ -176,6 +238,7 @@ function changeTab(value: string) {
 }
 async function changeMode(next: typeof mode.value) {
   mode.value = next
+  list.value = []
   select(undefined, false)
   showHistory.value = false
   query.value = ''
@@ -190,11 +253,12 @@ async function save(remove = false) {
     if (remove) await inboxService.deleteWorkflow(target)
     else if (target) await inboxService.updateWorkflow(target, form.value)
     else await inboxService.createWorkflow(form.value)
-    select(undefined, false)
+    select(undefined, false, true)
     await load()
     toast.success(t('settings.saved'))
   } catch {
-    toast.error(t('inboxRules.saveError'))
+    saveError.value = t('inboxRules.saveError')
+    toast.error(saveError.value)
   } finally {
     busy.value = false
   }
@@ -222,21 +286,56 @@ async function prepare(w: InboxWorkflow) {
   dryRunId.value = w.id
   preview.value = null
   caseId.value = ''
+  const request = ++previewSequence
+  previewBusy.value = true
   try {
-    cases.value = (await inboxService.queue({})).data.data.cases
+    const reply = await inboxService.queue({})
+    if (request !== previewSequence || dryRunId.value !== w.id) return
+    cases.value = reply.data.data.cases
   } catch {
-    toast.error(t('inboxRules.previewError'))
+    if (request === previewSequence) toast.error(t('inboxRules.previewError'))
+  } finally {
+    if (request === previewSequence) previewBusy.value = false
   }
 }
 async function runPreview() {
+  const workflow = dryRunId.value
+  const selectedCase = caseId.value
+  if (!workflow || !selectedCase) return
+  const request = ++previewSequence
+  previewBusy.value = true
   preview.value = null
   try {
-    preview.value = (
-      await inboxService.previewWorkflow(dryRunId.value, caseId.value)
-    ).data.data
+    const reply = await inboxService.previewWorkflow(
+      workflow,
+      selectedCase,
+      syntheticText.value,
+    )
+    if (
+      request !== previewSequence ||
+      workflow !== dryRunId.value ||
+      selectedCase !== caseId.value
+    )
+      return
+    preview.value = reply.data.data
   } catch {
-    toast.error(t('inboxRules.previewError'))
+    if (request === previewSequence) toast.error(t('inboxRules.previewError'))
+  } finally {
+    if (request === previewSequence) previewBusy.value = false
   }
+}
+watch(syntheticText, () => {
+  previewSequence++
+  preview.value = null
+  previewBusy.value = false
+})
+function clone(w: InboxWorkflow) {
+  requestDiscard(() => {
+    select(w, true, true)
+    id.value = ''
+    form.value.name = t('inboxQuality.copyName', { name: w.name }).slice(0, 100)
+    form.value.enabled = false
+  })
 }
 function move(index: number, delta: number) {
   const items = form.value.actions
@@ -296,15 +395,33 @@ onMounted(async () => {
   if (!enabled.value) return
   loadLookups()
 })
+function pageHistory(delta: number) {
+  historyOffset.value = Math.max(0, historyOffset.value + delta)
+  void load()
+}
 </script>
 
 <template>
   <main class="inbox-ui inbox-page">
+    <UnsavedChangesDialog
+      :open="discardOpen"
+      @leave="confirmDiscard"
+      @stay="cancelDiscard"
+    />
     <PageHeader
       :title="t('inboxRules.title')"
       :description="t('inboxUX.workflowsDescription')"
     >
       <template #actions
+        ><Button
+          v-if="ready && enabled && !editing && !showTargets"
+          variant="outline"
+          size="sm"
+          :disabled="busy"
+          @click="load"
+          ><RotateCw class="mr-2 h-4 w-4" aria-hidden="true" />{{
+            t('inboxQuality.refresh')
+          }}</Button
         ><Button
           v-if="editing"
           form="inbox-workflow-editor"
@@ -370,7 +487,7 @@ onMounted(async () => {
               ]"
               @update:model-value="changeTab"
             />
-            <InboxSLASettings v-if="showTargets" />
+            <InboxSLASettings v-if="showTargets" ref="targetEditor" />
             <template v-else-if="!showHistory">
               <div class="inbox-toolbar">
                 <p class="inbox-caption">
@@ -390,10 +507,26 @@ onMounted(async () => {
                 /></label>
               </div>
               <div class="inbox-panel">
-                <ul v-if="filtered.length" class="inbox-list">
+                <p v-if="busy" class="inbox-empty" role="status">
+                  {{ t('common.loading') }}
+                </p>
+                <ul v-else-if="filtered.length" class="inbox-list">
                   <li v-for="w in filtered" :key="w.id" class="inbox-list-row">
                     <div class="inbox-list-copy">
                       <p class="inbox-list-title">{{ w.name }}</p>
+                      <p v-if="w.description" class="inbox-caption mt-1">
+                        {{ w.description }}
+                      </p>
+                      <p class="inbox-caption mt-1">
+                        {{
+                          w.kind === 'rule'
+                            ? t('inboxQuality.ruleOrder', { order: w.position })
+                            : t(
+                                'inboxQuality.visibility.' +
+                                  (w.visibility || 'organization'),
+                              )
+                        }}
+                      </p>
                       <p class="inbox-caption mt-1">
                         {{
                           w.kind === 'rule'
@@ -436,6 +569,9 @@ onMounted(async () => {
                         />{{ t('common.edit') }}</Button
                       ><Button variant="ghost" size="sm" @click="prepare(w)">{{
                         t('inboxRules.dryRun')
+                      }}</Button
+                      ><Button variant="ghost" size="sm" @click="clone(w)">{{
+                        t('inboxQuality.clone')
                       }}</Button>
                     </div>
                   </li>
@@ -497,15 +633,29 @@ onMounted(async () => {
                 <p v-if="!cases.length" class="inbox-caption mt-2">
                   {{ t('inboxUX.noCasesHelp') }}
                 </p>
+                <label
+                  v-if="
+                    list.find((w) => w.id === dryRunId)?.conditions
+                      .message_contains
+                  "
+                  class="inbox-label mt-3"
+                  >{{ t('inboxQuality.syntheticText')
+                  }}<textarea
+                    v-model="syntheticText"
+                    maxlength="4096"
+                    rows="2"
+                  />
+                </label>
                 <Button
                   class="my-3"
                   variant="outline"
-                  :disabled="!caseId"
+                  :disabled="!caseId || previewBusy"
                   @click="runPreview"
                   >{{ t('inboxRules.review') }}</Button
                 ><InboxWorkflowPreviewPanel
                   v-if="preview"
                   :preview="preview"
+                  :teams="teams"
                   :users="users"
                 />
               </section>
@@ -555,6 +705,86 @@ onMounted(async () => {
                 <li v-for="run in runs" :key="run.id" class="inbox-list-row">
                   <div class="inbox-list-copy">
                     <p class="inbox-list-title">{{ run.workflow_name }}</p>
+                    <p class="inbox-caption mt-1">
+                      {{ run.actor_name || t('inboxQuality.formerUser') }} ·
+                      {{ run.account_name }}
+                    </p>
+                    <RouterLink
+                      v-if="run.contact_id && run.account_id"
+                      class="text-sm underline"
+                      :to="{
+                        name: 'chat-conversation',
+                        params: { contactId: run.contact_id },
+                        query: {
+                          inbox_account: run.account_name,
+                          inbox_account_id: run.account_id,
+                          case_id: run.case_id,
+                        },
+                      }"
+                      >{{ run.contact_name || t('inboxQuality.caseLabel') }} ·
+                      {{ run.case_id?.slice(0, 8) }}</RouterLink
+                    >
+                    <details class="mt-2">
+                      <summary
+                        class="inbox-caption min-h-8 cursor-pointer py-1"
+                      >
+                        {{ t('inboxQuality.runDetails') }}
+                      </summary>
+                      <p class="inbox-caption">
+                        {{
+                          t(
+                            run.conditions_matched === undefined
+                              ? 'inboxQuality.legacy'
+                              : run.conditions_matched
+                                ? 'inboxQuality.conditionMet'
+                                : 'inboxQuality.conditionNotMet',
+                          )
+                        }}
+                      </p>
+                      <ul class="inbox-caption grid gap-1">
+                        <li
+                          v-for="(condition, index) in run.condition_outcomes"
+                          :key="index"
+                        >
+                          {{
+                            condition.label ||
+                            t('inboxQuality.conditionName.' + condition.field)
+                          }}
+                          ·
+                          {{
+                            t(
+                              condition.matched
+                                ? 'inboxQuality.conditionMet'
+                                : 'inboxQuality.conditionNotMet',
+                            )
+                          }}
+                          ({{
+                            t(
+                              condition.group === 'any'
+                                ? 'inboxQuality.matchAny'
+                                : 'inboxQuality.matchAll',
+                            )
+                          }})
+                        </li>
+                      </ul>
+                      <ul class="inbox-caption grid gap-1">
+                        <li
+                          v-for="(outcome, index) in run.action_outcomes"
+                          :key="index"
+                        >
+                          {{ t('inboxRules.action.' + outcome.type) }} ·
+                          {{ t('inboxQuality.actionState.' + outcome.status) }}
+                          · {{ t('inboxQuality.preflight.' + outcome.reason) }}
+                        </li>
+                      </ul>
+                      <p v-if="run.message_status" class="inbox-caption">
+                        {{ t('inboxQuality.messageStatus') }}:
+                        {{ run.message_status }}
+                      </p>
+                      <p v-if="run.state === 'unknown'" class="inbox-notice">
+                        {{ t('inboxQuality.reconciliationHelp') }}
+                      </p>
+                    </details>
                     <p class="inbox-caption">
                       {{ new Date(run.created_at).toLocaleString()
                       }}<span v-if="run.outcome">
@@ -567,6 +797,24 @@ onMounted(async () => {
                   }}</span>
                 </li>
               </ul>
+              <div
+                v-if="historyOffset || historyMore"
+                class="inbox-subsection flex gap-2"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="!historyOffset || busy"
+                  @click="pageHistory(-50)"
+                  >{{ t('inboxQueue.previous') }}</Button
+                ><Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="!historyMore || busy"
+                  @click="pageHistory(50)"
+                  >{{ t('inboxQueue.next') }}</Button
+                >
+              </div>
             </div>
           </template>
           <template v-else>
@@ -584,12 +832,19 @@ onMounted(async () => {
               class="inbox-form"
               @submit.prevent="save()"
             >
+              <p
+                v-if="saveError"
+                role="alert"
+                class="inbox-notice text-destructive"
+              >
+                {{ saveError }}
+              </p>
               <section class="inbox-form-section">
                 <h2>{{ t(id ? 'inboxRules.edit' : 'inboxRules.add') }}</h2>
                 <p>
                   {{
                     t(
-                      mode === 'rule'
+                      form.kind === 'rule'
                         ? 'inboxUX.ruleEditorHelp'
                         : 'inboxUX.macroEditorHelp',
                     )
@@ -603,7 +858,43 @@ onMounted(async () => {
                     required
                     :placeholder="t('inboxUX.nameExample')"
                 /></label>
-                <div v-if="mode === 'rule'" class="inbox-grid mt-4">
+                <label class="inbox-label mt-4"
+                  >{{ t('inboxQuality.description')
+                  }}<textarea
+                    v-model="form.description"
+                    rows="2"
+                    maxlength="1000"
+                  />
+                </label>
+                <div v-if="form.kind === 'macro'" class="inbox-grid mt-4">
+                  <label class="inbox-label"
+                    >{{ t('inboxQueue.visibility')
+                    }}<select
+                      v-model="form.visibility"
+                      @change="form.team_id = undefined"
+                    >
+                      <option
+                        v-for="scope in ['personal', 'team', 'organization']"
+                        :key="scope"
+                        :value="scope"
+                      >
+                        {{ t('inboxQuality.visibility.' + scope) }}
+                      </option>
+                    </select></label
+                  ><label v-if="form.visibility === 'team'" class="inbox-label"
+                    >{{ t('inboxQueue.team')
+                    }}<select v-model="form.team_id" required>
+                      <option
+                        v-for="team in teams"
+                        :key="team.id"
+                        :value="team.id"
+                      >
+                        {{ team.name }}
+                      </option>
+                    </select></label
+                  >
+                </div>
+                <div v-if="form.kind === 'rule'" class="inbox-grid mt-4">
                   <label class="inbox-label"
                     >{{ t('inboxRules.trigger')
                     }}<select v-model="form.trigger">
@@ -628,12 +919,17 @@ onMounted(async () => {
                     }}</span></label
                   >
                 </div>
-                <label v-if="mode === 'rule' && id" class="inbox-check mt-4"
+                <label
+                  v-if="form.kind === 'rule' && id"
+                  class="inbox-check mt-4"
                   ><input v-model="form.enabled" type="checkbox" />{{
                     t('inboxRules.enableRule')
                   }}</label
                 >
-                <p v-if="mode === 'rule' && !id" class="inbox-caption mt-4">
+                <p
+                  v-if="form.kind === 'rule' && !id"
+                  class="inbox-caption mt-4"
+                >
                   {{ t('inboxUX.newRulesDisabled') }}
                 </p>
               </section>
@@ -721,7 +1017,20 @@ onMounted(async () => {
                   <InboxFieldMatchers
                     :model-value="form.conditions.fields ?? []"
                     @update:model-value="form.conditions.fields = $event"
-                  />
+                  /><InboxConditionBuilder v-model="form.conditions" /><label
+                    v-if="
+                      form.kind === 'rule' &&
+                      form.trigger === 'incoming_message'
+                    "
+                    class="inbox-label mt-4"
+                    >{{ t('inboxQuality.messageContains')
+                    }}<input
+                      v-model="form.conditions.message_contains"
+                      maxlength="500"
+                    /><span class="inbox-caption">{{
+                      t('inboxQuality.messageContainsHelp')
+                    }}</span></label
+                  >
                 </div>
               </section>
               <section class="inbox-form-section">
@@ -736,6 +1045,7 @@ onMounted(async () => {
                     i + 1
                   }}</span
                   ><InboxActionEditor
+                    :teams="teams"
                     :model-value="action"
                     @update:model-value="(value) => (form.actions[i] = value)"
                     :users="users"

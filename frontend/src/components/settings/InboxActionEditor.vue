@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import type { InboxAction } from '@/services/inbox'
 const model = defineModel<InboxAction>({ required: true })
 defineProps<{
+  teams?: { id: string; name: string }[]
   users: { id: string; full_name: string }[]
   tags: { name: string }[]
   templates: { id: string; name: string; language: string }[]
@@ -10,6 +11,8 @@ defineProps<{
 const { t } = useI18n()
 const types: InboxAction['type'][] = [
   'assign',
+  'assign_team',
+  'snooze',
   'tag',
   'priority',
   'status',
@@ -20,6 +23,7 @@ const types: InboxAction['type'][] = [
 function changeType() {
   model.value.value = ''
   model.value.consent_confirmed = false
+  model.value.duration_minutes = undefined
 }
 </script>
 <template>
@@ -49,6 +53,27 @@ function changeType() {
         </option>
       </select>
     </label>
+    <label v-else-if="model.type === 'snooze'" class="inbox-label"
+      >{{ t('inboxQuality.snoozeMinutes')
+      }}<input
+        v-model.number="model.duration_minutes"
+        type="number"
+        min="1"
+        max="43200"
+        required
+      /><span class="inbox-caption">{{
+        t('inboxQuality.snoozeHelp')
+      }}</span></label
+    >
+    <label v-else-if="model.type === 'assign_team'" class="inbox-label"
+      >{{ t('inboxQueue.team')
+      }}<select v-model="model.value">
+        <option value="">{{ t('inboxQuality.chooseTeam') }}</option>
+        <option v-for="team in teams" :key="team.id" :value="team.id">
+          {{ team.name }}
+        </option>
+      </select></label
+    >
     <label v-else-if="model.type === 'assign'" class="inbox-label"
       >{{ t('inboxQueue.assignee') }}
       <select v-model="model.value">

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
+import { computed, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Zap, Search } from 'lucide-vue-next'
@@ -28,9 +29,11 @@ const emit = defineEmits<{ applied: [] }>()
 const { t } = useI18n()
 const open = ref(false)
 const busy = ref(false)
+const applying = ref(false)
 const definitions = ref<InboxWorkflow[]>([])
 const selected = ref('')
 const query = ref('')
+const searchInput = ref<HTMLInputElement>()
 const filtered = computed(() =>
   definitions.value.filter((w) =>
     w.name.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()),
@@ -41,12 +44,6 @@ const selectedDefinition = computed(() =>
 )
 const caseId = ref('')
 const preview = ref<InboxWorkflowPreview | null>(null)
-const unresolvedAssignment = computed(
-  () =>
-    !!preview.value?.actions.some(
-      (a) => a.type === 'assign' && !props.users?.some((u) => u.id === a.value),
-    ),
-)
 const dispatch = ref(false)
 const error = ref('')
 let runId = ''
@@ -79,6 +76,8 @@ async function show() {
     if (c?.status !== 'resolved') caseId.value = c?.id ?? ''
     definitions.value = list.data.data.workflows
     dispatch.value = state.data.data.dispatch_available
+    await nextTick()
+    if (current === generation) searchInput.value?.focus()
   } catch {
     if (current === generation) error.value = t('inboxRules.loadError')
   } finally {
@@ -86,7 +85,7 @@ async function show() {
   }
 }
 async function prepare() {
-  const current = generation
+  const current = ++generation
   const target = selected.value
   busy.value = true
   error.value = ''
@@ -113,6 +112,7 @@ async function apply() {
   if (!preview.value) return
   const current = generation
   busy.value = true
+  applying.value = true
   error.value = ''
   try {
     const { data } = await inboxService.executeMacro(
@@ -128,9 +128,41 @@ async function apply() {
   } catch {
     if (current === generation) error.value = t('inboxRules.applyError')
   } finally {
+    applying.value = false
     if (current === generation) busy.value = false
   }
 }
+function changeOpen(value: boolean) {
+  if (!applying.value) open.value = value
+}
+watch(open, (value) => {
+  if (!value) {
+    generation++
+    preview.value = null
+    busy.value = false
+  }
+})
+function shortcut(event: KeyboardEvent) {
+  if (
+    event.ctrlKey &&
+    event.altKey &&
+    event.key.toLowerCase() === 'm' &&
+    !event.isComposing &&
+    !event.repeat &&
+    !open.value &&
+    !document.querySelector('[role="dialog"][data-state="open"]')
+  ) {
+    event.preventDefault()
+    void show()
+  }
+}
+onMounted(() => window.addEventListener('keydown', shortcut))
+onUnmounted(() => {
+  generation++
+  window.removeEventListener('keydown', shortcut)
+})
+
+const restoreDialogFocus = useInboxDialogFocus(open)
 </script>
 <template>
   <Button
@@ -138,13 +170,16 @@ async function apply() {
     variant="ghost"
     size="sm"
     class="mb-2 gap-1.5"
+    aria-keyshortcuts="Control+Alt+M"
     @click="show"
     ><Zap class="h-4 w-4" aria-hidden="true" />{{
       t('inboxRules.macros')
     }}</Button
   >
-  <Dialog v-model:open="open"
-    ><DialogContent class="inbox-ui max-h-[88dvh] overflow-auto sm:max-w-3xl"
+  <Dialog :open="open" @update:open="changeOpen"
+    ><DialogContent
+      @close-auto-focus="restoreDialogFocus"
+      class="inbox-ui max-h-[88dvh] overflow-auto sm:max-w-3xl"
       ><DialogHeader
         ><DialogTitle>{{ t('inboxRules.macros') }}</DialogTitle
         ><DialogDescription>{{
@@ -153,17 +188,21 @@ async function apply() {
       >
       <p v-if="error" role="alert" class="inbox-notice text-destructive">
         {{ error }}
+        <Button size="sm" variant="outline" @click="show">{{
+          t('common.retry')
+        }}</Button>
       </p>
       <p v-if="busy && !caseId" role="status" class="inbox-caption">
         {{ t('common.loading') }}
       </p>
       <p v-else-if="!caseId" class="inbox-notice">
-        {{ t('inboxRules.caseRequired') }}
+        {{ t('inboxQuality.macroCaseRequired') }}
       </p>
       <div v-else class="inbox-macro-layout">
         <div class="inbox-macro-list">
           <label class="inbox-search mb-3"
             ><Search class="h-4 w-4 shrink-0" aria-hidden="true" /><input
+              ref="searchInput"
               v-model="query"
               :aria-label="t('inboxUX.searchMacros')"
               :placeholder="t('inboxUX.searchMacros')"
@@ -215,7 +254,7 @@ async function apply() {
             :disabled="
               busy ||
               !preview.matches ||
-              unresolvedAssignment ||
+              preview.actions_eligible === false ||
               preview.send_unavailable ||
               (!!preview.reply && !dispatch)
             "
