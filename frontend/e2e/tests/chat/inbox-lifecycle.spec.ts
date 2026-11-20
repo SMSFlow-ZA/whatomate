@@ -2,7 +2,10 @@ import { expect, test } from '@playwright/test'
 import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
 
-test('starts, snoozes and resolves a case inside the chat thread', async ({ page, request }, testInfo) => {
+test('starts, snoozes and resolves a case inside the chat thread', async ({
+  page,
+  request,
+}, testInfo) => {
   const scope = createTestScope('inbox-lifecycle')
   const api = new ApiHelper(request)
   await api.loginAsAdmin()
@@ -17,13 +20,23 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
   })
   const contact = await api.createContact(scope.phone(), scope.name('customer'))
   try {
-    expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
+    expect(
+      (await api.put('/api/inbox/workflows', { enabled: true })).ok(),
+    ).toBeTruthy()
     const profile = await api.get('/api/me')
     expect(profile.ok()).toBeTruthy()
     const { data: user } = await profile.json()
     await page.context().addCookies((await request.storageState()).cookies)
-    await page.addInitScript(user => localStorage.setItem('user', JSON.stringify(user)), user)
-    await page.goto('/chat/' + contact.id + '?inbox_account=' + encodeURIComponent(account.name))
+    await page.addInitScript(
+      (user) => localStorage.setItem('user', JSON.stringify(user)),
+      user,
+    )
+    await page.goto(
+      '/chat/' +
+        contact.id +
+        '?inbox_account=' +
+        encodeURIComponent(account.name),
+    )
     await page.getByRole('button', { name: 'Start case' }).click()
     const status = page.getByRole('combobox', { name: 'Case status' })
     const priority = page.getByRole('combobox', { name: 'Case priority' })
@@ -32,15 +45,28 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({ page
     await expect(priority).toHaveValue('urgent')
     await status.selectOption('snoozed')
     const tomorrow = new Date(Date.now() + 48 * 60 * 60 * 1000)
-    const localDate = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+    const localDate = new Date(
+      tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000,
+    )
+      .toISOString()
+      .slice(0, 16)
     await page.getByLabel('Snooze until').fill(localDate)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(status).toHaveValue('snoozed')
-    if (process.env.INBOX_CAPTURE) await page.screenshot({ path: testInfo.outputPath('inbox-case-desktop.png') })
+    if (process.env.INBOX_CAPTURE)
+      await page.screenshot({
+        path: testInfo.outputPath('inbox-case-desktop.png'),
+      })
     await page.setViewportSize({ width: 390, height: 844 })
     await status.selectOption('resolved')
+    await page
+      .getByRole('button', { name: 'Save and resolve', exact: true })
+      .click()
     await expect(status).toHaveValue('resolved')
-    if (process.env.INBOX_CAPTURE) await page.screenshot({ path: testInfo.outputPath('inbox-case-mobile.png') })
+    if (process.env.INBOX_CAPTURE)
+      await page.screenshot({
+        path: testInfo.outputPath('inbox-case-mobile.png'),
+      })
     await status.selectOption('open')
     await expect(status).toHaveValue('open')
   } finally {

@@ -83,16 +83,18 @@ test('runs the inbox support workflow on an isolated workspace', async ({
     await page.goto('/settings/custom-fields', {
       waitUntil: 'domcontentloaded',
     })
-    await page.getByRole('button', { name: 'New field', exact: true }).first().click()
-    const fieldForm = page
-      .locator('form')
-      .filter({
-        has: page.getByRole('heading', { name: 'Add a custom field' }),
-      })
+    await page
+      .getByRole('button', { name: 'New field', exact: true })
+      .first()
+      .click()
+    const fieldForm = page.locator('form').filter({
+      has: page.getByRole('heading', { name: 'Add a custom field' }),
+    })
     const label = scope.name('Reference')
     await fieldForm.getByLabel('Field label', { exact: true }).fill(label)
     const key = 'reference_' + Date.now()
-    await fieldForm.getByLabel('Field key').fill(key)
+    await fieldForm.getByLabel('Advanced: edit the generated field key').check()
+    await fieldForm.getByLabel('Field key', { exact: true }).fill(key)
     await fieldForm.getByLabel('Required to resolve').check()
     const [savedField] = await Promise.all([
       page.waitForResponse(
@@ -174,6 +176,9 @@ test('runs the inbox support workflow on an isolated workspace', async ({
             ?.status,
       )
       .toBe('paused')
+    await page
+      .getByText('Response targets and deadlines', { exact: true })
+      .click()
     await expect(
       page.getByLabel('Inbox workflow').getByText(/Resolution · Paused/),
     ).toBeVisible({ timeout: 25000 })
@@ -186,12 +191,9 @@ test('runs the inbox support workflow on an isolated workspace', async ({
     await expect(requiredInput).toBeVisible()
     await expect(requiredInput).toBeEditable()
     await requiredInput.fill('SUPPORT-FIXTURE')
-    const fieldRow = page.locator('li').filter({ has: requiredInput })
-    await fieldRow.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(
-      fieldRow.getByRole('button', { name: 'Save', exact: true }),
-    ).toBeDisabled()
-    await page.getByRole('button', { name: 'Resolve', exact: true }).click()
+    await page
+      .getByRole('button', { name: 'Save and resolve', exact: true })
+      .click()
     await expect(
       page.getByRole('combobox', { name: 'Case status' }),
     ).toHaveValue('resolved')
@@ -225,6 +227,8 @@ test('runs the inbox support workflow on an isolated workspace', async ({
     await ruleTeam.selectOption(team)
     await expect(ruleTeam).toHaveValue(team)
 
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('button', { name: 'Leave', exact: true }).click()
     await page.goto('/analytics/agents', { waitUntil: 'domcontentloaded' })
     await page.getByRole('tab', { name: 'Live inbox', exact: true }).click()
     const slaReport = page

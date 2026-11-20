@@ -1,0 +1,127 @@
+name: Inbox acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: whatomate_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U test'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd 'redis-cli ping'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.11'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build embedded application
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          cp -r frontend/dist/. internal/frontend/dist/
+          go build -o "$RUNNER_TEMP/whatomate" ./cmd/whatomate
+      - name: Create isolated configuration with outbound work held
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          jwt_key=$(openssl rand -hex 32)
+          support_password=$(openssl rand -hex 24)
+          cat > "$RUNNER_TEMP/inbox.toml" <<EOF
+          [app]
+          environment = "test"
+          [server]
+          host = "127.0.0.1"
+          port = 8080
+          [database]
+          host = "127.0.0.1"
+          user = "test"
+          password = "test"
+          name = "whatomate_test"
+          ssl_mode = "disable"
+          [redis]
+          host = "127.0.0.1"
+          port = 6379
+          [jwt]
+          secret = "$jwt_key"
+          [storage]
+          type = "local"
+          local_path = "$RUNNER_TEMP/uploads"
+          [plan]
+          enabled = true
+          max_users = 30
+          max_numbers = 5
+          max_storage_bytes = 1073741824
+          support_email = "support@example.invalid"
+          support_password = "$support_password"
+          source_url = "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          [channels]
+          stop_dispatch = true
+          [inbox_automation]
+          dispatch_enabled = false
+          EOF
+      - name: Start and verify the application
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/whatomate" server -migrate -config "$RUNNER_TEMP/inbox.toml" > "$RUNNER_TEMP/inbox-app.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/inbox-app.pid"
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:8080/ready > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:8080/ready
+          python3 - <<'PY'
+          import urllib.request
+          url = 'http://127.0.0.1:8080/health?synthetic_sso_header_probe=' + 'A' * 8000
+          request = urllib.request.Request(url, headers={'Cookie': 'synthetic_session=' + 'B' * 3000})
+          assert urllib.request.urlopen(request, timeout=10).status == 200
+          PY
+      - run: npx playwright install chromium --with-deps
+        working-directory: frontend
+      - name: Test inbox workflows with synthetic data only
+        working-directory: frontend
+        env:
+          BASE_URL: http://127.0.0.1:8080
+          TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/whatomate_test
+          INBOX_CAPTURE: '1'
+          CI: 'true'
+        run: npx playwright test 'inbox-.*\.spec\.ts' --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inbox-acceptance
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 14
+      - name: Stop disposable application
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/inbox-app.pid"; then kill "$(cat "$RUNNER_TEMP/inbox-app.pid")" || true; fi
+          rm -f "$RUNNER_TEMP/inbox.toml"

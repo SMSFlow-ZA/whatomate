@@ -12,7 +12,9 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
   await api.loginAsAdmin()
   const before = (await (await api.get('/api/inbox/workflows')).json()).data
     .enabled
-  expect((await api.put('/api/inbox/workflows', { enabled: true })).ok()).toBeTruthy()
+  expect(
+    (await api.put('/api/inbox/workflows', { enabled: true })).ok(),
+  ).toBeTruthy()
   const automaticBefore = (
     await (await api.get('/api/inbox/automation')).json()
   ).data.enabled
@@ -49,7 +51,10 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
       profile,
     )
     await page.goto('/settings/inbox-workflows')
-    await page.getByRole('button', { name: 'New rule', exact: true }).first().click()
+    await page
+      .getByRole('button', { name: 'New rule', exact: true })
+      .first()
+      .click()
     const ruleForm = page.locator('#inbox-workflow-editor')
     await ruleForm.getByLabel('Workflow name').fill(scope.name('safe-rule'))
     await ruleForm
@@ -144,10 +149,14 @@ test('manages inbox settings with keyboard navigation, safe defaults and respons
     expect(savedCapacity.ok()).toBeTruthy()
 
     await page.goto('/settings/custom-fields')
-    await page.getByRole('button', { name: 'New field', exact: true }).first().click()
+    await page
+      .getByRole('button', { name: 'New field', exact: true })
+      .first()
+      .click()
     const fieldForm = page.locator('#inbox-field-editor')
     const label = scope.name('Reference')
     await fieldForm.getByLabel('Field label', { exact: true }).fill(label)
+    await fieldForm.getByLabel('Advanced: edit the generated field key').check()
     await fieldForm
       .getByLabel('Field key', { exact: true })
       .fill('reference_' + Date.now())
@@ -289,7 +298,10 @@ test('assigned agents can complete required case fields without rule administrat
       (u: { email: string }) => u.email === 'agent@test.com',
     )
     expect(agent).toBeTruthy()
-    const opened = await api.put(thread, { status: 'open', priority: 'normal' })
+    const opened = await api.put(thread, {
+      status: 'open',
+      priority: 'normal',
+    })
     const current = (await opened.json()).data.case
     const assignment = await api.post('/api/inbox/cases/bulk', {
       action: 'assign',
@@ -322,16 +334,13 @@ test('assigned agents can complete required case fields without rule administrat
     const input = page.getByRole('textbox', { name: label, exact: true })
     await expect(input).toBeEditable()
     await input.fill('DEMO-AGENT-REFERENCE')
-    const row = page.locator('li').filter({ has: input })
-    await row.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(
-      row.getByRole('button', { name: 'Save', exact: true }),
-    ).toBeDisabled()
     if (process.env.INBOX_CAPTURE)
       await page.screenshot({
         path: testInfo.outputPath('inbox-assigned-agent-required-fields.png'),
       })
-    await page.getByRole('button', { name: 'Resolve', exact: true }).click()
+    await page
+      .getByRole('button', { name: 'Save and resolve', exact: true })
+      .click()
     await expect(
       page.getByRole('combobox', { name: 'Case status', exact: true }),
     ).toHaveValue('resolved')

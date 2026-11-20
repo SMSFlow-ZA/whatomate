@@ -60,19 +60,51 @@ the source link is visible on the login page and application pages. Build from
 that published commit:
 
 ```sh
-docker build -f docker/Dockerfile.managed --build-arg VCS_REF="$(git rev-parse HEAD)" -t whatomate-managed .
+docker build -f docker/Dockerfile.managed-musl --build-arg VCS_REF="$(git rev-parse HEAD)" -t whatomate-managed .
 ```
 
-The managed Dockerfile uses a pinned Debian 13 runtime with supported package
-updates, and builds the application binary and embedded frontend using the
-pinned Go security release. Piper and its voice model are retained from the pinned
-upstream image; verified FFmpeg source is built for application audio formats and
-Opus tools come from Debian 13. The final image runs as
-user/group `10001:10001`. Rebuild with
-`--no-cache` when refreshing distribution security updates. Production deployments
+The managed inbox image uses `docker/Dockerfile.managed-musl`: a digest-pinned
+Alpine runtime, a pinned Go security release, native musl builds of Piper and
+verified FFmpeg sources, and the retained voice-model data. The Debian recipes
+remain available for their separately verified runtime variants. The final image
+runs as user/group `10001:10001`. Production deployments
 should pin the derived image digest and the same public source revision. See
 [dependency and runtime security](dependency-security.md) for scan scope and
 remaining distribution risk. Before deployment run
 `go test -p 1 ./...` with disposable PostgreSQL and Redis, plus frontend type
 checks, unit tests and production build. Upstream packages share a test database
 and must run serially; quota tests themselves exercise concurrent requests.
+
+
+## Inbox release and recovery checks
+
+Inbox workflow remains organization opt-in and is available independently of the
+hosted plan. New rules are disabled. Keep `inbox_automation.dispatch_enabled=false`
+and `channels.stop_dispatch=true` in disposable and recovery configurations. These
+are independent controls; enabling an inbox workflow does not authorize sending.
+
+Before promoting a managed inbox image:
+
+1. Pass the PostgreSQL-backed serial Go race suite, Vue type/unit checks and the
+   synthetic Chromium inbox workflow suite. The managed image workflow requires
+   the reusable `inbox-quality.yml` acceptance job before building and scanning.
+2. Exercise existing and new cases, multiple accounts with the same contact,
+   restricted agents and supervisors. Check immutable policy assignments,
+   completed reply cycles, scoped queue counts, field filters, capacity and
+   confirmed macro actions. Keep test providers and recipients synthetic.
+3. Restore a full database and file backup on an isolated instance. Include
+   `inbox_sla_versions`, `inbox_sla_obligations`, `inbox_capacity_presets`, case
+   policy references, saved views, workflow metadata and run outcomes. Older
+   backups without these additive structures migrate normally. Legacy policy
+   snapshots are labelled; missing historical cycles are not invented.
+4. Recreate the application and verify that configuration, branding and policy
+   references survive. Rehearse the previous digest with outbound work held,
+   then return to the candidate. Startup refreshes projections whose stored case
+   version is stale without changing their assigned policy.
+5. Reconcile submitting/unknown outbound runs before allowing dispatch in a
+   restored instance. Completed runs retain their identifiers and must not be
+   submitted again. Preserve the previous image digest and matching configuration
+   alongside the encrypted, restore-checked backup.
+6. Publish the exact corresponding AGPL source and deploy only the scanned image
+   digest. Verify sign-in, support identity, branding, plan limits, domain health
+   and monitoring. Rollout to any additional instance is a separate operation.
