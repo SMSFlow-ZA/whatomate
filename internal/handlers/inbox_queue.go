@@ -572,7 +572,7 @@ func (a *App) inboxQueueQuery(org, user uuid.UUID, f models.InboxQueueFilter) (*
 	return q, nil
 }
 
-const inboxQueueOwnerJoin = "LEFT JOIN users inbox_owner ON inbox_owner.id = inbox_cases.assignee_id AND inbox_owner.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id = inbox_owner.id AND uo.organization_id = inbox_cases.organization_id)"
+const inboxQueueOwnerJoin = "LEFT JOIN users inbox_owner ON inbox_owner.id = inbox_cases.assignee_id AND inbox_owner.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id = inbox_owner.id AND uo.organization_id = inbox_cases.organization_id)"
 const inboxQueueTeamJoin = "LEFT JOIN teams inbox_team ON inbox_team.id = inbox_cases.team_id AND inbox_team.organization_id = inbox_cases.organization_id AND inbox_team.deleted_at IS NULL"
 const inboxQueueColumns = "inbox_cases.*, wa.name AS account_name, c.profile_name AS contact_name, COALESCE(inbox_owner.full_name,'') AS assignee_name, COALESCE(inbox_team.name,'') AS team_name, COALESCE((SELECT left(m.content,160) FROM messages m WHERE m.organization_id = inbox_cases.organization_id AND m.contact_id = inbox_cases.contact_id AND m.whats_app_account = wa.name AND m.direction = 'incoming' AND COALESCE(m.channel,'') IN ('','whatsapp') AND m.deleted_at IS NULL ORDER BY m.created_at DESC,m.id DESC LIMIT 1),'') AS message_preview"
 

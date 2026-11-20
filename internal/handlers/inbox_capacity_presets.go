@@ -120,7 +120,7 @@ func (a *App) applyInboxPreset(r *fastglue.Request, apply bool) error {
 		if err := tx.First(&team, "id=? AND organization_id=? AND is_active", input.TeamID, org).Error; err != nil {
 			return err
 		}
-		if err := tx.Table("team_members tm").Joins("JOIN users u ON u.id=tm.user_id AND u.deleted_at IS NULL").Joins("JOIN user_organizations uo ON uo.user_id=u.id AND uo.organization_id=?", org).Joins("LEFT JOIN inbox_agent_capacities cap ON cap.agent_id=u.id AND cap.account_id=? AND cap.organization_id=?", input.AccountID, org).Where("tm.team_id=? AND tm.user_id IN ? AND tm.deleted_at IS NULL", input.TeamID, input.AgentIDs).Select("u.id AS agent_id,u.full_name AS name,COALESCE(cap.max_active,0) AS before,?::integer AS after", preset.MaxActive).Order("u.id").Scan(&changes).Error; err != nil {
+		if err := tx.Table("team_members tm").Joins("JOIN users u ON u.id=tm.user_id AND u.deleted_at IS NULL").Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id=u.id AND uo.organization_id=?", org).Joins("LEFT JOIN inbox_agent_capacities cap ON cap.agent_id=u.id AND cap.account_id=? AND cap.organization_id=?", input.AccountID, org).Where("tm.team_id=? AND tm.user_id IN ? AND tm.deleted_at IS NULL", input.TeamID, input.AgentIDs).Select("u.id AS agent_id,u.full_name AS name,COALESCE(cap.max_active,0) AS before,?::integer AS after", preset.MaxActive).Order("u.id").Scan(&changes).Error; err != nil {
 			return err
 		}
 		if len(changes) != len(input.AgentIDs) {

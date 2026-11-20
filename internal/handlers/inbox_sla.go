@@ -22,11 +22,12 @@ type inboxSLATarget struct {
 }
 
 type inboxSLASnapshot struct {
-	PolicyVersion *uuid.UUID      `json:"policy_version,omitempty"`
-	Legacy        bool            `json:"legacy"`
-	FirstReply    *inboxSLATarget `json:"first_reply,omitempty"`
-	NextReply     *inboxSLATarget `json:"next_reply,omitempty"`
-	Resolution    *inboxSLATarget `json:"resolution,omitempty"`
+	PolicyVersion *uuid.UUID          `json:"policy_version,omitempty"`
+	Legacy        bool                `json:"legacy"`
+	SnoozeOptions []inboxSnoozeOption `json:"snooze_options,omitempty"`
+	FirstReply    *inboxSLATarget     `json:"first_reply,omitempty"`
+	NextReply     *inboxSLATarget     `json:"next_reply,omitempty"`
+	Resolution    *inboxSLATarget     `json:"resolution,omitempty"`
 }
 
 type inboxSLACase struct {
@@ -182,6 +183,7 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 	for _, c := range cases {
 		if entry, ok := byCasePolicy[c.ID]; ok {
 			results[c.ID] = inboxSnapshot(entry.clock, entry.policy, c, byCase[c.ID], now)
+			results[c.ID].SnoozeOptions = inboxSnoozeOptions(entry.policy, now)
 		}
 	}
 	return results, nil

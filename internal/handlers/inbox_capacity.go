@@ -104,7 +104,7 @@ func (a *App) GetInboxTeamCapacity(r *fastglue.Request) error {
 	rows := []InboxCapacityRow{}
 	err = a.DB.Table("team_members tm").
 		Joins("JOIN users u ON u.id = tm.user_id AND u.deleted_at IS NULL").
-		Joins("JOIN user_organizations uo ON uo.user_id=u.id AND uo.organization_id=?", org).
+		Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id=u.id AND uo.organization_id=?", org).
 		Joins("LEFT JOIN inbox_agent_capacities lim ON lim.organization_id = ? AND lim.account_id = ? AND lim.agent_id = tm.user_id", org, account).
 		Where("tm.team_id = ? AND tm.deleted_at IS NULL", team).
 		Select("u.id AS agent_id, u.full_name AS name, COALESCE(lim.max_active, 0) AS max_active, (u.is_active AND u.is_available) AS available, NOT u.is_active AS inactive, "+
@@ -232,7 +232,7 @@ func (a *App) routeEligibleInboxCase(tx *gorm.DB, c *models.InboxCase) error {
 	}
 	q := tx.Model(&models.TeamMember{}).
 		Joins("JOIN users u ON u.id = team_members.user_id AND u.is_active AND u.is_available AND u.deleted_at IS NULL").
-		Joins("JOIN user_organizations uo ON uo.user_id = u.id AND uo.organization_id = ?", c.OrganizationID).
+		Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id = u.id AND uo.organization_id = ?", c.OrganizationID).
 		Where("team_members.team_id = ?", team.ID)
 	if team.AssignmentStrategy == models.AssignmentStrategyLoadBalanced {
 		q = q.Select("team_members.*, (SELECT COUNT(*) FROM inbox_cases ic WHERE ic.organization_id = ? AND ic.account_id = ? "+

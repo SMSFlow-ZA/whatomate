@@ -111,7 +111,7 @@ func inboxReplyFingerprint(c models.InboxCase, account models.WhatsAppAccount, c
 func (a *App) workflowActorActive(db *gorm.DB, org, user uuid.UUID) bool {
 	var count int64
 	err := db.Model(&models.User{}).Where("id = ? AND is_active AND (is_super_admin OR organization_id = ? OR "+
-		"EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id = users.id AND uo.organization_id = ?))", user, org, org).Count(&count).Error
+		"EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id = users.id AND uo.organization_id = ?))", user, org, org).Count(&count).Error
 	return err == nil && count == 1
 }
 
@@ -402,7 +402,7 @@ func (a *App) ListInboxWorkflowRuns(r *fastglue.Request) error {
 	}
 	if err := q.Joins("JOIN whatsapp_accounts wa ON wa.id=inbox_workflow_runs.account_id AND wa.organization_id=inbox_workflow_runs.organization_id AND wa.deleted_at IS NULL").
 		Joins("JOIN contacts c ON c.id=inbox_workflow_runs.contact_id AND c.organization_id=inbox_workflow_runs.organization_id AND c.deleted_at IS NULL").
-		Joins("LEFT JOIN users actor ON actor.id=inbox_workflow_runs.actor_id AND actor.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id=actor.id AND uo.organization_id=inbox_workflow_runs.organization_id)").
+		Joins("LEFT JOIN users actor ON actor.id=inbox_workflow_runs.actor_id AND actor.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=actor.id AND uo.organization_id=inbox_workflow_runs.organization_id)").
 		Joins("LEFT JOIN messages m ON m.id=inbox_workflow_runs.id AND m.organization_id=inbox_workflow_runs.organization_id AND m.contact_id=inbox_workflow_runs.contact_id AND m.whats_app_account=wa.name AND m.deleted_at IS NULL").
 		Select("inbox_workflow_runs.*,COALESCE(actor.full_name,'') AS actor_name,wa.name AS account_name,c.profile_name AS contact_name,COALESCE(m.status,'') AS message_status").Order("inbox_workflow_runs.created_at DESC,inbox_workflow_runs.id").Offset(parseInboxQueuePage(r.RequestCtx.QueryArgs())).Limit(51).Scan(&runs).Error; err != nil {
 		return a.inboxError(r, err)

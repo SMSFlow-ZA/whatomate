@@ -31,7 +31,7 @@ func (a *App) InboxAssignmentOptions(r *fastglue.Request) error {
 	if err := a.scopeInboxCases(a.DB.Model(&models.InboxCase{}), user, t.org).First(&models.InboxCase{}, "inbox_cases.id=?", c.ID).Error; err != nil {
 		return a.inboxError(r, err)
 	}
-	q := a.DB.Model(&models.User{}).Joins("JOIN user_organizations uo ON uo.user_id=users.id AND uo.organization_id=?", t.org).Joins("LEFT JOIN inbox_agent_capacities lim ON lim.agent_id=users.id AND lim.organization_id=? AND lim.account_id=?", t.org, t.account).Where("users.is_active")
+	q := a.DB.Model(&models.User{}).Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id=users.id AND uo.organization_id=?", t.org).Joins("LEFT JOIN inbox_agent_capacities lim ON lim.agent_id=users.id AND lim.organization_id=? AND lim.account_id=?", t.org, t.account).Where("users.is_active")
 	if c.TeamID != nil {
 		q = q.Where("EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id=? AND tm.user_id=users.id AND tm.deleted_at IS NULL)", *c.TeamID)
 	}

@@ -94,7 +94,7 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 		Joins("JOIN contacts c ON c.id=ic.contact_id AND c.organization_id=ic.organization_id AND c.deleted_at IS NULL").
 		Joins("JOIN whatsapp_accounts wa ON wa.id=ic.account_id AND wa.organization_id=ic.organization_id AND wa.deleted_at IS NULL").
 		Joins("LEFT JOIN teams t ON t.id=inbox_sla_obligations.team_id AND t.organization_id=ic.organization_id AND t.deleted_at IS NULL").
-		Joins("LEFT JOIN users u ON u.id=inbox_sla_obligations.agent_id AND u.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id=u.id AND uo.organization_id=ic.organization_id)").
+		Joins("LEFT JOIN users u ON u.id=inbox_sla_obligations.agent_id AND u.deleted_at IS NULL AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=u.id AND uo.organization_id=ic.organization_id)").
 		Order("completed_at DESC,inbox_sla_obligations.id").Limit(limit)
 	if !export {
 		query = query.Offset(parseInboxQueuePage(args))
@@ -163,7 +163,7 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 		Name string    `json:"name"`
 	}{}
 	if len(agentIDs) > 0 {
-		if err := a.DB.Model(&models.User{}).Select("id,full_name AS name").Where("id IN ? AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.user_id=users.id AND uo.organization_id=?)", agentIDs, org).Order("full_name,id").Scan(&agents).Error; err != nil {
+		if err := a.DB.Model(&models.User{}).Select("id,full_name AS name").Where("id IN ? AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=users.id AND uo.organization_id=?)", agentIDs, org).Order("full_name,id").Scan(&agents).Error; err != nil {
 			return a.inboxError(r, err)
 		}
 	}

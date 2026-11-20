@@ -86,7 +86,7 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 					break
 				}
 				var members []models.TeamMember
-				if err := db.Joins("JOIN users u ON u.id=team_members.user_id AND u.is_active AND u.is_available AND u.deleted_at IS NULL").Joins("JOIN user_organizations uo ON uo.user_id=u.id AND uo.organization_id=?", c.OrganizationID).Where("team_members.team_id=?", id).Find(&members).Error; err != nil {
+				if err := db.Joins("JOIN users u ON u.id=team_members.user_id AND u.is_active AND u.is_available AND u.deleted_at IS NULL").Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id=u.id AND uo.organization_id=?", c.OrganizationID).Where("team_members.team_id=?", id).Find(&members).Error; err != nil {
 					return nil, false, err
 				}
 				item.Status, item.Reason = "unassigned", "team_unavailable"

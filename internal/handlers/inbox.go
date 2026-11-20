@@ -245,8 +245,8 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 		activityQuery = activityQuery.Where("case_id=?", id)
 	}
 	if err := activityQuery.
-		Joins("LEFT JOIN users actor ON actor.id=inbox_case_activities.actor_id AND actor.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.user_id=actor.id AND uo.organization_id=inbox_case_activities.organization_id)").
-		Joins("LEFT JOIN users owner ON owner.id=inbox_case_activities.assignee_id AND owner.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.user_id=owner.id AND uo.organization_id=inbox_case_activities.organization_id)").
+		Joins("LEFT JOIN users actor ON actor.id=inbox_case_activities.actor_id AND actor.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=actor.id AND uo.organization_id=inbox_case_activities.organization_id)").
+		Joins("LEFT JOIN users owner ON owner.id=inbox_case_activities.assignee_id AND owner.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=owner.id AND uo.organization_id=inbox_case_activities.organization_id)").
 		Joins("LEFT JOIN teams team ON team.id=inbox_case_activities.team_id AND team.organization_id=inbox_case_activities.organization_id AND team.deleted_at IS NULL").
 		Select("inbox_case_activities.*, COALESCE(actor.full_name,'') AS actor_name,COALESCE(owner.full_name,'') AS assignee_name,COALESCE(team.name,'') AS team_name").
 		Where("kind <> ?", "incoming_message").Order("inbox_case_activities.created_at DESC, inbox_case_activities.id DESC").Limit(50).Scan(&activities).Error; err != nil {
