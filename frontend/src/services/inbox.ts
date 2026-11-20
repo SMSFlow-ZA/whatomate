@@ -152,6 +152,7 @@ export interface InboxSLATarget {
   timezone?: string
 }
 export interface InboxSLA {
+  snooze_options?: { key: string; until: string; timezone: string }[]
   first_reply?: InboxSLATarget
   next_reply?: InboxSLATarget
   resolution?: InboxSLATarget
@@ -190,6 +191,8 @@ export interface InboxCapacity {
 export interface InboxCase {
   routing_reason?: string
   opened_at?: string
+  next_reply_from?: string
+  first_human_reply_at?: string
   last_inbound_at?: string
   sla?: InboxSLA
   id: string
@@ -436,6 +439,7 @@ export const inboxService = {
         })[]
         has_more: boolean
         updated_at: string
+        unique_agents: number
       }>
     >('/inbox/workload', {
       params: {

@@ -5,6 +5,8 @@ import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/shared'
+import InboxFilterSummary from '@/components/chat/InboxFilterSummary.vue'
+import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
 import InboxTabs from '@/components/shared/InboxTabs.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import { useRoute } from 'vue-router'
@@ -981,17 +983,12 @@ function pageHistory(delta: number) {
                       </option>
                     </select></label
                   >
-                  <label class="inbox-label"
-                    >{{ t('inboxQueue.assignee')
-                    }}<select v-model="form.conditions.assignee_id">
-                      <option :value="undefined">
-                        {{ t('inboxSla.any') }}
-                      </option>
-                      <option v-for="a in users" :key="a.id" :value="a.id">
-                        {{ a.full_name }}
-                      </option>
-                    </select></label
-                  >
+                  <InboxAgentSelect
+                    v-model="form.conditions.assignee_id"
+                    :users="users"
+                    :label="t('inboxQueue.assignee')"
+                    :empty-label="t('inboxSla.any')"
+                  />
                   <fieldset>
                     <legend class="mb-2 text-xs font-medium">
                       {{ t('contacts.tags') }}
@@ -1014,10 +1011,77 @@ function pageHistory(delta: number) {
                   </fieldset>
                 </div>
                 <div class="mt-4">
-                  <InboxFieldMatchers
-                    :model-value="form.conditions.fields ?? []"
-                    @update:model-value="form.conditions.fields = $event"
-                  /><InboxConditionBuilder v-model="form.conditions" /><label
+                  <details
+                    :open="
+                      !!(
+                        form.conditions.fields?.length ||
+                        form.conditions.predicates?.length
+                      )
+                    "
+                  >
+                    <summary class="min-h-10 cursor-pointer py-2">
+                      {{ t('inboxReview.advancedConditions') }}
+                    </summary>
+                    <div class="grid gap-3 py-3">
+                      <InboxFieldMatchers
+                        :predicate-count="
+                          form.conditions.predicates?.length ?? 0
+                        "
+                        :model-value="form.conditions.fields ?? []"
+                        @update:model-value="form.conditions.fields = $event"
+                      /><InboxConditionBuilder v-model="form.conditions" />
+                    </div>
+                  </details>
+                  <aside class="inbox-notice mt-4 min-w-0 flex-col break-words">
+                    <h3 class="font-medium">
+                      {{ t('inboxReview.workflowSummary') }}
+                    </h3>
+                    <InboxFilterSummary
+                      :filters="form.conditions"
+                      :accounts="accounts"
+                      :teams="teams"
+                      :users="users"
+                    />
+                    <ol
+                      class="mt-2 max-h-64 w-full list-inside list-decimal overflow-auto whitespace-pre-wrap break-words"
+                      tabindex="0"
+                      :aria-label="t('inboxRules.actions')"
+                    >
+                      <li v-for="(action, index) in form.actions" :key="index">
+                        {{ t('inboxRules.action.' + action.type) }}:
+                        {{
+                          action.type === 'assign'
+                            ? users.find((user) => user.id === action.value)
+                                ?.full_name || t('inboxUX.agentUnavailable')
+                            : action.type === 'assign_team'
+                              ? teams.find((team) => team.id === action.value)
+                                  ?.name || t('inboxQuality.teamUnavailable')
+                              : action.type === 'snooze'
+                                ? t('inboxQuality.snoozeDuration', {
+                                    minutes: action.duration_minutes,
+                                  })
+                                : action.type === 'status' ||
+                                    action.type === 'priority'
+                                  ? t(
+                                      'inboxWorkflow.' +
+                                        action.type +
+                                        '.' +
+                                        action.value,
+                                    )
+                                  : action.type === 'send_template'
+                                    ? templates.find(
+                                        (template) =>
+                                          template.id === action.value,
+                                      )?.name || t('inboxUX.chooseTemplate')
+                                    : action.value
+                        }}
+                      </li>
+                    </ol>
+                    <p class="inbox-caption mt-2">
+                      {{ t('inboxQuality.preflightHelp') }}
+                    </p>
+                  </aside>
+                  <label
                     v-if="
                       form.kind === 'rule' &&
                       form.trigger === 'incoming_message'

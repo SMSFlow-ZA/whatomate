@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
+import InboxFilterSummary from './InboxFilterSummary.vue'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -108,6 +110,60 @@ const statuses: CaseStatus[] = [
 const priorities: CasePriority[] = ['low', 'normal', 'high', 'urgent']
 const canEdit = computed(() => auth.hasPermission('chat', 'write'))
 const canAssignOrTag = computed(() => auth.hasPermission('contacts', 'write'))
+const filterCount = computed(
+  () =>
+    ['account_id', 'team_id', 'assignee_id', 'status', 'priority'].filter(
+      (key) => !!filters.value[key as keyof InboxFilters],
+    ).length +
+    (filters.value.tags?.length ?? 0) +
+    (filters.value.fields?.length ?? 0) +
+    (filters.value.predicates?.length ?? 0),
+)
+const selectable = computed(() =>
+  rows.value.filter((row) => row.status !== 'resolved'),
+)
+const pageSelected = computed(
+  () =>
+    !!selectable.value.length &&
+    selectable.value.every((row) => selected.value.includes(row.id)),
+)
+function selectPage() {
+  selected.value = pageSelected.value
+    ? []
+    : selectable.value.map((row) => row.id)
+}
+function clearFilters() {
+  activeView.value = ''
+  filters.value = { tags: [], queue: filters.value.queue }
+}
+const clock = ref(Date.now())
+const ageTimer = setInterval(() => {
+  clock.value = Date.now()
+}, 30000)
+onUnmounted(() => clearInterval(ageTimer))
+function waitingAge(row: QueueCase) {
+  const since =
+    row.next_reply_from ??
+    (!row.first_human_reply_at
+      ? row.last_inbound_at
+        ? row.opened_at
+        : undefined
+      : undefined)
+  if (!since || row.status === 'resolved') return ''
+  const minutes = Math.max(
+    0,
+    Math.floor((clock.value - Date.parse(since)) / 60000),
+  )
+  return t('inboxReview.waitingAge', {
+    age: new Intl.RelativeTimeFormat(undefined, { numeric: 'always' }).format(
+      -Math.max(
+        1,
+        Math.floor(minutes / (minutes >= 1440 ? 1440 : minutes >= 60 ? 60 : 1)),
+      ),
+      minutes >= 1440 ? 'day' : minutes >= 60 ? 'hour' : 'minute',
+    ),
+  })
+}
 const selectedCases = computed(() =>
   rows.value.filter((row) => selected.value.includes(row.id)),
 )
@@ -438,7 +494,8 @@ async function applyBulk() {
           ><PopoverTrigger as-child
             ><Button variant="outline" size="sm"
               ><Filter class="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{{
-                t('inboxQueue.filters')
+                t('inboxQueue.filters') +
+                (filterCount ? ' (' + filterCount + ')' : '')
               }}</Button
             ></PopoverTrigger
           ><PopoverContent
@@ -474,21 +531,12 @@ async function applyBulk() {
                   </option>
                 </select></label
               >
-              <label class="inbox-label"
-                >{{ t('inboxQueue.assignee')
-                }}<select v-model="filters.assignee_id">
-                  <option :value="undefined">
-                    {{ t('inboxQueue.allAssignees') }}
-                  </option>
-                  <option
-                    v-for="item in agents"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.full_name }}
-                  </option>
-                </select></label
-              >
+              <InboxAgentSelect
+                v-model="filters.assignee_id"
+                :users="agents"
+                :label="t('inboxQueue.assignee')"
+                :empty-label="t('inboxQueue.allAssignees')"
+              />
               <div class="inbox-grid">
                 <label class="inbox-label"
                   >{{ t('inboxWorkflow.caseStatus')
@@ -534,15 +582,23 @@ async function applyBulk() {
                   >
                 </div>
               </fieldset>
-              <InboxFieldMatchers
-                :model-value="filters.fields ?? []"
-                @update:model-value="filters.fields = $event"
-              /><InboxConditionBuilder v-model="filters" /><Button
-                variant="outline"
-                size="sm"
-                @click="filters = { tags: [], queue: filters.queue }"
-                >{{ t('inboxUX.resetFilters') }}</Button
+              <details
+                :open="!!(filters.fields?.length || filters.predicates?.length)"
               >
+                <summary class="min-h-10 cursor-pointer py-2">
+                  {{ t('inboxReview.advancedConditions') }}
+                </summary>
+                <div class="grid gap-3 py-3">
+                  <InboxFieldMatchers
+                    :predicate-count="filters.predicates?.length ?? 0"
+                    :model-value="filters.fields ?? []"
+                    @update:model-value="filters.fields = $event"
+                  /><InboxConditionBuilder v-model="filters" />
+                </div>
+              </details>
+              <Button variant="outline" size="sm" @click="clearFilters">{{
+                t('inboxUX.resetFilters')
+              }}</Button>
             </div></PopoverContent
           ></Popover
         >
@@ -636,6 +692,29 @@ async function applyBulk() {
           ><RotateCw class="h-3.5 w-3.5" aria-hidden="true"
         /></Button>
       </div>
+      <div v-if="filterCount" class="mt-2 grid gap-1">
+        <InboxFilterSummary
+          :filters="filters"
+          :accounts="accounts"
+          :teams="teams"
+          :users="agents"
+        /><Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="justify-self-start"
+          @click="clearFilters"
+          >{{ t('inboxUX.resetFilters') }}</Button
+        >
+      </div>
+      <label v-if="canEdit && selectable.length" class="inbox-check mt-2"
+        ><input
+          type="checkbox"
+          :checked="pageSelected"
+          :disabled="saving || loading"
+          @change="selectPage"
+        />{{ t('inboxReview.selectPage') }}</label
+      >
       <p v-if="updatedAt" class="inbox-caption mt-2" role="status">
         {{ t('inboxQuality.lastUpdated', { time: updatedAt }) }}
       </p>
@@ -682,17 +761,15 @@ async function applyBulk() {
           >{{ t('inboxQueue.review') }}</Button
         >
       </div>
-      <select
+      <InboxAgentSelect
         v-if="action === 'assign'"
-        v-model="actionValue"
-        class="inbox-control mt-2"
-        :aria-label="t('inboxQueue.chooseAgent')"
-      >
-        <option value="">{{ t('inboxQueue.chooseAgent') }}</option>
-        <option v-for="entry in agents" :key="entry.id" :value="entry.id">
-          {{ entry.full_name }}
-        </option></select
-      ><select
+        :model-value="actionValue"
+        @update:model-value="actionValue = $event ?? ''"
+        :users="agents"
+        :label="t('inboxQueue.chooseAgent')"
+        :empty-label="t('inboxQueue.chooseAgent')"
+        :disabled="saving"
+      /><select
         v-if="action === 'tag'"
         v-model="actionValue"
         class="inbox-control mt-2"
@@ -813,6 +890,9 @@ async function applyBulk() {
             ><span class="inbox-caption mt-1 block truncate"
               >{{ row.team_name || t('inboxQuality.noTeam') }} ·
               {{ row.assignee_name || t('inboxQueue.queue.unassigned') }}</span
+            ><span v-if="waitingAge(row)" class="inbox-caption mt-1 block">{{
+              waitingAge(row)
+            }}</span
             ><span v-if="row.last_inbound_at" class="inbox-caption mt-1 block"
               >{{ t('inboxQuality.waitingSince') }}
               {{ new Date(row.last_inbound_at).toLocaleString() }}</span

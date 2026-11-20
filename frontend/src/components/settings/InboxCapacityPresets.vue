@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -33,9 +45,16 @@ const { t } = useI18n(),
   reviewing = ref(false),
   changes = ref<CapacityChange[]>([]),
   confirmation = ref('')
+const baseline = ref('')
+const removing = ref(false)
+const draft = () => JSON.stringify([name.value, maximum.value])
+const dirty = computed(() => editing.value && draft() !== baseline.value)
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(() => dirty.value)
+defineExpose({ confirmLeave: requestDiscard })
 let generation = 0
 watch(
-  () => [props.team, props.account, props.agents.join(',')],
+  [() => props.team, () => props.account, () => props.agents.join(',')],
   () => {
     generation++
     reviewing.value = false
@@ -55,6 +74,7 @@ function edit() {
   name.value = preset?.name ?? ''
   maximum.value = preset?.max_active ?? 0
   editing.value = true
+  baseline.value = draft()
 }
 async function save() {
   busy.value = true
@@ -116,12 +136,63 @@ async function apply() {
 onMounted(load)
 
 const restoreDialogFocus = useInboxDialogFocus(reviewing)
-function changePreset() {
-  editing.value = false
-  generation++
+function changePreset(event: Event) {
+  const control = event.target as HTMLSelectElement
+  const next = control.value
+  control.value = selected.value
+  requestDiscard(() => {
+    selected.value = next
+    editing.value = false
+    generation++
+    reviewing.value = false
+  })
+}
+async function remove() {
+  if (!selected.value || busy.value) return
+  busy.value = true
+  try {
+    await inboxService.deleteCapacityPreset(selected.value)
+    selected.value = ''
+    editing.value = false
+    removing.value = false
+    generation++
+    await load()
+  } catch {
+    error.value = t('inboxReview.presetDeleteError')
+  } finally {
+    busy.value = false
+  }
 }
 </script>
 <template>
+  <UnsavedChangesDialog
+    :open="discardOpen"
+    @leave="confirmDiscard"
+    @stay="cancelDiscard"
+  />
+  <AlertDialog
+    :open="removing"
+    @update:open="
+      (value) => {
+        if (!busy) removing = value
+      }
+    "
+    ><AlertDialogContent
+      ><AlertDialogHeader
+        ><AlertDialogTitle>{{ t('inboxReview.removePreset') }}</AlertDialogTitle
+        ><AlertDialogDescription>{{
+          t('inboxReview.removePresetHelp')
+        }}</AlertDialogDescription></AlertDialogHeader
+      ><AlertDialogFooter
+        ><AlertDialogCancel :disabled="busy">{{
+          t('common.cancel')
+        }}</AlertDialogCancel
+        ><AlertDialogAction :disabled="busy" @click.prevent="remove">{{
+          t('common.remove')
+        }}</AlertDialogAction></AlertDialogFooter
+      ></AlertDialogContent
+    ></AlertDialog
+  >
   <details class="inbox-subsection">
     <summary class="min-h-10 cursor-pointer py-2 font-medium">
       {{ t('inboxQuality.capacityPresets') }}
@@ -136,16 +207,31 @@ function changePreset() {
     <div class="flex flex-wrap items-end gap-2">
       <label class="inbox-label grow"
         >{{ t('inboxQuality.capacityPresets')
-        }}<select v-model="selected" :disabled="busy" @change="changePreset()">
+        }}<select :value="selected" :disabled="busy" @change="changePreset">
           <option value="">{{ t('inboxQuality.newPreset') }}</option>
           <option v-for="preset in presets" :key="preset.id" :value="preset.id">
             {{ preset.name }} ·
             {{ preset.max_active || t('inboxCapacity.unlimited') }}
           </option>
         </select></label
-      ><Button variant="outline" size="sm" :disabled="busy" @click="edit">{{
-        t(selected ? 'common.edit' : 'common.add')
-      }}</Button
+      ><Button
+        variant="outline"
+        size="sm"
+        :disabled="busy"
+        @click="requestDiscard(edit)"
+        >{{ t(selected ? 'common.edit' : 'common.add') }}</Button
+      ><Button
+        v-if="selected"
+        size="sm"
+        variant="outline"
+        :disabled="busy"
+        @click="
+          requestDiscard(() => {
+            editing = false
+            removing = true
+          })
+        "
+        >{{ t('common.remove') }}</Button
       ><Button
         size="sm"
         :disabled="!selected || busy || !agents.length"
@@ -173,7 +259,11 @@ function changePreset() {
           variant="outline"
           size="sm"
           :disabled="busy"
-          @click="editing = false"
+          @click="
+            requestDiscard(() => {
+              editing = false
+            })
+          "
           >{{ t('common.cancel') }}</Button
         >
       </div>

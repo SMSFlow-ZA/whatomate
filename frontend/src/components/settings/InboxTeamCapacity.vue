@@ -17,6 +17,7 @@ const props = defineProps<{
   canWrite?: boolean
 }>()
 const { t } = useI18n()
+const presetEditor = ref<InstanceType<typeof InboxCapacityPresets>>()
 const account = ref(props.account ?? '')
 const accounts = ref<{ id: string; name: string }[]>([])
 const rows = ref<InboxCapacity[]>([])
@@ -44,9 +45,12 @@ function selectAccount(event: Event) {
   const control = event.target as HTMLSelectElement
   const value = control.value
   control.value = account.value
-  requestDiscard(() => {
-    account.value = value
-  })
+  const change = () =>
+    requestDiscard(() => {
+      account.value = value
+    })
+  if (presetEditor.value) presetEditor.value.confirmLeave(change)
+  else change()
 }
 
 async function load() {
@@ -297,6 +301,7 @@ function presetApplied() {
       </table>
     </div>
     <InboxCapacityPresets
+      ref="presetEditor"
       v-if="canWrite && account && rows.length"
       :team="team"
       :account="account"

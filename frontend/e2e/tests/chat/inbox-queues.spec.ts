@@ -46,7 +46,7 @@ test('filters queues, saves a view, and reviews a bulk resolve', async ({
     await page.goto('/chat')
     await page.getByRole('button', { name: 'Queues', exact: true }).click()
     await page.getByRole('button', { name: 'Unassigned', exact: true }).click()
-    await page.getByRole('button', { name: 'Filters', exact: true }).click()
+    await page.getByRole('button', { name: /^Filters(?: \(\d+\))?$/ }).click()
     await page
       .getByRole('combobox', { name: 'WhatsApp account', exact: true })
       .selectOption(account.id)

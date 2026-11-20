@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { inboxService, type InboxSLAHistoryRow } from '@/services/inbox'
@@ -52,6 +52,19 @@ function filters() {
     offset: offset.value,
   }
 }
+const unapplied = computed(() => {
+  try {
+    const current = filters()
+    return (
+      !!applied.value &&
+      ['from', 'to', 'agent_id', 'policy_id', 'kind'].some(
+        (key) => current[key as keyof typeof current] !== applied.value?.[key],
+      )
+    )
+  } catch {
+    return true
+  }
+})
 function applyFilters() {
   offset.value = 0
   try {
@@ -84,7 +97,7 @@ async function load() {
   }
 }
 async function download() {
-  if (!applied.value) return
+  if (!applied.value || unapplied.value) return
   exporting.value = true
   exportError.value = false
   try {
@@ -182,12 +195,15 @@ function pageBy(delta: number) {
           ><Button
             type="button"
             variant="outline"
-            :disabled="exporting || busy"
+            :disabled="exporting || busy || unapplied"
             @click="download"
             >{{ t('inboxQuality.exportCsv') }}</Button
           >
         </div>
       </form>
+      <p v-if="unapplied" class="inbox-notice mt-3" role="status">
+        {{ t('inboxReview.unappliedFilters') }}
+      </p>
       <p v-if="exportError" role="alert" class="inbox-notice mt-3">
         {{ t('inboxQuality.exportError') }}
       </p>
@@ -225,7 +241,9 @@ function pageBy(delta: number) {
             >{{ row.contact_name || t('inboxQueue.unnamed') }}</RouterLink
           >
           <p class="inbox-caption mt-1">
-            {{ row.account_name }} · {{ row.team_name }} · {{ row.agent_name }}
+            {{ row.account_name }} ·
+            {{ row.team_name || t('inboxQuality.noTeam') }} ·
+            {{ row.agent_name || t('inboxQuality.formerUser') }}
           </p>
           <p class="inbox-caption">
             {{ t('inboxSla.target.' + row.kind) }} ·

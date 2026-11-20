@@ -14,7 +14,8 @@ const { t } = useI18n(),
   failed = ref(false),
   updated = ref(''),
   offset = ref(0),
-  more = ref(false)
+  more = ref(false),
+  uniqueAgents = ref(0)
 let generation = 0,
   timer: ReturnType<typeof setInterval> | undefined
 async function load() {
@@ -30,6 +31,7 @@ async function load() {
     if (request !== generation) return
     rows.value = data.data.agents ?? []
     more.value = data.data.has_more
+    uniqueAgents.value = data.data.unique_agents ?? 0
     updated.value = new Date(data.data.updated_at).toLocaleTimeString()
     failed.value = false
   } catch {
@@ -66,6 +68,16 @@ onUnmounted(() => {
         <h3 class="inbox-section-heading">
           {{ t('inboxQuality.liveWorkload') }}
         </h3>
+        <p class="inbox-caption mt-1">
+          {{
+            t(
+              'inboxReview.workloadSummary',
+              { count: uniqueAgents },
+              uniqueAgents,
+            )
+          }}
+        </p>
+        <p class="inbox-caption mt-1">{{ t('inboxReview.workloadHelp') }}</p>
         <p v-if="updated" class="inbox-caption mt-1" role="status">
           {{ t('inboxQuality.lastUpdated', { time: updated }) }}
         </p>
@@ -100,7 +112,8 @@ onUnmounted(() => {
             }}</span>
           </p>
           <p class="inbox-caption">
-            {{ row.team_name }} · {{ row.account_name }}
+            {{ row.team_name || t('inboxQuality.noTeam') }} ·
+            {{ row.account_name }}
           </p>
           <p class="inbox-caption">
             {{
@@ -116,7 +129,7 @@ onUnmounted(() => {
           >{{ row.active }} /
           {{ row.max_active || t('inboxCapacity.unlimited') }}</span
         ><RouterLink
-          v-if="auth.hasPermission('teams', 'read')"
+          v-if="row.team_name && auth.hasPermission('teams', 'read')"
           :to="'/settings/teams/' + row.team_id"
           class="text-sm underline"
           >{{ t('inboxQuality.teamSettings') }}</RouterLink

@@ -152,7 +152,7 @@ test('qualifies queues, routing previews, required resolution, workload presets 
     await expect(
       page.getByRole('button', { name: 'Mine', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true')
-    await page.getByRole('button', { name: 'Filters', exact: true }).click()
+    await page.getByRole('button', { name: /^Filters(?: \(\d+\))?$/ }).click()
     await page
       .getByRole('combobox', { name: 'WhatsApp account', exact: true })
       .selectOption(account.id)

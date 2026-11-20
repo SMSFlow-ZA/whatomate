@@ -1,18 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { InboxSLA, InboxSLATarget } from '@/services/inbox'
 
 const props = defineProps<{ sla: InboxSLA; compact?: boolean }>()
 const { t, locale } = useI18n()
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 30000)
-})
-onUnmounted(() => clearInterval(timer))
 function dueLabel(deadline: Date | null, timezone?: string) {
   if (!deadline) return ''
   try {
@@ -47,12 +39,7 @@ const allTargets = computed(() =>
       const minutes = Math.max(0, Math.ceil(target.remaining_seconds / 60))
       return {
         kind,
-        status:
-          deadline &&
-          deadline.getTime() <= now.value &&
-          ['on_track', 'at_risk'].includes(target.status)
-            ? 'breached'
-            : target.status,
+        status: target.status,
         countdown:
           minutes > 0
             ? new Intl.RelativeTimeFormat(locale.value, {

@@ -26,6 +26,7 @@ const offset = ref(0)
 const hasMore = ref(false)
 const available = ref(false)
 const failed = ref(false)
+const loading = ref(false)
 const settingsFailed = ref(false)
 const lastUpdated = ref('')
 const lookupFailed = ref(false)
@@ -37,7 +38,9 @@ const visible = computed(() => rows.value)
 const summary = ref({ total: 0, breached: 0, at_risk: 0 })
 async function load() {
   if (document.visibilityState !== 'visible') return
+  if (section.value !== 'live') return
   const request = ++sequence
+  loading.value = true
   try {
     const { data } = await inboxService.slaReport(
       account.value,
@@ -55,13 +58,36 @@ async function load() {
     ).toLocaleTimeString()
   } catch {
     if (request === sequence) failed.value = true
+  } finally {
+    if (request === sequence) loading.value = false
   }
 }
-watch([team, account, all], () => {
+watch([team, account, all, section], () => {
+  sequence++
+  rows.value = []
+  summary.value = { total: 0, breached: 0, at_risk: 0 }
+  hasMore.value = false
+  lastUpdated.value = ''
+  loading.value = false
   offset.value = 0
   void load()
 })
 watch(offset, load)
+async function loadLookups() {
+  lookupFailed.value = false
+  const results = await Promise.allSettled([
+    accountsService.list().then((reply) => {
+      accounts.value = reply.data.data?.accounts ?? []
+    }),
+    teamsStore.fetchTeams().then((result) => {
+      teams.value = result.teams
+    }),
+  ])
+  lookupFailed.value = results.some((result) => result.status === 'rejected')
+}
+function refreshVisible() {
+  if (!loading.value) void load()
+}
 async function initialize() {
   settingsFailed.value = false
   try {
@@ -71,29 +97,18 @@ async function initialize() {
     return
   }
   if (!available.value) return
-  void accountsService
-    .list()
-    .then((reply) => {
-      accounts.value = reply.data.data?.accounts ?? []
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
-  void teamsStore
-    .fetchTeams()
-    .then((result) => {
-      teams.value = result.teams
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
+  void loadLookups()
   await load()
-  if (!timer) timer = setInterval(load, 30000)
+  if (!timer) timer = setInterval(refreshVisible, 30000)
 }
-onMounted(initialize)
+onMounted(() => {
+  void initialize()
+  document.addEventListener('visibilitychange', refreshVisible)
+})
 onUnmounted(() => {
   sequence++
   clearInterval(timer)
+  document.removeEventListener('visibilitychange', refreshVisible)
 })
 </script>
 
@@ -127,7 +142,10 @@ onUnmounted(() => {
       >
     </div>
     <p v-if="lookupFailed" role="alert" class="inbox-notice text-destructive">
-      {{ t('inboxQueue.loadFiltersError') }}
+      {{ t('inboxQueue.loadFiltersError')
+      }}<Button size="sm" variant="outline" @click="loadLookups">{{
+        t('common.retry')
+      }}</Button>
     </p>
     <InboxTabs
       v-model="section"
@@ -138,15 +156,26 @@ onUnmounted(() => {
         { value: 'history', label: t('inboxQuality.historicalTargets') },
       ]"
     />
-    <div v-if="section === 'live'" class="mb-4 flex flex-wrap gap-3">
+    <div
+      v-if="section === 'live' && !loading"
+      class="mb-4 flex flex-wrap gap-3"
+    >
       <span class="inbox-badge">{{
-        t('inboxQuality.summaryBreached', { count: summary.breached })
+        t(
+          'inboxQuality.summaryBreached',
+          { count: summary.breached },
+          summary.breached,
+        )
       }}</span
       ><span class="inbox-badge">{{
-        t('inboxQuality.summaryRisk', { count: summary.at_risk })
+        t(
+          'inboxQuality.summaryRisk',
+          { count: summary.at_risk },
+          summary.at_risk,
+        )
       }}</span
       ><span class="inbox-badge">{{
-        t('inboxQuality.summaryOpen', { count: summary.total })
+        t('inboxQuality.summaryOpen', { count: summary.total }, summary.total)
       }}</span
       ><Button size="sm" variant="outline" @click="load">{{
         t('inboxQuality.refresh')
@@ -190,7 +219,10 @@ onUnmounted(() => {
         :team="team"
         :account="account"
       />
-      <div v-if="failed" role="alert" class="inbox-notice">
+      <p v-if="loading" role="status" class="inbox-notice">
+        {{ t('inboxReview.updatingTargets') }}
+      </p>
+      <div v-else-if="failed" role="alert" class="inbox-notice">
         {{ t('inboxSla.loadError')
         }}<Button variant="outline" size="sm" @click="load">{{
           t('common.retry')
@@ -230,13 +262,13 @@ onUnmounted(() => {
       </div>
       <div v-if="offset || hasMore" class="mt-4 flex gap-2">
         <Button
-          :disabled="!offset"
+          :disabled="!offset || loading"
           variant="outline"
           size="sm"
           @click="offset -= 50"
           >{{ t('inboxQueue.previous') }}</Button
         ><Button
-          :disabled="!hasMore"
+          :disabled="!hasMore || loading"
           variant="outline"
           size="sm"
           @click="offset += 50"

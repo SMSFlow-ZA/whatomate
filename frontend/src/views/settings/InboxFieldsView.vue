@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { useI18n } from 'vue-i18n'
+import { isAxiosError } from 'axios'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/shared'
@@ -131,8 +132,29 @@ function begin(d?: FieldDefinition) {
   editing.value = true
   baseline.value = JSON.stringify([form.value, choices.value])
 }
+const choiceError = computed(() => {
+  if (selected.value || form.value.kind !== 'select') return ''
+  const lines = choices.value
+    .split('\n')
+    .map((line, index) => ({ text: line.trim(), line: index + 1 }))
+    .filter((item) => item.text)
+  if (!lines.length || lines.length > 100) return t('inboxReview.choiceCount')
+  const seen = new Set<string>()
+  for (const item of lines) {
+    if (Array.from(item.text).length > 100)
+      return t('inboxReview.choiceLength', { line: item.line })
+    if (seen.has(item.text))
+      return t('inboxReview.choiceDuplicate', { line: item.line })
+    seen.add(item.text)
+  }
+  return ''
+})
 async function save() {
   if (busy.value) return
+  if (choiceError.value) {
+    saveError.value = choiceError.value
+    return
+  }
   busy.value = true
   try {
     if (selected.value)
@@ -155,8 +177,13 @@ async function save() {
     editing.value = false
     await load()
     toast.success(t('settings.saved'))
-  } catch {
-    saveError.value = t('inboxFields.saveError')
+  } catch (error) {
+    const detail =
+      isAxiosError(error) && error.response?.status === 400
+        ? error.response.data?.message
+        : undefined
+    saveError.value =
+      typeof detail === 'string' ? detail : t('inboxFields.saveError')
     toast.error(saveError.value)
   } finally {
     busy.value = false
@@ -403,6 +430,9 @@ onMounted(load)
                   >{{ t('inboxFields.choices')
                   }}<textarea
                     v-model="choices"
+                    :aria-label="t('inboxFields.choices')"
+                    :aria-invalid="!!choiceError"
+                    aria-describedby="inbox-choice-help inbox-choice-error"
                     rows="5"
                     required
                     :disabled="!!selected"
@@ -410,6 +440,17 @@ onMounted(load)
                     t('inboxUX.fieldOptionsHelp')
                   }}</span></label
                 >
+                <p id="inbox-choice-help" class="inbox-caption">
+                  {{ t('inboxReview.choiceHelp') }}
+                </p>
+                <p
+                  v-if="choiceError"
+                  id="inbox-choice-error"
+                  role="alert"
+                  class="text-sm text-destructive"
+                >
+                  {{ choiceError }}
+                </p>
               </section>
               <section class="inbox-form-section">
                 <label class="inbox-check"

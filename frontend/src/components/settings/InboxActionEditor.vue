@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
 import { useI18n } from 'vue-i18n'
 import type { InboxAction } from '@/services/inbox'
 const model = defineModel<InboxAction>({ required: true })
@@ -74,15 +75,14 @@ function changeType() {
         </option>
       </select></label
     >
-    <label v-else-if="model.type === 'assign'" class="inbox-label"
-      >{{ t('inboxQueue.assignee') }}
-      <select v-model="model.value">
-        <option value="">{{ t('inboxQueue.chooseAgent') }}</option>
-        <option v-for="user in users" :key="user.id" :value="user.id">
-          {{ user.full_name }}
-        </option>
-      </select>
-    </label>
+    <InboxAgentSelect
+      v-else-if="model.type === 'assign'"
+      :model-value="model.value"
+      @update:model-value="model.value = $event ?? ''"
+      :users="users"
+      :label="t('inboxQueue.assignee')"
+      :empty-label="t('inboxQueue.chooseAgent')"
+    />
     <label v-else-if="model.type === 'tag'" class="inbox-label"
       >{{ t('contacts.tags') }}
       <select v-model="model.value">

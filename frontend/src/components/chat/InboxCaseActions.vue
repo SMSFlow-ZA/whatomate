@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inboxTextEntry } from '@/lib/inboxInteraction'
 import { Button } from '@/components/ui/button'
 import {
   Check,
@@ -56,7 +57,37 @@ const busy = ref(false)
 const snoozing = ref(false)
 const resolving = ref(false)
 const snoozeUntil = ref('')
+const snoozeOptions = computed(() => {
+  if (current.value?.sla?.snooze_options?.length)
+    return current.value.sla.snooze_options
+  const now = new Date(),
+    tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(9, 0, 0, 0)
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return [
+    {
+      key: 'later',
+      until: new Date(now.getTime() + 7200000).toISOString(),
+      timezone,
+    },
+    { key: 'tomorrow', until: tomorrow.toISOString(), timezone },
+  ]
+})
+
 let sequence = 0
+let targetTimer: ReturnType<typeof setInterval> | undefined
+function refreshTargets() {
+  if (
+    !props.history &&
+    document.visibilityState === 'visible' &&
+    !loading.value &&
+    !busy.value &&
+    !snoozing.value &&
+    !resolving.value
+  )
+    void load()
+}
 
 const priorities: CasePriority[] = ['low', 'normal', 'high', 'urgent']
 const activeStatuses: CaseStatus[] = [
@@ -121,6 +152,11 @@ watch(
   },
 )
 
+function chooseSnooze(until: string) {
+  const date = new Date(until)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  snoozeUntil.value = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 async function update(input: {
   status?: CaseStatus
   priority?: CasePriority
@@ -198,11 +234,8 @@ function shortcut(event: KeyboardEvent) {
     !event.altKey
   )
     return
-  const target = event.target as HTMLElement | null
   if (
-    target?.closest(
-      'input,textarea,select,[contenteditable="true"],[role="dialog"]',
-    ) ||
+    inboxTextEntry(event) ||
     document.querySelector('[role="dialog"][data-state="open"]')
   )
     return
@@ -224,10 +257,16 @@ function shortcut(event: KeyboardEvent) {
   if (status === 'snoozed') snoozing.value = true
   else void update({ status })
 }
-onMounted(() => window.addEventListener('keydown', shortcut))
+onMounted(() => {
+  window.addEventListener('keydown', shortcut)
+  document.addEventListener('visibilitychange', refreshTargets)
+  targetTimer = setInterval(refreshTargets, 30000)
+})
 onUnmounted(() => {
   sequence++
   window.removeEventListener('keydown', shortcut)
+  document.removeEventListener('visibilitychange', refreshTargets)
+  clearInterval(targetTimer)
 })
 function resolvedCase(value: InboxCase) {
   emit('changed', value)
@@ -453,6 +492,19 @@ function resolvedCase(value: InboxCase) {
       >{{ t('inboxWorkflow.startCase') }}</Button
     >
     <form v-if="snoozing" class="mt-3 grid gap-3" @submit.prevent="saveSnooze">
+      <div class="flex flex-wrap gap-2">
+        <Button
+          v-for="option in snoozeOptions"
+          :key="option.key"
+          type="button"
+          variant="outline"
+          size="sm"
+          :disabled="busy"
+          @click="chooseSnooze(option.until)"
+          >{{ t('inboxReview.snooze.' + option.key) }}</Button
+        >
+      </div>
+      <p class="inbox-caption">{{ t('inboxReview.snoozeHelp') }}</p>
       <label class="inbox-label"
         >{{ t('inboxWorkflow.snoozeUntil')
         }}<input

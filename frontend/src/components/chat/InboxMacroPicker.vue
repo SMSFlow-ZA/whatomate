@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inboxTextEntry } from '@/lib/inboxInteraction'
 import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
 import { computed, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -148,6 +149,7 @@ function shortcut(event: KeyboardEvent) {
     event.altKey &&
     event.key.toLowerCase() === 'm' &&
     !event.isComposing &&
+    !inboxTextEntry(event) &&
     !event.repeat &&
     !open.value &&
     !document.querySelector('[role="dialog"][data-state="open"]')

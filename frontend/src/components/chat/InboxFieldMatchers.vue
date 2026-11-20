@@ -10,6 +10,7 @@ import {
   type FieldValue,
 } from '@/services/inbox'
 
+const props = defineProps<{ predicateCount?: number }>()
 const matches = defineModel<FieldMatch[]>({ required: true })
 const { t } = useI18n()
 const definitions = ref<FieldDefinition[]>([])
@@ -33,7 +34,8 @@ function add() {
     !chosen.value ||
     value.value === null ||
     value.value === '' ||
-    matches.value.length >= 8
+    matches.value.length >= 8 ||
+    matches.value.length + (props.predicateCount ?? 0) >= 20
   )
     return
   matches.value = [
@@ -56,6 +58,13 @@ function add() {
     v-if="definitions.length || matches.length"
     class="grid min-w-0 gap-3"
   >
+    <p class="inbox-caption" role="status">
+      {{
+        t('inboxReview.conditionBudget', {
+          remaining: Math.max(0, 20 - matches.length - (predicateCount ?? 0)),
+        })
+      }}
+    </p>
     <legend class="mb-2 text-xs font-medium">
       {{ t('inboxFields.matches') }}
     </legend>
@@ -111,7 +120,12 @@ function add() {
         size="sm"
         type="button"
         variant="outline"
-        :disabled="value === null || value === '' || matches.length >= 8"
+        :disabled="
+          value === null ||
+          value === '' ||
+          matches.length >= 8 ||
+          matches.length + (predicateCount ?? 0) >= 20
+        "
         @click="add"
         >{{ t('inboxFields.addMatch') }}</Button
       >

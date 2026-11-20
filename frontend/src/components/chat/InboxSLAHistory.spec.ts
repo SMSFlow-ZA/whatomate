@@ -20,7 +20,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.clearAllMocks()
 })
-it('exports and paginates the applied snapshot while controls contain unsubmitted edits', async () => {
+it('blocks export for unapplied filters and paginates the displayed snapshot', async () => {
   mock.history.mockResolvedValue({
     data: {
       data: {
@@ -50,7 +50,8 @@ it('exports and paginates the applied snapshot while controls contain unsubmitte
     )!
   button('inboxQuality.exportCsv').click()
   await settle()
-  expect(mock.export.mock.calls[0]![0].from).toBe(original.from)
+  expect(button('inboxQuality.exportCsv').disabled).toBe(true)
+  expect(mock.export).not.toHaveBeenCalled()
   button('inboxQueue.next').click()
   await settle()
   expect(mock.history.mock.lastCall![0]).toMatchObject({
@@ -63,4 +64,9 @@ it('exports and paginates the applied snapshot while controls contain unsubmitte
   await settle()
   expect(mock.history.mock.lastCall![0].from).not.toBe(original.from)
   expect(mock.history.mock.lastCall![0].offset).toBe(0)
+  button('inboxQuality.exportCsv').click()
+  await settle()
+  expect(mock.export.mock.lastCall![0].from).toBe(
+    mock.history.mock.lastCall![0].from,
+  )
 })

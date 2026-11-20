@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
+import { cloneInboxPolicy } from '@/lib/inboxInteraction'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
@@ -94,8 +95,9 @@ async function save(remove = false) {
     else await inboxService.setSlaPolicy(id, policy.value)
     await load()
     if (selected.value === id) {
-      policy.value =
-        policies.value.find((item) => item.account_id === id) ?? defaults(id)
+      policy.value = cloneInboxPolicy(
+        policies.value.find((item) => item.account_id === id) ?? defaults(id),
+      )
       baseline.value = JSON.stringify(policy.value)
     }
     saveError.value = ''
@@ -236,11 +238,17 @@ onMounted(load)
               <option v-for="zone in timezones" :key="zone" :value="zone" />
             </datalist>
             <div class="mt-4 grid gap-3">
-              <div
+              <fieldset
                 v-for="(shift, i) in policy.shifts"
                 :key="i"
                 class="inbox-shift-row"
               >
+                <legend class="sr-only">
+                  {{ weekdays[shift.Day] }}
+                  {{ localTime(shift.StartMinute) }}–{{
+                    localTime(shift.EndMinute)
+                  }}
+                </legend>
                 <label class="inbox-label"
                   >{{ t('inboxSla.day')
                   }}<select v-model.number="shift.Day">
@@ -276,10 +284,17 @@ onMounted(load)
                   type="button"
                   variant="ghost"
                   size="sm"
+                  :aria-label="
+                    t('inboxReview.removeShift', {
+                      day: weekdays[shift.Day],
+                      from: localTime(shift.StartMinute),
+                      to: localTime(shift.EndMinute),
+                    })
+                  "
                   @click="policy.shifts.splice(i, 1)"
                   >{{ t('common.remove') }}</Button
                 >
-              </div>
+              </fieldset>
             </div>
             <Button
               class="mt-3"
