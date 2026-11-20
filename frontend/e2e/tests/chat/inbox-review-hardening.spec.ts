@@ -145,8 +145,8 @@ test('reviews scope, selection, snooze, keyboard boundaries and configuration re
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBeLessThanOrEqual(390)
-      const measured = await inboxContrast(page)
-      expect(measured.filter((item) => item.ratio < item.minimum)).toEqual([])
+      await expect.poll(() => page.locator('aside[aria-label="Main navigation"]').evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(0)
+      await expect.poll(async () => (await inboxContrast(page)).filter(item => item.ratio < item.minimum)).toEqual([])
       if (process.env.INBOX_CAPTURE)
         await page.screenshot({
           path: testInfo.outputPath(
