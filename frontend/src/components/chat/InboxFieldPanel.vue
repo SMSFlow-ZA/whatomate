@@ -10,6 +10,8 @@ import {
   type FieldDefinition,
 } from '@/services/inbox'
 import InboxFieldInput from './InboxFieldInput.vue'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 
 const props = defineProps<{
   contact: string
@@ -25,6 +27,12 @@ const subjectId = ref('')
 const busy = ref('')
 const ready = ref(false)
 const failed = ref(false)
+const errors = ref<Record<string, string>>({})
+const { discardOpen, confirmDiscard, cancelDiscard } = useInboxDraftGuard(() =>
+  Object.keys(values.value).some(
+    (id) => (values.value[id] ?? null) !== (stored.value[id] ?? null),
+  ),
+)
 let request = 0
 const visible = computed(() =>
   definitions.value.filter(
@@ -71,6 +79,7 @@ watch(() => [props.contact, props.account, props.caseId], load, {
 })
 function update(id: string, value: FieldValue) {
   values.value[id] = value
+  delete errors.value[id]
 }
 async function save(d: FieldDefinition) {
   const sequence = request
@@ -89,13 +98,25 @@ async function save(d: FieldDefinition) {
       toast.success(t('settings.saved'))
     }
   } catch {
-    if (sequence === request) toast.error(t('inboxFields.saveError'))
+    if (sequence === request) {
+      errors.value[d.id] = t('inboxFields.saveError')
+      toast.error(errors.value[d.id])
+    }
   } finally {
     busy.value = ''
   }
 }
+function cancelField(id: string) {
+  values.value[id] = stored.value[id] ?? null
+  delete errors.value[id]
+}
 </script>
 <template>
+  <UnsavedChangesDialog
+    :open="discardOpen"
+    @leave="confirmDiscard"
+    @stay="cancelDiscard"
+  />
   <section
     v-if="failed || (ready && visible.length)"
     class="inbox-ui inbox-fields-panel"
@@ -103,7 +124,12 @@ async function save(d: FieldDefinition) {
     <h3 class="mb-2 font-medium">
       {{ t(account ? 'inboxUX.caseFieldTitle' : 'inboxUX.contactFieldTitle') }}
     </h3>
-    <p v-if="failed" role="alert">{{ t('inboxFields.loadError') }}</p>
+    <div v-if="failed" role="alert">
+      {{ t('inboxFields.loadError') }}
+      <Button size="sm" variant="outline" @click="load">{{
+        t('common.retry')
+      }}</Button>
+    </div>
     <ul v-else class="grid gap-2">
       <li v-for="d in visible" :key="d.id" class="grid gap-1">
         <label
@@ -114,9 +140,17 @@ async function save(d: FieldDefinition) {
             · {{ t('inboxFields.archived') }}</small
           ></label
         >
+        <p :id="'field-help-' + d.id" class="inbox-caption">
+          {{ d.description }}
+          <span v-if="d.required_on_resolve && !d.archived_at">{{
+            t('inboxFields.required')
+          }}</span
+          ><span v-if="d.archived_at">{{ t('inboxFields.archived') }}</span>
+        </p>
         <form class="flex items-center gap-2" @submit.prevent="save(d)">
           <InboxFieldInput
             :definition="d"
+            :aria-describedby="'field-help-' + d.id"
             :model-value="values[d.id] ?? null"
             :disabled="!!d.archived_at || !canWrite || !!busy"
             @update:model-value="(value) => update(d.id, value)"
@@ -131,7 +165,19 @@ async function save(d: FieldDefinition) {
             "
             >{{ t('common.save') }}</Button
           >
+          <Button
+            v-if="canWrite && !d.archived_at"
+            type="button"
+            variant="ghost"
+            size="sm"
+            :disabled="!!busy"
+            @click="cancelField(d.id)"
+            >{{ t('common.cancel') }}</Button
+          >
         </form>
+        <p v-if="errors[d.id]" role="alert" class="text-sm text-destructive">
+          {{ errors[d.id] }}
+        </p>
       </li>
     </ul>
   </section>

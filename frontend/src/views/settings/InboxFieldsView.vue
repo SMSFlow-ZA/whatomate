@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -49,11 +51,44 @@ const newField = () => ({
   scope: 'case' as FieldDefinition['scope'],
   key: '',
   label: '',
+  description: '',
   kind: 'text' as FieldKind,
   required_on_resolve: false,
 })
 const form = ref(newField())
 const choices = ref('')
+const advancedKey = ref(false),
+  baseline = ref(''),
+  saveError = ref('')
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(
+    () =>
+      editing.value &&
+      JSON.stringify([form.value, choices.value]) !== baseline.value,
+  )
+watch(
+  () => form.value.label,
+  (label) => {
+    if (selected.value || advancedKey.value) return
+    let key = label
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+    if (!/^[a-z]/.test(key)) key = 'field_' + key
+    key = key.slice(0, 60) || 'field'
+    const base = key
+    let suffix = 2
+    while (
+      definitions.value.some(
+        (d) => d.scope === form.value.scope && d.key === key,
+      )
+    )
+      key = base + '_' + suffix++
+    form.value.key = key
+  },
+)
 const archive = ref<FieldDefinition | null>(null)
 const filtered = computed(() =>
   definitions.value.filter(
@@ -79,18 +114,22 @@ async function load() {
   }
 }
 function begin(d?: FieldDefinition) {
+  saveError.value = ''
+  advancedKey.value = false
   selected.value = d?.id ?? ''
   form.value = d
     ? {
         scope: d.scope,
         key: d.key,
         label: d.label,
+        description: d.description ?? '',
         kind: d.kind,
         required_on_resolve: d.required_on_resolve,
       }
     : newField()
   choices.value = d?.options?.join('\n') ?? ''
   editing.value = true
+  baseline.value = JSON.stringify([form.value, choices.value])
 }
 async function save() {
   if (busy.value) return
@@ -99,6 +138,7 @@ async function save() {
     if (selected.value)
       await inboxService.updateFieldDefinition(selected.value, {
         label: form.value.label,
+        description: form.value.description,
         required_on_resolve: form.value.required_on_resolve,
       })
     else
@@ -116,7 +156,8 @@ async function save() {
     await load()
     toast.success(t('settings.saved'))
   } catch {
-    toast.error(t('inboxFields.saveError'))
+    saveError.value = t('inboxFields.saveError')
+    toast.error(saveError.value)
   } finally {
     busy.value = false
   }
@@ -140,6 +181,11 @@ onMounted(load)
 </script>
 <template>
   <main class="inbox-ui inbox-page">
+    <UnsavedChangesDialog
+      :open="discardOpen"
+      @leave="confirmDiscard"
+      @stay="cancelDiscard"
+    />
     <PageHeader
       :title="t('inboxFields.title')"
       :description="t('inboxUX.fieldsDescription')"
@@ -236,9 +282,11 @@ onMounted(load)
                 <h2>
                   {{
                     t(
-                      query || scope || tab === 'archived'
+                      query || scope
                         ? 'inboxUX.noMatches'
-                        : 'inboxUX.noFields',
+                        : tab === 'archived'
+                          ? 'inboxQuality.noArchivedFields'
+                          : 'inboxUX.noFields',
                     )
                   }}
                 </h2>
@@ -266,7 +314,7 @@ onMounted(load)
               variant="ghost"
               size="sm"
               class="mb-4 -ml-2"
-              @click="editing = false"
+              @click="requestDiscard(() => (editing = false))"
               ><ArrowLeft class="mr-2 h-4 w-4" aria-hidden="true" />{{
                 t('inboxUX.backToFields')
               }}</Button
@@ -276,6 +324,13 @@ onMounted(load)
               class="inbox-form"
               @submit.prevent="save"
             >
+              <p
+                v-if="saveError"
+                role="alert"
+                class="inbox-notice text-destructive"
+              >
+                {{ saveError }}
+              </p>
               <section class="inbox-form-section">
                 <h2>
                   {{ t(selected ? 'inboxUX.editField' : 'inboxFields.add') }}
@@ -288,7 +343,7 @@ onMounted(load)
                       v-model.trim="form.label"
                       maxlength="100"
                       required /></label
-                  ><label class="inbox-label"
+                  ><label v-if="selected || advancedKey" class="inbox-label"
                     >{{ t('inboxFields.key')
                     }}<input
                       v-model.trim="form.key"
@@ -320,6 +375,25 @@ onMounted(load)
                     </select></label
                   >
                 </div>
+                <label v-if="!selected" class="inbox-check mt-4"
+                  ><input v-model="advancedKey" type="checkbox" />{{
+                    t('inboxQuality.advancedKey')
+                  }}
+                  <span v-if="!advancedKey" class="inbox-caption">{{
+                    form.key
+                  }}</span></label
+                >
+                <label class="inbox-label mt-4"
+                  >{{ t('inboxQuality.fieldHelpText')
+                  }}<textarea
+                    v-model="form.description"
+                    rows="2"
+                    maxlength="1000"
+                  />
+                </label>
+                <p class="inbox-caption mt-2">
+                  {{ t('inboxQuality.fieldValidation.' + form.kind) }}
+                </p>
                 <p v-if="selected" class="inbox-caption mt-3">
                   {{ t('inboxUX.fieldTypeLocked') }}
                 </p>
@@ -362,7 +436,7 @@ onMounted(load)
                   type="button"
                   variant="outline"
                   :disabled="busy"
-                  @click="editing = false"
+                  @click="requestDiscard(() => (editing = false))"
                   >{{ t('common.cancel') }}</Button
                 >
               </footer>
