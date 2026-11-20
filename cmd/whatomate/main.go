@@ -280,13 +280,7 @@ func runServer(args []string) {
 	setupRoutes(g, app, lo, cfg.Server.BasePath, rdb, cfg)
 
 	// Create server with CORS wrapper
-	server := &fasthttp.Server{
-		Handler:            corsWrapper(g.Handler(), allowedOrigins),
-		ReadTimeout:        time.Duration(cfg.Server.ReadTimeout) * time.Second,
-		WriteTimeout:       time.Duration(cfg.Server.WriteTimeout) * time.Second,
-		MaxRequestBodySize: 15 * 1024 * 1024,
-		Name:               "Whatomate",
-	}
+	server := newHTTPServer(corsWrapper(g.Handler(), allowedOrigins), cfg.Server)
 
 	// Start server in goroutine
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
