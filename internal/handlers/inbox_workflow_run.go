@@ -49,29 +49,24 @@ func workflowDigest(value any) string {
 }
 
 func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, user uuid.UUID, now time.Time, triggeringText ...string) (inboxWorkflowPreview, error) {
-	out := inboxWorkflowPreview{Matches: workflowMatchesCase(w.Conditions, c, contact)}
-	if out.Matches && (len(w.Conditions.Fields) > 0 || len(w.Conditions.Predicates) > 0) {
-		var matches int64
-		q, err := queryInboxFieldMatchers(tx.Model(&models.InboxCase{}).
-			Joins("JOIN contacts c ON c.id=inbox_cases.contact_id AND c.organization_id=inbox_cases.organization_id AND c.deleted_at IS NULL").
-			Where("inbox_cases.id = ? AND inbox_cases.organization_id = ?", c.ID, c.OrganizationID),
-			c.OrganizationID, w.Conditions.Fields, a.HasPermission(user, models.ResourceContacts, models.ActionRead, c.OrganizationID))
-		if err != nil {
-			return out, err
-		}
-		q, err = applyInboxPredicates(tx, q, c.OrganizationID, w.Conditions, a.HasPermission(user, models.ResourceContacts, models.ActionRead, c.OrganizationID))
-		if err != nil {
-			return out, err
-		}
-		if err := q.Count(&matches).Error; err != nil {
-			return out, err
-		}
-		out.Matches = matches == 1
-	}
-	if w.Conditions.MessageContains != "" {
-		out.Matches = out.Matches && len(triggeringText) == 1 && strings.Contains(strings.ToLower(triggeringText[0]), strings.ToLower(w.Conditions.MessageContains))
-	}
+	out := inboxWorkflowPreview{Matches: true}
 	var err error
+	out.ConditionOutcomes, err = a.inboxConditionOutcomes(tx, w, c, contact, user, triggeringText)
+	if err != nil {
+		return out, err
+	}
+	hasAny, anyMatched := false, false
+	for _, condition := range out.ConditionOutcomes {
+		if condition.Group == "any" {
+			hasAny = true
+			anyMatched = anyMatched || condition.Matched
+		} else {
+			out.Matches = out.Matches && condition.Matched
+		}
+	}
+	if hasAny {
+		out.Matches = out.Matches && anyMatched
+	}
 	out.ActionOutcomes, out.ActionsEligible, err = a.preflightInboxActions(tx, w, c, user, now)
 	if err != nil {
 		return out, err
@@ -92,10 +87,7 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 			out.Digest = inboxReplyFingerprint(c, account, contact, reply)
 		}
 	}
-	out.ConditionOutcomes, err = a.inboxConditionOutcomes(tx, w, c, contact, user, triggeringText)
-	if err != nil {
-		return out, err
-	}
+
 	stateDigest, err := inboxSendCaseDigest(tx, c)
 	if err != nil {
 		return out, err

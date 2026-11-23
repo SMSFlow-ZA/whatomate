@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"time"
@@ -224,13 +225,14 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
+	currentCaseID := c.ID
 	var activities []struct {
 		models.InboxCaseActivity
 		ActorName    string `json:"actor_name"`
 		AssigneeName string `json:"assignee_name"`
 		TeamName     string `json:"team_name"`
 	}
-	scope := a.scopeInboxCases(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).
+	scope := a.scopeInboxCaseHistory(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).
 		Select("inbox_cases.id")
 	activityQuery := a.DB.Model(&models.InboxCaseActivity{}).Where("inbox_case_activities.organization_id = ? AND inbox_case_activities.account_id = ? AND case_id IN (?)", t.org, t.account, scope)
 	if raw := string(r.RequestCtx.QueryArgs().Peek("case_id")); raw != "" {
@@ -239,17 +241,25 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 			return a.inboxError(r, errInboxTransition)
 		}
 		var selected models.InboxCase
-		if e := a.scopeInboxCases(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).First(&selected, "inbox_cases.id=?", id).Error; e != nil {
+		if e := a.scopeInboxCaseHistory(t.query(a.DB.Model(&models.InboxCase{})), user, t.org).First(&selected, "inbox_cases.id=?", id).Error; e != nil {
 			return a.inboxError(r, e)
 		}
+		c = selected
 		activityQuery = activityQuery.Where("case_id=?", id)
+	}
+	if cursor := string(r.RequestCtx.QueryArgs().Peek("activity_before")); cursor != "" {
+		at, id, err := parseInboxActivityCursor(cursor)
+		if err != nil {
+			return a.inboxError(r, errInboxTransition)
+		}
+		activityQuery = activityQuery.Where("(inbox_case_activities.created_at,inbox_case_activities.id) < (?,?)", at, id)
 	}
 	if err := activityQuery.
 		Joins("LEFT JOIN users actor ON actor.id=inbox_case_activities.actor_id AND actor.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=actor.id AND uo.organization_id=inbox_case_activities.organization_id)").
 		Joins("LEFT JOIN users owner ON owner.id=inbox_case_activities.assignee_id AND owner.deleted_at IS NULL AND EXISTS(SELECT 1 FROM user_organizations uo WHERE uo.deleted_at IS NULL AND uo.user_id=owner.id AND uo.organization_id=inbox_case_activities.organization_id)").
 		Joins("LEFT JOIN teams team ON team.id=inbox_case_activities.team_id AND team.organization_id=inbox_case_activities.organization_id AND team.deleted_at IS NULL").
 		Select("inbox_case_activities.*, COALESCE(actor.full_name,'') AS actor_name,COALESCE(owner.full_name,'') AS assignee_name,COALESCE(team.name,'') AS team_name").
-		Where("kind <> ?", "incoming_message").Order("inbox_case_activities.created_at DESC, inbox_case_activities.id DESC").Limit(50).Scan(&activities).Error; err != nil {
+		Where("kind <> ?", "incoming_message").Order("inbox_case_activities.created_at DESC, inbox_case_activities.id DESC").Limit(51).Scan(&activities).Error; err != nil {
 		return a.inboxError(r, err)
 	}
 	if c.AssigneeID != nil && *c.AssigneeID != user && !a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) {
@@ -259,7 +269,36 @@ func (a *App) GetInboxConversation(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"case": inboxSLACase{InboxCase: c, SLA: sla[c.ID]}, "activity": activities})
+	more := len(activities) > 50
+	if more {
+		activities = activities[:50]
+	}
+	cursor := ""
+	if more {
+		last := activities[len(activities)-1]
+		cursor = base64.RawURLEncoding.EncodeToString([]byte(last.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID.String()))
+	}
+	return r.SendEnvelope(map[string]any{"case": inboxSLACase{InboxCase: c, SLA: sla[c.ID]}, "activity": activities, "current_case_id": currentCaseID, "read_only": c.ID != currentCaseID, "activity_has_more": more, "activity_next_cursor": cursor})
+}
+
+func parseInboxActivityCursor(raw string) (time.Time, uuid.UUID, error) {
+	if len(raw) > 256 {
+		return time.Time{}, uuid.Nil, errInboxTransition
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return time.Time{}, uuid.Nil, errInboxTransition
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 2 {
+		return time.Time{}, uuid.Nil, errInboxTransition
+	}
+	at, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	id, err := uuid.Parse(parts[1])
+	return at, id, err
 }
 
 type inboxCaseUpdate struct {

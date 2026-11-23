@@ -33,7 +33,7 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 	default:
 		return false
 	}
-	if w.Conditions.Queue != "" || !validateInboxFilter(w.Conditions) {
+	if w.Conditions.Search != "" || w.Conditions.Queue != "" || !validateInboxFilter(w.Conditions) {
 		return false
 	}
 	sends := 0

@@ -139,6 +139,7 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 type inboxFieldSubject struct {
 	org, user, account, contact, id uuid.UUID
 	scope                           string
+	caseID                          *uuid.UUID
 }
 
 func (a *App) fieldSubject(r *fastglue.Request, action string, isCase bool) (inboxFieldSubject, error) {
@@ -155,6 +156,18 @@ func (a *App) fieldSubject(r *fastglue.Request, action string, isCase bool) (inb
 	if isCase {
 		s.scope = "case"
 		s.account, err = parsePathUUID(r, "account_id", "WhatsApp account")
+		if err == nil && action == models.ActionRead {
+			if raw := string(r.RequestCtx.QueryArgs().Peek("case_id")); raw != "" {
+				var id uuid.UUID
+				id, err = uuid.Parse(raw)
+				if err != nil {
+					_ = r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid case identifier", nil, "")
+				}
+				if err == nil {
+					s.caseID = &id
+				}
+			}
+		}
 	} else {
 		_, _, err = a.requireAuth(r, models.ResourceContacts, action)
 	}
@@ -170,6 +183,14 @@ func (a *App) accessInboxFieldSubject(db *gorm.DB, subject inboxFieldSubject) (u
 		return contact.ID, nil
 	}
 	thread := inboxThread{subject.org, subject.account, subject.contact}
+	if subject.caseID != nil {
+		if _, err := a.inboxThreadAccess(db, thread, subject.user); err != nil {
+			return uuid.Nil, err
+		}
+		var selected models.InboxCase
+		err := a.scopeInboxCaseHistory(thread.query(db.Model(&models.InboxCase{})), subject.user, subject.org).First(&selected, "inbox_cases.id=?", *subject.caseID).Error
+		return selected.ID, err
+	}
 	c, err := thread.latest(db)
 	if err != nil {
 		return uuid.Nil, err
@@ -284,15 +305,12 @@ func checkInboxRequiredFields(tx *gorm.DB, c models.InboxCase) error {
 }
 
 func queryInboxFieldMatchers(q *gorm.DB, org uuid.UUID, matches []models.InboxFieldMatch, allowContact bool) (*gorm.DB, error) {
+	predicates := make([]models.InboxPredicate, 0, len(matches))
 	for _, match := range matches {
 		id := match.DefinitionID
-		query, args, err := inboxPredicateSQL(q, org, models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: match.Operator, Value: match.Value}, allowContact)
-		if err != nil {
-			return nil, err
-		}
-		q = q.Where(query, args...)
+		predicates = append(predicates, models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: match.Operator, Value: match.Value})
 	}
-	return q, nil
+	return applyInboxPredicates(q, q, org, models.InboxQueueFilter{Predicates: predicates}, allowContact)
 }
 
 func validateInboxFieldMatchers(db *gorm.DB, org uuid.UUID, matches []models.InboxFieldMatch, allowContact bool) error {

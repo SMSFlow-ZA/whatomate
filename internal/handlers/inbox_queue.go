@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -38,6 +39,9 @@ func validateInboxFilter(f models.InboxQueueFilter) bool {
 		return false
 	}
 	if f.Priority != "" && !(inboxCaseUpdate{Priority: f.Priority}).valid(time.Time{}) {
+		return false
+	}
+	if utf8.RuneCountInString(f.Search) > 120 {
 		return false
 	}
 	if len(f.Fields)+len(f.Predicates) > 20 || len(f.Tags) > 20 || (f.Match != "" && f.Match != "all" && f.Match != "any") || len(f.MessageContains) > 500 {
@@ -534,6 +538,15 @@ func (a *App) inboxQueueQuery(org, user uuid.UUID, f models.InboxQueueFilter) (*
 		"AND newer.account_id = inbox_cases.account_id AND newer.contact_id = inbox_cases.contact_id AND newer.deleted_at IS NULL " +
 		"AND (newer.opened_at, newer.id) > (inbox_cases.opened_at, inbox_cases.id))")
 	q = applyInboxQueueKind(q, f.Queue, user)
+	if search := strings.TrimSpace(f.Search); search != "" {
+		// Match only names the viewer may see. Numeric profile names are masked
+		// by the contact service and must not become a search/count oracle.
+		name := "c.profile_name"
+		if a.ShouldMaskPhoneNumbers(org) {
+			name = "CASE WHEN length(regexp_replace(COALESCE(c.profile_name,''),'[^0-9]','','g')) >= 7 AND length(regexp_replace(COALESCE(c.profile_name,''),'[^0-9]','','g'))::numeric / NULLIF(octet_length(c.profile_name),0) > 0.7 THEN '' ELSE c.profile_name END"
+		}
+		q = q.Where("(position(lower(?) in lower(COALESCE("+name+",'')))>0 OR position(lower(?) in inbox_cases.id::text)>0)", search, search)
+	}
 	if f.AccountID != nil {
 		q = q.Where("inbox_cases.account_id = ?", f.AccountID)
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
@@ -56,7 +57,8 @@ func (a *App) InboxResolutionRequirements(r *fastglue.Request) error {
 	if !enabled {
 		return a.inboxError(r, errInboxDisabled)
 	}
-	if _, err := a.inboxThreadAccess(a.DB, t, user); err != nil {
+	contact, err := a.inboxThreadAccess(a.DB, t, user)
+	if err != nil {
 		return a.inboxError(r, err)
 	}
 	c, err := t.latest(a.DB)
@@ -70,7 +72,29 @@ func (a *App) InboxResolutionRequirements(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"case_id": c.ID, "version": c.Version, "missing_fields": missing})
+	var account models.WhatsAppAccount
+	if err := a.DB.Select("name").First(&account, "id=? AND organization_id=?", t.account, t.org).Error; err != nil {
+		return a.inboxError(r, err)
+	}
+	name := contact.ProfileName
+	if a.ShouldMaskPhoneNumbers(t.org) {
+		name = utils.MaskIfPhoneNumber(name)
+	}
+	return r.SendEnvelope(map[string]any{"case_id": c.ID, "version": c.Version, "status": c.Status, "missing_fields": missing, "contact_name": name, "account_name": account.Name})
+}
+
+type inboxResolutionFieldError struct {
+	DefinitionID uuid.UUID `json:"definition_id"`
+	Label        string    `json:"label"`
+	Code         string    `json:"code"`
+}
+type inboxResolutionProblem struct {
+	Code   string
+	Fields []inboxResolutionFieldError
+}
+
+func (e inboxResolutionProblem) Error() string {
+	return "Review the highlighted details before resolving"
 }
 
 // Values and the resolution transition commit together. A stale case, changed
@@ -127,13 +151,16 @@ func (a *App) CompleteAndResolveInboxCase(r *fastglue.Request) error {
 			seen[item.DefinitionID] = true
 			var d models.InboxFieldDefinition
 			if e := tx.First(&d, "organization_id=? AND id=? AND archived_at IS NULL", t.org, item.DefinitionID).Error; e != nil {
+				if errors.Is(e, gorm.ErrRecordNotFound) {
+					return inboxResolutionProblem{Code: "requirements_changed"}
+				}
 				return e
 			}
 			if d.Scope == "contact" && (!a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org) || !a.HasPermission(user, models.ResourceContacts, models.ActionWrite, t.org)) {
-				return errInboxTransition
+				return inboxResolutionProblem{Code: "permission_required", Fields: []inboxResolutionFieldError{{DefinitionID: d.ID, Label: d.Label, Code: "contact_edit_required"}}}
 			}
 			if d.ValidateValue(item.Value) != nil {
-				return errInboxTransition
+				return inboxResolutionProblem{Code: "invalid_values", Fields: []inboxResolutionFieldError{{DefinitionID: d.ID, Label: d.Label, Code: "invalid_value"}}}
 			}
 			subject := c.ID
 			if d.Scope == "contact" {
@@ -150,12 +177,23 @@ func (a *App) CompleteAndResolveInboxCase(r *fastglue.Request) error {
 		}
 		return applyInboxTransition(tx, &c, inboxCaseUpdate{Status: models.InboxCaseResolved}, &user, time.Now().UTC(), "updated")
 	})
+	var problem inboxResolutionProblem
+	if errors.As(err, &problem) {
+		status := fasthttp.StatusBadRequest
+		if problem.Code == "permission_required" {
+			status = fasthttp.StatusForbidden
+		}
+		if problem.Code == "requirements_changed" {
+			status = fasthttp.StatusConflict
+		}
+		return r.SendErrorEnvelope(status, problem.Error(), map[string]any{"code": problem.Code, "field_errors": problem.Fields}, "inbox_resolution")
+	}
 	if errors.Is(err, errRequiredInboxFields) {
 		missing, e := a.missingInboxFields(a.DB, c, user)
 		if e != nil {
 			return a.inboxError(r, e)
 		}
-		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, err.Error(), map[string]any{"missing_fields": missing}, "")
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, err.Error(), map[string]any{"missing_fields": missing, "code": "required_fields"}, "inbox_resolution")
 	}
 	if err != nil {
 		return a.inboxError(r, err)

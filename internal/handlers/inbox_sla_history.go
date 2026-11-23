@@ -58,6 +58,7 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 	}
 	cases := a.scopeInboxCaseHistory(a.DB.Model(&models.InboxCase{}), user, org).Select("inbox_cases.id")
 	q := a.DB.Model(&models.InboxSLAObligation{}).Where("inbox_sla_obligations.organization_id = ? AND case_id IN (?) AND completed_at >= ? AND completed_at < ?", org, cases, start, end)
+	facets := q.Session(&gorm.Session{}).Where("1=1")
 	for _, key := range []string{"account_id", "team_id", "agent_id", "policy_id"} {
 		if raw := string(args.Peek(key)); raw != "" {
 			id, e := uuid.Parse(raw)
@@ -65,6 +66,9 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 				return a.inboxError(r, errInboxTransition)
 			}
 			q = q.Where("inbox_sla_obligations."+key+" = ?", id)
+			if key == "account_id" || key == "team_id" {
+				facets = facets.Where("inbox_sla_obligations."+key+" = ?", id)
+			}
 		}
 	}
 	if kind := string(args.Peek("kind")); kind != "" {
@@ -72,6 +76,7 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 			return a.inboxError(r, errInboxTransition)
 		}
 		q = q.Where("inbox_sla_obligations.kind = ?", kind)
+		facets = facets.Where("inbox_sla_obligations.kind = ?", kind)
 	}
 	var summary struct {
 		Total      int64 `json:"total"`
@@ -147,7 +152,7 @@ func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
 		AgentID  *uuid.UUID
 		PolicyID uuid.UUID
 	}
-	if err := q.Session(&gorm.Session{}).Select("DISTINCT agent_id,policy_id").Scan(&combinations).Error; err != nil {
+	if err := facets.Session(&gorm.Session{}).Select("DISTINCT agent_id,policy_id").Scan(&combinations).Error; err != nil {
 		return a.inboxError(r, err)
 	}
 	agentIDs := []uuid.UUID{}

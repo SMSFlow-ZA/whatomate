@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +13,47 @@ import (
 
 // User predicates never contain SQL identifiers or nested expressions. Mandatory
 // organization/account/team authorization remains outside this condition group.
+func inboxPredicateDefinitions(db *gorm.DB, org uuid.UUID, predicates []models.InboxPredicate, allowContact bool) (map[uuid.UUID]models.InboxFieldDefinition, error) {
+	ids := []uuid.UUID{}
+	seen := map[uuid.UUID]bool{}
+	for _, p := range predicates {
+		if p.Field != "custom_field" {
+			continue
+		}
+		if p.DefinitionID == nil {
+			return nil, errInboxTransition
+		}
+		if !seen[*p.DefinitionID] {
+			ids = append(ids, *p.DefinitionID)
+			seen[*p.DefinitionID] = true
+		}
+	}
+	result := map[uuid.UUID]models.InboxFieldDefinition{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	var definitions []models.InboxFieldDefinition
+	if err := db.Session(&gorm.Session{NewDB: true}).Where("organization_id=? AND id IN ? AND (scope='case' OR ?)", org, ids, allowContact).Find(&definitions).Error; err != nil {
+		return nil, err
+	}
+	if len(definitions) != len(ids) {
+		return nil, errInboxTransition
+	}
+	for _, d := range definitions {
+		result[d.ID] = d
+	}
+	return result, nil
+}
+
 func inboxPredicateSQL(db *gorm.DB, org uuid.UUID, p models.InboxPredicate, allowContact bool) (string, []any, error) {
+	definitions, err := inboxPredicateDefinitions(db, org, []models.InboxPredicate{p}, allowContact)
+	if err != nil {
+		return "", nil, err
+	}
+	return compiledInboxPredicateSQL(p, definitions)
+}
+
+func compiledInboxPredicateSQL(p models.InboxPredicate, definitions map[uuid.UUID]models.InboxFieldDefinition) (string, []any, error) {
 	op := p.Operator
 	if op == "" {
 		op = "eq"
@@ -23,12 +62,9 @@ func inboxPredicateSQL(db *gorm.DB, org uuid.UUID, p models.InboxPredicate, allo
 		if p.DefinitionID == nil {
 			return "", nil, errInboxTransition
 		}
-		var d models.InboxFieldDefinition
-		if err := db.Session(&gorm.Session{NewDB: true}).First(&d, "id = ? AND organization_id = ? AND (scope = 'case' OR ?)", p.DefinitionID, org, allowContact).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return "", nil, errInboxTransition
-			}
-			return "", nil, err
+		d, ok := definitions[*p.DefinitionID]
+		if !ok {
+			return "", nil, errInboxTransition
 		}
 		base := "EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id = inbox_cases.organization_id AND v.definition_id = ? AND v.subject_id = "
 		subject := "inbox_cases.id"
@@ -120,10 +156,14 @@ func applyInboxPredicates(db, q *gorm.DB, org uuid.UUID, f models.InboxQueueFilt
 	if len(f.Predicates) == 0 {
 		return q, nil
 	}
+	definitions, err := inboxPredicateDefinitions(db, org, f.Predicates, allowContact)
+	if err != nil {
+		return nil, err
+	}
 	parts := make([]string, 0, len(f.Predicates))
 	var args []any
 	for _, p := range f.Predicates {
-		sql, values, err := inboxPredicateSQL(db, org, p, allowContact)
+		sql, values, err := compiledInboxPredicateSQL(p, definitions)
 		if err != nil {
 			return nil, err
 		}

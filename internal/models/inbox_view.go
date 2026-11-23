@@ -13,6 +13,7 @@ type InboxFieldMatch struct {
 }
 
 type InboxQueueFilter struct {
+	Search          string            `json:"search,omitempty"`
 	Match           string            `json:"match,omitempty"`
 	Predicates      []InboxPredicate  `json:"predicates,omitempty"`
 	MessageContains string            `json:"message_contains,omitempty"`

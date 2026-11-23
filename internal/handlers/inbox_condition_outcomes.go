@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
-	"strings"
 )
 
 func (a *App) inboxConditionOutcomes(db *gorm.DB, w models.InboxWorkflow, c models.InboxCase, contact models.Contact, user uuid.UUID, triggerText []string) ([]models.InboxConditionOutcome, error) {
@@ -49,24 +51,33 @@ func (a *App) inboxConditionOutcomes(db *gorm.DB, w models.InboxWorkflow, c mode
 		predicates = append(predicates, models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: field.Operator, Value: field.Value})
 		groups = append(groups, "all")
 	}
+	definitions, err := inboxPredicateDefinitions(db, c.OrganizationID, predicates, allowContact)
+	if err != nil {
+		return nil, err
+	}
+	selections := []string{}
+	args := []any{}
 	for i, p := range predicates {
-		sql, args, err := inboxPredicateSQL(db, c.OrganizationID, p, allowContact)
+		expression, values, err := compiledInboxPredicateSQL(p, definitions)
 		if err != nil {
 			return nil, err
 		}
-		var count int64
-		if err := db.Model(&models.InboxCase{}).Joins("JOIN contacts c ON c.id=inbox_cases.contact_id AND c.organization_id=inbox_cases.organization_id AND c.deleted_at IS NULL").Where("inbox_cases.organization_id=? AND inbox_cases.id=?", c.OrganizationID, c.ID).Where(sql, args...).Count(&count).Error; err != nil {
+		selections = append(selections, "("+expression+") AS "+fmt.Sprintf("p%d", i))
+		args = append(args, values...)
+	}
+	flags := map[string]interface{}{}
+	if len(selections) > 0 {
+		if err := db.Model(&models.InboxCase{}).Joins("JOIN contacts c ON c.id=inbox_cases.contact_id AND c.organization_id=inbox_cases.organization_id AND c.deleted_at IS NULL").Where("inbox_cases.organization_id=? AND inbox_cases.id=?", c.OrganizationID, c.ID).Select(strings.Join(selections, ","), args...).Scan(&flags).Error; err != nil {
 			return nil, err
 		}
+	}
+	for i, p := range predicates {
 		label := ""
 		if p.Field == "custom_field" {
-			var definition models.InboxFieldDefinition
-			if err := db.First(&definition, "id=? AND organization_id=?", p.DefinitionID, c.OrganizationID).Error; err != nil {
-				return nil, err
-			}
-			label = definition.Label
+			label = definitions[*p.DefinitionID].Label
 		}
-		add(p.Field, label, groups[i], count == 1)
+		matched, _ := flags[fmt.Sprintf("p%d", i)].(bool)
+		add(p.Field, label, groups[i], matched)
 	}
 	if f.MessageContains != "" {
 		add("message_contains", "", "all", len(triggerText) == 1 && strings.Contains(strings.ToLower(triggerText[0]), strings.ToLower(f.MessageContains)))
