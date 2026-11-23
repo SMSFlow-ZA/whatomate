@@ -316,11 +316,12 @@ test('reviews exact historical evidence, keyboard previews, resolution recovery 
     ).toBe(0)
     for (const theme of ['light', 'dark']) {
       await page.setViewportSize({ width: 390, height: 844 })
+      await page.evaluate(
+        (theme) => localStorage.setItem('color-mode', theme),
+        theme,
+      )
       await page.goto(url(old.id))
-      await page.evaluate((theme) => {
-        document.documentElement.classList.toggle('light', theme === 'light')
-        document.documentElement.classList.toggle('dark', theme === 'dark')
-      }, theme)
+      await expect(page.locator('html')).toHaveClass(new RegExp(theme))
       await expect(
         page.getByText('Viewing historical case ' + old.id.slice(0, 8), {
           exact: true,

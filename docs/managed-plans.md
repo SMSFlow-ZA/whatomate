@@ -150,3 +150,11 @@ Keep a database query-count regression for twenty repeated and distinct custom
 field conditions: request-local batch evaluation must remain equivalent to the
 bounded all/any predicate semantics without cross-organization cached data. Run
 all `inbox-*.spec.ts` browser workflows and inspect both themes and mobile widths.
+
+### Review release usage
+
+Run Go/PostgreSQL race tests, frontend checks and synthetic browser acceptance
+locally while iterating on managed review branches. The inbox follow-up branch
+uses manual managed-image dispatch for the final accepted source. A dispatched
+release still runs its full verification and scan gates before publication.
+Superseded managed image runs on the same branch are cancelled automatically.

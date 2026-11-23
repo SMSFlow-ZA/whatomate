@@ -2,7 +2,7 @@ name: Managed image
 
 on:
   push:
-    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027, codex/release-security-20261028, codex/managed-inbox-datanamix, codex/inbox-product-quality, codex/inbox-review-followup]
+    branches: [codex/plan-limits, codex/instance-branding, codex/production-hardening, codex/channels-smsflow-20261019, codex/webhook-signing-20261027, codex/release-security-20261028, codex/managed-inbox-datanamix, codex/inbox-product-quality]
   workflow_dispatch:
     inputs:
       musl_runtime:
@@ -13,6 +13,12 @@ on:
         description: Rebuild pinned FFmpeg/Piper native runtime from the full recipe
         type: boolean
         default: false
+
+# Managed review branches run local verification during development. Dispatch
+# one release for the final source instead of rebuilding on every review push.
+concurrency:
+  group: managed-image-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
