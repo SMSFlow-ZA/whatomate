@@ -24,29 +24,6 @@ type inboxReplyPreview struct {
 	Language    string `json:"language,omitempty"`
 }
 
-func workflowMatchesCase(conditions models.InboxQueueFilter, c models.InboxCase, contact models.Contact) bool {
-	if (conditions.AccountID != nil && *conditions.AccountID != c.AccountID) ||
-		(conditions.TeamID != nil && (c.TeamID == nil || *conditions.TeamID != *c.TeamID)) ||
-		(conditions.AssigneeID != nil && (c.AssigneeID == nil || *conditions.AssigneeID != *c.AssigneeID)) ||
-		(conditions.Status != "" && conditions.Status != c.Status) ||
-		(conditions.Priority != "" && conditions.Priority != c.Priority) {
-		return false
-	}
-	for _, expected := range conditions.Tags {
-		matched := false
-		for _, actual := range contact.Tags {
-			if actual == expected {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
-	}
-	return true
-}
-
 func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
 	return previewInboxReplyWithDB(a.DB, c, account, contact, action, now)
 }

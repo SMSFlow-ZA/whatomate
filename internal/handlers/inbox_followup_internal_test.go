@@ -219,8 +219,8 @@ func TestInboxFollowupPredicateBatchCostAndSemantics(t *testing.T) {
 	callback := func(*gorm.DB) { queries.Add(1) }
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("followup_query_count", callback))
 	require.NoError(t, db.Callback().Row().Before("gorm:row").Register("followup_row_count", callback))
-	defer db.Callback().Query().Remove("followup_query_count")
-	defer db.Callback().Row().Remove("followup_row_count")
+	defer func() { require.NoError(t, db.Callback().Query().Remove("followup_query_count")) }()
+	defer func() { require.NoError(t, db.Callback().Row().Remove("followup_row_count")) }()
 	w := models.InboxWorkflow{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, Kind: "macro", Actions: []models.InboxAction{{Type: "note", Value: "Synthetic preview"}}}
 	baseline, err := a.evaluateInboxWorkflow(db, w, c, *account, *contact, user.ID, time.Now())
 	require.NoError(t, err)
