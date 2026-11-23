@@ -301,3 +301,22 @@ Resolving opens **Complete required details** when values are needed. The form i
 - Capacity preset drafts have discard protection. Removing a preset requires confirmation and does not change previously applied agent limits.
 - Single-select field definitions accept 1–100 unique choices, each at most 100 characters. Duplicate and overlong lines receive specific errors. Choices remain immutable after creation.
 - A workflow's condition and action summary explains its intended effect before saving. This summary does not replace dry-run preflight or dispatch-time checks. New rules remain disabled, and reply review is mandatory for sending macros.
+
+
+## Review earlier cases and find enquiries
+
+Use **Find an enquiry** in Queues to search displayable contact names or a case ID. Search combines with the selected queue, saved view and filters; counts use that same scope. Hidden phone content and message bodies are not searched.
+
+**Case details** opens the existing conversation panel at the case information. Follow a case link from activity or a completed-target report to review that specific enquiry. Earlier cases are explicitly read-only and retain their recorded fields and policy, including archived field values. Use **Return to current case** before sending, assigning or changing the active enquiry. The message thread remains the contact's complete conversation.
+
+Use **Load older activity** to continue past the first page. Newly refreshed activity is merged without discarding pages already loaded. If a burst of newer activity leaves an unseen interval, a refresh notice offers a complete reload rather than implying the ledger is complete.
+
+The conversation header shows the earliest actionable response target and its time zone. Completed and paused targets remain in the expanded details instead of appearing as the next action.
+
+## Preview and complete work
+
+Workflow dry runs let you search and page through all authorised current cases. Every option identifies its contact, account and short case ID. Preview performs no actions and sends no message. Macro selection retains keyboard focus while its preview loads, and announces readiness without applying anything.
+
+When no required values are missing, Resolve shows a short confirmation identifying the enquiry. When details are missing, the completion form remains available. Invalid values identify the affected field; changed versions or permissions ask for a refresh. Network failures preserve the entered values and offer a safe retry. Confirmation and field completion still use one atomic, version-checked resolution operation.
+
+Completed-target agent and policy choices remain available when another selection is applied, so you can switch directly without resetting the report. Filter choices retain the authorised date, account, team and target scope.

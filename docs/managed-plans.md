@@ -130,3 +130,23 @@ measurement without interpreting local timings as a production capacity promise.
 Inspect advanced-filter summaries, page selection, agent search, calendar-aware
 snooze suggestions and export with unapplied filters at desktop/mobile widths in
 both themes. Keep synthetic messaging dispatch held through restore and rollback.
+
+
+### Historical case and preview regression gate
+
+Verify exact-case metadata, policy and field reads for historical links, including
+archived recorded values. Historical screens must be explicitly read-only and
+must not silently operate on the latest case. Current writes retain case-version
+and subject checks. Exercise cursor paging beyond 50 activity entries with tied
+timestamps and concurrent new activity, and retain older loaded pages on refresh.
+
+Test stable historical-report facets, scoped literal queue search, masking against
+phone-content inference, dry-run selection beyond page one, and keyboard focus
+through macro preview loading. Cover empty versus required-details resolution,
+structured field errors, stale versions, revoked permissions and uncertain network
+results without partial writes or draft loss.
+
+Keep a database query-count regression for twenty repeated and distinct custom
+field conditions: request-local batch evaluation must remain equivalent to the
+bounded all/any predicate semantics without cross-organization cached data. Run
+all `inbox-*.spec.ts` browser workflows and inspect both themes and mobile widths.
