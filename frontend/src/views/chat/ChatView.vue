@@ -158,6 +158,13 @@ const isBusinessCallingEnabled = computed(() =>
 
 const organizationsStore = useOrganizationsStore()
 const inboxEnabled = ref(false)
+const inboxReadOnly=ref(false)
+const caseDetails=ref<InstanceType<typeof InboxCaseActions>>()
+function closeInfoPanel(){if(caseDetails.value)caseDetails.value.requestLeave(()=>{isInfoPanelOpen.value=false});else isInfoPanelOpen.value=false}
+function toggleInfoPanel(){if(isInfoPanelOpen.value)closeInfoPanel();else isInfoPanelOpen.value=true}
+function receiveInboxContext(value:{readOnly:boolean}){inboxReadOnly.value=value.readOnly}
+watch(inboxEnabled,enabled=>{inboxReadOnly.value=enabled&&typeof route.query.case_id==='string'})
+watch(()=>[route.query.case_id,route.params.contactId,route.query.inbox_account_id],()=>{inboxReadOnly.value=inboxEnabled.value&&typeof route.query.case_id==='string';isAssignDialogOpen.value=false;templateDialogOpen.value=false},{immediate:false})
 const inboxSettingsFailed = ref(false)
 const showInboxQueues = ref(true)
 const queueAccountId = computed(() => typeof route.query.inbox_account_id === 'string' ? route.query.inbox_account_id : undefined)
@@ -463,6 +470,7 @@ function clearTagFilter() {
 }
 
 async function executeCustomAction(action: CustomAction) {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact || executingActionId.value) return
 
   executingActionId.value = action.id
@@ -830,6 +838,7 @@ function handleContactClick(contact: Contact) {
 }
 
 async function sendMessage() {
+  if (inboxReadOnly.value) return
   if (!messageInput.value.trim() || !contactsStore.currentContact) return
 
   isSending.value = true
@@ -857,6 +866,7 @@ async function sendMessage() {
 const retryingMessageId = ref<string | null>(null)
 
 async function retryMessage(message: Message) {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact || retryingMessageId.value) return
 
   retryingMessageId.value = message.id
@@ -1017,6 +1027,7 @@ function handleCannedSelect(response: CannedResponse) {
 }
 
 async function sendCannedResponse() {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact || !selectedCannedResponse.value) return
 
   const missing = cannedParamNames.value.some(n => !cannedParamValues.value[n]?.trim())
@@ -1209,6 +1220,7 @@ function handleTemplateWithParams(template: any, paramNames: string[]) {
 }
 
 async function sendTemplateMessage() {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact || !selectedTemplate.value) return
 
   // Validate header param (separate ref so it can hold its own value even
@@ -1286,6 +1298,7 @@ const reactionPickerMessageId = ref<string | null>(null)
 const quickReactionEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
 async function sendReaction(messageId: string, emoji: string) {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact) return
 
   try {
@@ -1333,6 +1346,7 @@ watch(messageInput, (val) => {
 })
 
 async function assignContactToUser(userId: string | null) {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact) return
 
   try {
@@ -1352,6 +1366,7 @@ async function assignContactToUser(userId: string | null) {
 }
 
 async function transferToAgent() {
+  if (inboxReadOnly.value) return
   if (!contactsStore.currentContact) return
 
   isTransferring.value = true
@@ -1375,6 +1390,7 @@ async function transferToAgent() {
 }
 
 async function resumeChatbot() {
+  if (inboxReadOnly.value) return
   if (!activeTransferId.value) return
 
   const currentContactId = contactsStore.currentContact?.id
@@ -1779,6 +1795,7 @@ function getMediaType(mimeType: string): string {
 }
 
 async function sendMediaMessage() {
+  if(inboxReadOnly.value)return
   if (!selectedFile.value || !contactsStore.currentContact) return
 
   isUploadingMedia.value = true
@@ -1849,6 +1866,7 @@ async function sendMediaMessage() {
         :active="showInboxQueues"
         :selected-contact="contactsStore.currentContact?.id"
         :selected-account="inboxAccountId || undefined"
+        :selected-case="typeof route.query.case_id==='string'?route.query.case_id:undefined"
         @open="row => router.push({ name: 'chat-conversation', params: { contactId: row.contact_id }, query: { inbox_account: row.account_name, inbox_account_id: row.account_id, case_id: row.id } })"
         @changed="refreshInboxSummaries"
       />
@@ -2039,7 +2057,7 @@ async function sendMediaMessage() {
                 <p class="text-sm font-medium text-white light:text-gray-900">
                   {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
                 </p>
-                <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
+                <Badge v-if="activeTransferId && !inboxReadOnly" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
                   Paused
                 </Badge>
                 <Badge v-if="contactsStore.currentContact?.marketing_opt_out" class="text-[10px] h-5 bg-red-500/20 text-red-400 light:bg-red-100 light:text-red-700" :title="$t('chat.marketingOptOut')">
@@ -2053,13 +2071,13 @@ async function sendMediaMessage() {
           </div>
           <div class="flex items-center gap-1">
             <CallButton
-              v-if="contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
+              v-if="!inboxReadOnly && contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
               :contact-id="contactsStore.currentContact.id"
               :contact-phone="contactsStore.currentContact.phone_number"
               :contact-name="contactsStore.currentContact.name || contactsStore.currentContact.phone_number"
               :whatsapp-account="selectedAccount"
             />
-            <Tooltip v-if="canAssignContacts">
+            <Tooltip v-if="canAssignContacts && !inboxReadOnly">
               <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" @click="isAssignDialogOpen = true">
                   <UserPlus class="h-4 w-4" />
@@ -2067,7 +2085,7 @@ async function sendMediaMessage() {
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.assignToAgent') }}</TooltipContent>
             </Tooltip>
-            <Tooltip v-if="activeTransferId">
+            <Tooltip v-if="activeTransferId && !inboxReadOnly">
               <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" :disabled="isResuming" @click="resumeChatbot">
                   <Play class="h-4 w-4" />
@@ -2082,7 +2100,7 @@ async function sendMediaMessage() {
                   variant="ghost"
                   size="icon"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-                  :disabled="executingActionId === action.id"
+                  :disabled="inboxReadOnly || executingActionId === action.id"
                   @click="executeCustomAction(action)"
                 >
                   <Loader2 v-if="executingActionId === action.id" class="h-4 w-4 animate-spin" />
@@ -2122,7 +2140,7 @@ async function sendMediaMessage() {
                   :aria-label="$t('chat.contactInfo')"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
-                  @click="isInfoPanelOpen = !isInfoPanelOpen"
+                  @click="toggleInfoPanel"
                 >
                   <Info class="h-4 w-4" />
                 </Button>
@@ -2138,7 +2156,7 @@ async function sendMediaMessage() {
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>{{ $t('chat.contactOptions') }}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem v-if="canAssignContacts" @click="isAssignDialogOpen = true">
+                <DropdownMenuItem v-if="canAssignContacts && !inboxReadOnly" @click="isAssignDialogOpen = true">
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
                 </DropdownMenuItem>
@@ -2146,11 +2164,11 @@ async function sendMediaMessage() {
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="activeTransferId" @click="resumeChatbot" :disabled="isResuming">
+                <DropdownMenuItem v-if="activeTransferId && !inboxReadOnly" @click="resumeChatbot" :disabled="isResuming">
                   <Play class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.resumeChatbot') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem @click="isInfoPanelOpen = !isInfoPanelOpen">
+                <DropdownMenuItem @click="toggleInfoPanel">
                   <Info class="mr-2 h-4 w-4" />
                   <span>{{ isInfoPanelOpen ? $t('chat.hideContactDetails') : $t('chat.viewContactDetails') }}</span>
                 </DropdownMenuItem>
@@ -2165,7 +2183,9 @@ async function sendMediaMessage() {
           :account-id="inboxAccountId"
           :contact-id="contactsStore.currentContact.id"
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
-          :can-write="authStore.hasPermission('chat', 'write')"
+          :can-write="authStore.hasPermission('chat', 'write') && !inboxReadOnly"
+          @context="receiveInboxContext"
+          @details="isInfoPanelOpen=true"
           @changed="updateInboxSummary"
           @needs-fields="isInfoPanelOpen = true"
         />
@@ -2616,7 +2636,7 @@ async function sendMediaMessage() {
 
         <!-- Service window expired banner -->
         <div
-          v-if="isServiceWindowExpired && deliveryOptions.channel !== 'sms'"
+          v-if="!inboxReadOnly && isServiceWindowExpired && deliveryOptions.channel !== 'sms'"
           class="px-4 py-2.5 border-t border-red-500/20 bg-red-500/10 flex items-center gap-2"
         >
           <Clock class="h-4 w-4 text-red-500 shrink-0" />
@@ -2644,8 +2664,9 @@ async function sendMediaMessage() {
           </button>
         </div>
 
+        <p v-if="inboxReadOnly" class="inbox-ui inbox-notice m-3" role="status">{{t('inboxFollowup.historyReadOnly')}}</p>
         <!-- Message Input -->
-        <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
+        <div v-if="!inboxReadOnly" class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
           <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
           <ChannelOptions v-model="deliveryOptions" :text="messageInput" :show-setup-hint="false" />
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
@@ -2729,7 +2750,7 @@ async function sendMediaMessage() {
 
     <!-- Notes Side Panel -->
     <ConversationNotes
-      v-if="contactsStore.currentContact && isNotesPanelOpen"
+      v-if="contactsStore.currentContact && isNotesPanelOpen && !inboxReadOnly"
       :contact-id="contactsStore.currentContact.id"
       @close="isNotesPanelOpen = false"
     />
@@ -2739,17 +2760,20 @@ async function sendMediaMessage() {
       v-if="contactsStore.currentContact && isInfoPanelOpen"
       :contact="contactsStore.currentContact"
       :session-data="contactSessionData"
-      @close="isInfoPanelOpen = false"
+      :read-only="inboxReadOnly"
+      @close="closeInfoPanel"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
     >
       <template #case-history>
         <InboxCaseActions
+          ref="caseDetails"
+          id="inbox-case-details"
           v-if="inboxEnabled && inboxAccountId"
           :key="inboxOrg + '/' + inboxAccountId + '/' + contactsStore.currentContact.id"
           :account-id="inboxAccountId"
           :contact-id="contactsStore.currentContact.id"
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
-          :can-write="authStore.hasPermission('chat', 'write')"
+          :can-write="authStore.hasPermission('chat', 'write') && !inboxReadOnly"
           history
         />
       </template>
@@ -2883,7 +2907,7 @@ async function sendMediaMessage() {
     </Dialog>
 
     <!-- Assign Contact Dialog -->
-    <InboxAssignmentDialog v-if="inboxEnabled && inboxAccountId && contactsStore.currentContact" v-model="isAssignDialogOpen" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @assigned="updateInboxSummary($event);refreshInboxSummaries()"/>
+    <InboxAssignmentDialog v-if="!inboxReadOnly && inboxEnabled && inboxAccountId && contactsStore.currentContact" v-model="isAssignDialogOpen" :account="inboxAccountId" :contact="contactsStore.currentContact.id" @assigned="updateInboxSummary($event);refreshInboxSummaries()"/>
     <Dialog v-else v-model:open="isAssignDialogOpen" @update:open="(open) => !open && (assignSearchQuery = '')">
       <DialogContent class="max-w-sm">
         <DialogHeader>

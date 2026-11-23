@@ -21,6 +21,7 @@ import {
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import InboxNextTarget from './InboxNextTarget.vue'
 import { toast } from 'vue-sonner'
 import { isAxiosError } from 'axios'
 import {
@@ -38,7 +39,14 @@ const props = defineProps<{
   summary?: InboxCase
   history?: boolean
 }>()
-const emit = defineEmits<{ changed: [value: InboxCase]; 'needs-fields': [] }>()
+const emit = defineEmits<{
+  changed: [value: InboxCase]
+  'needs-fields': []
+  details: []
+  context: [
+    value: { readOnly: boolean; caseId?: string; currentCaseId?: string },
+  ]
+}>()
 const { t, locale } = useI18n()
 const route = useRoute()
 const activityGroups = computed(() => {
@@ -50,6 +58,59 @@ const activityGroups = computed(() => {
 })
 const current = ref<InboxCase | null>(null)
 const activity = ref<CaseActivity[]>([])
+const readOnly = ref(false)
+const currentCaseId = ref('')
+const editable = computed(() => props.canWrite && !readOnly.value)
+const fieldPanel = ref<InstanceType<typeof InboxFieldPanel>>()
+const activityCursor = ref('')
+const olderBusy = ref(false),
+  olderFailed = ref(false),
+  activityGap = ref(false)
+let olderLoaded = false,
+  contextGeneration = 0
+function mergeActivity(incoming: CaseActivity[], existing: CaseActivity[]) {
+  const unique = new Map(
+    [...existing, ...incoming].map((item) => [item.id, item]),
+  )
+  return [...unique.values()].sort(
+    (a, b) =>
+      b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+  )
+}
+async function loadOlder() {
+  if (olderBusy.value || !activityCursor.value) return
+  const generation = contextGeneration,
+    cursor = activityCursor.value
+  olderBusy.value = true
+  olderFailed.value = false
+  try {
+    const { data } = await inboxService.conversation(
+      props.accountId,
+      props.contactId,
+      typeof route.query.case_id === 'string' ? route.query.case_id : undefined,
+      cursor,
+    )
+    if (generation !== contextGeneration) return
+    activity.value = mergeActivity(data.data.activity ?? [], activity.value)
+    activityCursor.value = data.data.activity_next_cursor ?? ''
+    olderLoaded = true
+  } catch {
+    if (generation === contextGeneration) olderFailed.value = true
+  } finally {
+    if (generation === contextGeneration) olderBusy.value = false
+  }
+}
+function reloadActivity() {
+  olderLoaded = false
+  activityGap.value = false
+  void load()
+}
+defineExpose({
+  requestLeave: (action: () => void) => {
+    if (fieldPanel.value) fieldPanel.value.requestLeave(action)
+    else action()
+  },
+})
 const ready = ref(false)
 const loading = ref(false)
 const failed = ref(false)
@@ -111,6 +172,12 @@ async function load(reset = false) {
   loading.value = true
   failed.value = false
   if (reset) {
+    contextGeneration++
+    olderBusy.value = false
+    olderFailed.value = false
+    olderLoaded = false
+    activityCursor.value = ''
+    activityGap.value = false
     current.value = null
     activity.value = []
     ready.value = false
@@ -124,11 +191,38 @@ async function load(reset = false) {
       typeof route.query.case_id === 'string' ? route.query.case_id : undefined,
     )
     if (request !== sequence) return
+    const selected =
+      typeof route.query.case_id === 'string' ? route.query.case_id : undefined
+    if (selected && data.data.case?.id !== selected)
+      throw new Error('Selected case does not match response')
     current.value = data.data.case
-    activity.value = data.data.activity ?? []
+    readOnly.value = !!data.data.read_only
+    currentCaseId.value = data.data.current_case_id ?? current.value?.id ?? ''
+    emit('context', {
+      readOnly: readOnly.value,
+      caseId: current.value?.id,
+      currentCaseId: currentCaseId.value,
+    })
+    const incoming = data.data.activity ?? []
+    if (!olderLoaded) {
+      activity.value = incoming
+      activityCursor.value = data.data.activity_next_cursor ?? ''
+    } else if (
+      incoming.length &&
+      activity.value.length &&
+      !incoming.some((item) =>
+        activity.value.some((existing) => existing.id === item.id),
+      ) &&
+      data.data.activity_has_more
+    ) {
+      activityGap.value = true
+    } else activity.value = mergeActivity(incoming, activity.value)
     ready.value = true
   } catch {
-    if (request === sequence) failed.value = true
+    if (request === sequence) {
+      failed.value = true
+      emit('context', { readOnly: true })
+    }
   } finally {
     if (request === sequence) loading.value = false
   }
@@ -162,6 +256,7 @@ async function update(input: {
   priority?: CasePriority
   snoozed_until?: string
 }) {
+  if (!editable.value) return
   if (input.status === 'resolved') {
     resolving.value = true
     return
@@ -225,7 +320,7 @@ function saveSnooze() {
 function shortcut(event: KeyboardEvent) {
   if (
     props.history ||
-    !props.canWrite ||
+    !editable.value ||
     busy.value ||
     loading.value ||
     event.repeat ||
@@ -264,9 +359,13 @@ onMounted(() => {
 })
 onUnmounted(() => {
   sequence++
+  contextGeneration++
   window.removeEventListener('keydown', shortcut)
   document.removeEventListener('visibilitychange', refreshTargets)
   clearInterval(targetTimer)
+})
+watch(resolving, (open, previous) => {
+  if (previous && !open) void load()
 })
 function resolvedCase(value: InboxCase) {
   emit('changed', value)
@@ -290,6 +389,32 @@ function resolvedCase(value: InboxCase) {
     :class="history ? 'inbox-case-details' : 'inbox-case-toolbar'"
     :aria-label="t('inboxWorkflow.title')"
   >
+    <div
+      v-if="readOnly && !history && current"
+      class="inbox-notice mb-3"
+      role="status"
+    >
+      <div class="min-w-0">
+        <strong>{{
+          t('inboxFollowup.historical', { id: current.id.slice(0, 8) })
+        }}</strong>
+        <p class="inbox-caption mt-1">
+          {{ t('inboxFollowup.historyReadOnly') }}
+        </p>
+        <p v-if="current.opened_at" class="inbox-caption mt-1">
+          {{ t('inboxFollowup.opened') }} {{ format(current.opened_at)
+          }}<span v-if="current.resolved_at">
+            · {{ t('inboxFollowup.closed') }}
+            {{ format(current.resolved_at) }}</span
+          >
+        </p>
+        <RouterLink
+          :to="{ query: { ...route.query, case_id: currentCaseId } }"
+          class="mt-2 inline-flex min-h-9 items-center underline"
+          >{{ t('inboxFollowup.returnCurrent') }}</RouterLink
+        >
+      </div>
+    </div>
     <template v-if="history">
       <details class="inbox-history">
         <summary>
@@ -364,17 +489,45 @@ function resolvedCase(value: InboxCase) {
           {{ t('inboxUX.caseHistoryEmpty') }}
         </p>
       </details>
+      <p v-if="activityGap" class="inbox-notice mt-3" role="status">
+        {{ t('inboxFollowup.newActivity') }}
+        <Button variant="outline" size="sm" @click="reloadActivity">{{
+          t('common.refresh')
+        }}</Button>
+      </p>
+      <p v-if="olderFailed" role="alert" class="inbox-notice mt-3">
+        {{ t('inboxFollowup.olderError') }}
+      </p>
+      <Button
+        v-if="activityCursor || olderFailed"
+        type="button"
+        variant="outline"
+        size="sm"
+        class="my-3"
+        :disabled="olderBusy"
+        @click="loadOlder"
+        >{{
+          t(
+            olderBusy
+              ? 'common.loading'
+              : olderFailed
+                ? 'common.retry'
+                : 'inboxFollowup.loadOlder',
+          )
+        }}</Button
+      >
       <InboxFieldPanel
+        ref="fieldPanel"
         v-if="current"
         :contact="contactId"
         :account="accountId"
         :case-id="current.id"
-        :can-write="canWrite"
+        :can-write="editable"
       />
     </template>
     <template v-else-if="current">
       <div class="inbox-case-controls">
-        <template v-if="canWrite"
+        <template v-if="editable"
           ><label class="inbox-case-select"
             ><Clock3 class="h-3.5 w-3.5" aria-hidden="true" /><select
               :aria-label="t('inboxWorkflow.caseStatus')"
@@ -413,7 +566,7 @@ function resolvedCase(value: InboxCase) {
           t('inboxWorkflow.status.' + current.status)
         }}</span>
         <Button
-          v-if="canWrite"
+          v-if="editable"
           type="button"
           size="sm"
           class="ml-auto"
@@ -438,7 +591,16 @@ function resolvedCase(value: InboxCase) {
           }}</Button
         >
       </div>
+      <InboxNextTarget
+        v-if="!readOnly && current.sla && current.status !== 'resolved'"
+        :sla="current.sla"
+      />
       <div class="mt-1 flex items-start gap-2">
+        <Button type="button" variant="ghost" size="sm" @click="emit('details')"
+          ><History class="mr-1.5 h-4 w-4" aria-hidden="true" />{{
+            t('inboxFollowup.caseDetails')
+          }}</Button
+        >
         <details v-if="current.sla" class="min-w-0 flex-1">
           <summary class="inbox-caption min-h-8 cursor-pointer py-1">
             {{ t('inboxQuality.responseDetails') }}
@@ -484,7 +646,7 @@ function resolvedCase(value: InboxCase) {
       >
     </template>
     <Button
-      v-else-if="canWrite"
+      v-else-if="editable"
       variant="outline"
       size="sm"
       :disabled="busy"

@@ -54,6 +54,7 @@ const valueText = (value: unknown) =>
 const summary = computed(() => {
   const f = props.filters,
     parts: string[] = []
+  if (f.search) parts.push(t('inboxFollowup.search') + ': ' + f.search)
   if (f.queue) parts.push(t('inboxQueue.queue.' + f.queue))
   if (f.account_id)
     parts.push(

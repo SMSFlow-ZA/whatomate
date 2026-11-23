@@ -106,6 +106,7 @@ async function prepare() {
   }
 }
 function selectMacro(id: string) {
+  if (busy.value) return
   selected.value = id
   void prepare()
 }
@@ -220,7 +221,9 @@ const restoreDialogFocus = useInboxDialogFocus(open)
                 class="inbox-macro-option"
                 :aria-pressed="selected === w.id"
                 :aria-label="w.name"
-                :disabled="busy"
+                :aria-disabled="busy"
+                :aria-busy="busy && selected === w.id"
+                :class="{ 'cursor-wait': busy }"
                 @click="selectMacro(w.id)"
               >
                 <span class="font-medium">{{ w.name }}</span
@@ -238,6 +241,13 @@ const restoreDialogFocus = useInboxDialogFocus(open)
           <h3 v-if="selectedDefinition" class="mb-3 font-semibold">
             {{ selectedDefinition.name }}
           </h3>
+          <p class="sr-only" role="status" aria-live="polite">
+            {{
+              preview
+                ? t('inboxFollowup.previewReady')
+                : error || (busy ? t('common.loading') : '')
+            }}
+          </p>
           <p v-if="!preview" class="inbox-caption">
             {{ t(busy ? 'common.loading' : 'inboxUX.chooseMacroHelp') }}
           </p>

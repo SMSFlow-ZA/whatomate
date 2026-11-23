@@ -66,6 +66,7 @@ interface SessionData {
 const props = defineProps<{
   contact: Contact
   sessionData?: SessionData | null
+  readOnly?:boolean
 }>()
 
 const emit = defineEmits<{
@@ -86,7 +87,7 @@ const panelWidth = ref(MAX_WIDTH) // Default to max width
 const isResizing = ref(false)
 
 // Check if user can edit tags
-const canEditTags = computed(() => authStore.hasPermission('contacts', 'write'))
+const canEditTags = computed(() => !props.readOnly && authStore.hasPermission('contacts', 'write'))
 
 // Fetch tags on mount
 onMounted(async () => {

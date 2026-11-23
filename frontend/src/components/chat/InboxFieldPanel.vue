@@ -28,11 +28,12 @@ const busy = ref('')
 const ready = ref(false)
 const failed = ref(false)
 const errors = ref<Record<string, string>>({})
-const { discardOpen, confirmDiscard, cancelDiscard } = useInboxDraftGuard(() =>
-  Object.keys(values.value).some(
-    (id) => (values.value[id] ?? null) !== (stored.value[id] ?? null),
-  ),
-)
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(() =>
+    Object.keys(values.value).some(
+      (id) => (values.value[id] ?? null) !== (stored.value[id] ?? null),
+    ),
+  )
 let request = 0
 const visible = computed(() =>
   definitions.value.filter(
@@ -56,13 +57,15 @@ async function load() {
       return
     const [rules, reply] = await Promise.all([
       inboxService.fieldDefinitions(account ? 'case' : 'contact'),
-      inboxService.fieldValues(contact, account),
+      inboxService.fieldValues(
+        contact,
+        account,
+        account ? props.caseId : undefined,
+      ),
     ])
-    if (
-      sequence !== request ||
-      (account && props.caseId !== reply.data.data.subject_id)
-    )
-      return
+    if (sequence !== request) return
+    if (account && props.caseId !== reply.data.data.subject_id)
+      throw new Error('Case context changed')
     definitions.value = rules.data.data.definitions
     subjectId.value = reply.data.data.subject_id
     stored.value = Object.fromEntries(
@@ -110,6 +113,7 @@ function cancelField(id: string) {
   values.value[id] = stored.value[id] ?? null
   delete errors.value[id]
 }
+defineExpose({ requestLeave: requestDiscard })
 </script>
 <template>
   <UnsavedChangesDialog

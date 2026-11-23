@@ -181,3 +181,45 @@ it('discards a dry run when the agent has selected another case', async () => {
   expect(selector.value).toBe('case-b')
   expect(root.textContent).not.toContain('STALE_REPLY_MUST_NOT_APPEAR')
 })
+it('loads and selects cases beyond page one without losing account and case identity', async () => {
+  mock.definitions.mockResolvedValue(reply([workflow('rule', 'rule-a')]))
+  mock.queue
+    .mockResolvedValueOnce({
+      data: {
+        data: {
+          cases: Array.from({ length: 50 }, (_, i) => ({
+            id: 'case-' + i,
+            contact_name: 'Example ' + i,
+            account_name: 'Inbox A',
+          })),
+          has_more: true,
+        },
+      },
+    })
+    .mockResolvedValueOnce({
+      data: {
+        data: {
+          cases: [
+            {
+              id: 'case-51',
+              contact_name: 'Example 51',
+              account_name: 'Inbox B',
+            },
+          ],
+          has_more: false,
+        },
+      },
+    })
+  const root = await mount()
+  click(root, 'inboxRules.dryRun')
+  await settle()
+  expect(mock.queue).toHaveBeenNthCalledWith(1, { search: '' }, 0)
+  click(root, 'inboxQueue.next')
+  await settle()
+  expect(mock.queue).toHaveBeenNthCalledWith(2, { search: '' }, 50)
+  const option = Array.from(root.querySelectorAll('option')).find(
+    (option) => option.value === 'case-51',
+  )
+  expect(option?.textContent).toContain('Inbox B')
+  expect(option?.textContent).toContain('case-51')
+})

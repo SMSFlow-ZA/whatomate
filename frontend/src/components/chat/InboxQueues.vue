@@ -35,6 +35,7 @@ const props = defineProps<{
   active: boolean
   selectedContact?: string
   selectedAccount?: string
+  selectedCase?: string
 }>()
 const teamsStore = useTeamsStore()
 const lookupFailed = ref(false)
@@ -112,9 +113,14 @@ const canEdit = computed(() => auth.hasPermission('chat', 'write'))
 const canAssignOrTag = computed(() => auth.hasPermission('contacts', 'write'))
 const filterCount = computed(
   () =>
-    ['account_id', 'team_id', 'assignee_id', 'status', 'priority'].filter(
-      (key) => !!filters.value[key as keyof InboxFilters],
-    ).length +
+    [
+      'account_id',
+      'team_id',
+      'assignee_id',
+      'status',
+      'priority',
+      'search',
+    ].filter((key) => !!filters.value[key as keyof InboxFilters]).length +
     (filters.value.tags?.length ?? 0) +
     (filters.value.fields?.length ?? 0) +
     (filters.value.predicates?.length ?? 0),
@@ -173,9 +179,12 @@ const actionReady = computed(
     (action.value === 'resolve' || actionValue.value !== ''),
 )
 let revision = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let lastFilterShape = JSON.stringify({ ...filters.value, search: undefined })
 
 function isCurrent(row: QueueCase) {
   return (
+    (!props.selectedCase || row.id === props.selectedCase) &&
     row.contact_id === props.selectedContact &&
     (!props.selectedAccount || row.account_id === props.selectedAccount)
   )
@@ -247,7 +256,18 @@ watch(
     selected.value = []
     results.value = {}
     reviewing.value = false
-    void refresh()
+    revision++
+    clearTimeout(searchTimer)
+    const shape = JSON.stringify({ ...filters.value, search: undefined })
+    const searching = shape === lastFilterShape && !!filters.value.search
+    lastFilterShape = shape
+    rows.value = []
+    counts.value = {}
+    updatedAt.value = ''
+    if (searching) {
+      loading.value = true
+      searchTimer = setTimeout(() => void refresh(), 250)
+    } else void refresh()
   },
   { deep: true },
 )
@@ -338,6 +358,7 @@ const refreshTimer = setInterval(() => {
 onUnmounted(() => {
   revision++
   clearInterval(refreshTimer)
+  clearTimeout(searchTimer)
   document.removeEventListener('visibilitychange', activate)
 })
 
@@ -472,6 +493,15 @@ async function applyBulk() {
     :aria-label="t('inboxQueue.title')"
   >
     <div class="inbox-queue-tools">
+      <label class="inbox-label mb-3"
+        >{{ t('inboxFollowup.search') }}
+        <input
+          v-model="filters.search"
+          type="search"
+          maxlength="120"
+          :placeholder="t('inboxFollowup.searchHelp')"
+        />
+      </label>
       <nav class="inbox-queue-shortcuts" :aria-label="t('inboxQueue.title')">
         <button
           v-for="queue in queues"

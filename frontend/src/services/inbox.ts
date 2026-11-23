@@ -191,6 +191,7 @@ export interface InboxCapacity {
 export interface InboxCase {
   routing_reason?: string
   opened_at?: string
+  resolved_at?: string
   next_reply_from?: string
   first_human_reply_at?: string
   last_inbound_at?: string
@@ -320,9 +321,10 @@ export const inboxService = {
       archive?: boolean
     },
   ) => api.put('/inbox/fields/' + encodeURIComponent(id), input),
-  fieldValues: (contact: string, account?: string) =>
+  fieldValues: (contact: string, account?: string, case_id?: string) =>
     api.get<Envelope<{ subject_id: string; values: FieldMatch[] }>>(
       fieldPath(contact, account),
+      { params: { case_id } },
     ),
   setFieldValue: (
     contact: string,
@@ -382,7 +384,10 @@ export const inboxService = {
       Envelope<{
         case_id: string
         version: number
+        status?: CaseStatus
         missing_fields: MissingInboxField[]
+        contact_name?: string
+        account_name?: string
       }>
     >(conversationPath(account, contact) + '/resolution'),
   completeAndResolve: (
@@ -544,11 +549,24 @@ export const inboxService = {
     api.get<Envelope<{ cases: InboxCase[] }>>('/inbox/cases', {
       params: { contacts: contacts.join(',') },
     }),
-  conversation: (accountId: string, contactId: string, case_id?: string) =>
-    api.get<Envelope<{ case: InboxCase | null; activity: CaseActivity[] }>>(
-      conversationPath(accountId, contactId),
-      { params: { case_id } },
-    ),
+  conversation: (
+    accountId: string,
+    contactId: string,
+    case_id?: string,
+    activity_before?: string,
+  ) =>
+    api.get<
+      Envelope<{
+        case: InboxCase | null
+        activity: CaseActivity[]
+        current_case_id?: string
+        read_only?: boolean
+        activity_has_more?: boolean
+        activity_next_cursor?: string
+      }>
+    >(conversationPath(accountId, contactId), {
+      params: { case_id, activity_before },
+    }),
   update: (accountId: string, contactId: string, input: CaseUpdate) =>
     api.put<Envelope<{ case: InboxCase }>>(
       conversationPath(accountId, contactId),
@@ -573,6 +591,7 @@ export type BulkInboxResult =
   | 'capacity'
 
 export interface InboxFilters {
+  search?: string
   queue?: InboxQueue
   account_id?: string
   team_id?: string

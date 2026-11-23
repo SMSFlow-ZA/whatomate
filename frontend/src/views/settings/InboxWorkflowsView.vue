@@ -74,6 +74,36 @@ const failed = ref(false)
 const lookupFailed = ref(false)
 const caseId = ref('')
 const cases = ref<QueueCase[]>([])
+const caseSearch = ref(''),
+  caseOffset = ref(0),
+  casesMore = ref(false),
+  casesBusy = ref(false),
+  casesFailed = ref(false)
+let caseSequence = 0
+async function loadCases(offset = 0) {
+  const generation = ++caseSequence,
+    workflow = dryRunId.value
+  casesBusy.value = true
+  casesFailed.value = false
+  try {
+    const { data } = await inboxService.queue(
+      { search: caseSearch.value },
+      offset,
+    )
+    if (generation !== caseSequence || workflow !== dryRunId.value) return
+    const selected = cases.value.find((row) => row.id === caseId.value)
+    cases.value =
+      selected && !data.data.cases.some((row) => row.id === selected.id)
+        ? [selected, ...data.data.cases]
+        : data.data.cases
+    caseOffset.value = offset
+    casesMore.value = data.data.has_more
+  } catch {
+    if (generation === caseSequence) casesFailed.value = true
+  } finally {
+    if (generation === caseSequence) casesBusy.value = false
+  }
+}
 const dryRunId = ref('')
 const preview = ref<InboxWorkflowPreview | null>(null)
 const previewBusy = ref(false)
@@ -89,10 +119,13 @@ watch(
   { flush: 'sync' },
 )
 onUnmounted(() => {
+  caseSequence++
   loadSequence++
   previewSequence++
 })
 function closePreview() {
+  caseSequence++
+  casesBusy.value = false
   dryRunId.value = ''
   preview.value = null
 }
@@ -288,18 +321,12 @@ async function prepare(w: InboxWorkflow) {
   dryRunId.value = w.id
   preview.value = null
   caseId.value = ''
-  const request = ++previewSequence
-  previewBusy.value = true
-  try {
-    const reply = await inboxService.queue({})
-    if (request !== previewSequence || dryRunId.value !== w.id) return
-    cases.value = reply.data.data.cases
-  } catch {
-    if (request === previewSequence) toast.error(t('inboxRules.previewError'))
-  } finally {
-    if (request === previewSequence) previewBusy.value = false
-  }
+  caseSearch.value = ''
+  cases.value = []
+  caseOffset.value = 0
+  await loadCases()
 }
+
 async function runPreview() {
   const workflow = dryRunId.value
   const selectedCase = caseId.value
@@ -621,18 +648,75 @@ function pageHistory(delta: number) {
                 <p class="inbox-caption mb-4">
                   {{ t('inboxRules.dryRunHelp') }}
                 </p>
+                <form
+                  class="mb-3 flex flex-wrap items-end gap-2"
+                  @submit.prevent="loadCases()"
+                >
+                  <label class="inbox-label min-w-0 flex-1"
+                    >{{ t('inboxFollowup.search')
+                    }}<input
+                      v-model="caseSearch"
+                      type="search"
+                      maxlength="120"
+                      :placeholder="t('inboxFollowup.searchHelp')"
+                  /></label>
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    :disabled="casesBusy"
+                    >{{ t('common.search') }}</Button
+                  >
+                </form>
+                <p v-if="casesBusy" role="status" class="inbox-caption">
+                  {{ t('common.loading') }}
+                </p>
+                <p v-if="casesFailed" role="alert" class="inbox-notice">
+                  {{ t('inboxFollowup.casesError') }}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    @click="loadCases(caseOffset)"
+                    >{{ t('common.retry') }}</Button
+                  >
+                </p>
                 <label class="inbox-label"
                   >{{ t('inboxRules.chooseCase')
-                  }}<select v-model="caseId" @change="preview = null">
+                  }}<select
+                    v-model="caseId"
+                    :disabled="casesBusy"
+                    @change="preview = null"
+                  >
                     <option value="">{{ t('inboxRules.chooseCase') }}</option>
                     <option v-for="c in cases" :key="c.id" :value="c.id">
                       {{ c.contact_name || t('inboxQueue.unnamed') }} ({{
                         c.account_name
-                      }})
+                      }}) · {{ c.id.slice(0, 8) }}
                     </option>
                   </select></label
                 >
-                <p v-if="!cases.length" class="inbox-caption mt-2">
+                <div v-if="caseOffset || casesMore" class="my-3 flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    :disabled="!caseOffset || casesBusy"
+                    @click="loadCases(Math.max(0, caseOffset - 50))"
+                    >{{ t('inboxQueue.previous') }}</Button
+                  ><Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    :disabled="!casesMore || casesBusy"
+                    @click="loadCases(caseOffset + 50)"
+                    >{{ t('inboxQueue.next') }}</Button
+                  >
+                </div>
+                <p
+                  v-if="!cases.length && !casesBusy && !casesFailed"
+                  class="inbox-caption mt-2"
+                >
                   {{ t('inboxUX.noCasesHelp') }}
                 </p>
                 <label
@@ -651,7 +735,7 @@ function pageHistory(delta: number) {
                 <Button
                   class="my-3"
                   variant="outline"
-                  :disabled="!caseId || previewBusy"
+                  :disabled="!caseId || previewBusy || casesBusy"
                   @click="runPreview"
                   >{{ t('inboxRules.review') }}</Button
                 ><InboxWorkflowPreviewPanel

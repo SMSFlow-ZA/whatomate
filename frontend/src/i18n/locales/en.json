@@ -3151,5 +3151,29 @@
     "selectPage": "Select all eligible cases on this page",
     "workflowSummary": "Review conditions and actions",
     "waitingAge": "Customer waiting · {age}"
+  },
+  "inboxFollowup": {
+    "historical": "Viewing historical case {id}",
+    "historyReadOnly": "This historical view is read-only. Return to the current case to send messages or make changes.",
+    "returnCurrent": "Return to current case",
+    "opened": "Opened",
+    "closed": "Closed",
+    "loadOlder": "Load older activity",
+    "olderError": "Older activity could not be loaded. Retry to continue from the same place.",
+    "newActivity": "Newer activity is available. Refresh history to load the complete latest sequence.",
+    "caseDetails": "Case details",
+    "search": "Find an enquiry",
+    "searchHelp": "Contact name or case ID",
+    "casesError": "Cases could not be loaded. Retry or adjust your search.",
+    "previewReady": "Preview ready. Review the recipient and actions before applying.",
+    "confirmResolve": "Resolve this case?",
+    "confirmResolveHelp": "Confirm that the enquiry is complete. Its messages and case history will remain available.",
+    "validationError": "Review the highlighted details before resolving.",
+    "invalidValue": "Enter a valid value for this field.",
+    "conflictError": "This case or its required details changed. Refresh to review the latest version; your entries will be kept.",
+    "permissionError": "Your permissions no longer allow this action. Refresh to check access, or ask a supervisor for help.",
+    "caseUnavailable": "This case is no longer available. Refresh or return to the inbox.",
+    "networkError": "We could not confirm the result. Retry safely, or refresh to check the current case before continuing.",
+    "alreadyResolved": "This case is already resolved. Close this dialog to view its latest status."
   }
 }

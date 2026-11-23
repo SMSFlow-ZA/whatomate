@@ -60,7 +60,8 @@ test('starts, snoozes and resolves a case inside the chat thread', async ({
     await page.setViewportSize({ width: 390, height: 844 })
     await status.selectOption('resolved')
     await page
-      .getByRole('button', { name: 'Save and resolve', exact: true })
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Resolve', exact: true })
       .click()
     await expect(status).toHaveValue('resolved')
     if (process.env.INBOX_CAPTURE)
