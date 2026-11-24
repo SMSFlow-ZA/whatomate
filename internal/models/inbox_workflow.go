@@ -7,6 +7,7 @@ import (
 )
 
 type InboxAction struct {
+	IntegrationInputs map[string]string `json:"integration_inputs,omitempty"`
 	// Personalise is explicit so legacy authored braces remain literal.
 	Personalise      bool              `json:"personalise,omitempty"`
 	BodyParameters   map[string]string `json:"body_parameters,omitempty"`

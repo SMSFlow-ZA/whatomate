@@ -12,6 +12,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/channelapp"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/inboxintegration"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
@@ -26,16 +27,18 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
-	BuildSourceURL    string
-	Config            *config.Config
-	DB                *gorm.DB
-	Redis             *redis.Client
-	Log               logf.Logger
-	WhatsApp          *whatsapp.Client
-	WSHub             *websocket.Hub
-	Queue             queue.Queue
-	Channels          *channelapp.Service
-	CampaignSubCancel context.CancelFunc
+	// Nil uses the hardened HTTP client. Tests may inject a fake provider.
+	InboxIntegrationExecutor inboxintegration.Executor
+	BuildSourceURL           string
+	Config                   *config.Config
+	DB                       *gorm.DB
+	Redis                    *redis.Client
+	Log                      logf.Logger
+	WhatsApp                 *whatsapp.Client
+	WSHub                    *websocket.Hub
+	Queue                    queue.Queue
+	Channels                 *channelapp.Service
+	CampaignSubCancel        context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)

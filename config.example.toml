@@ -146,6 +146,14 @@ full_name = "Admin"
 [inbox_automation]
 # Set true after WhatsApp reply dispatch has been commissioned. Keep false in restored copies until queued work is reconciled.
 dispatch_enabled = false
+# Separate host hold for external inbox integrations. Keep restored work held
+# until outcomes are reconciled. This feature is under development.
+integration_dispatch_enabled = false
+# Exact operator-approved endpoints (JSON). No wildcard hosts, URL credentials,
+# redirects or private destinations. The optional header asserts provider-side
+# durable idempotency; it does not cause automatic retries.
+integration_endpoints = '[]'
+# Example: '[{"key":"crm","name":"CRM case","url":"https://crm.example.com/api/cases","method":"POST","idempotency_header":"Idempotency-Key"}]'
 
 [channels]
 # Emergency/restore hold stops new SMS and SMS bot dispatch; receipts continue.

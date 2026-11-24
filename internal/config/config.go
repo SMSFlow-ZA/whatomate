@@ -35,7 +35,10 @@ type Config struct {
 }
 
 type InboxAutomationConfig struct {
-	DispatchEnabled bool `koanf:"dispatch_enabled"`
+	DispatchEnabled            bool `koanf:"dispatch_enabled"`
+	IntegrationDispatchEnabled bool `koanf:"integration_dispatch_enabled"`
+	// JSON array of exact operator-approved HTTPS endpoint definitions.
+	IntegrationEndpoints string `koanf:"integration_endpoints"`
 }
 
 type ChannelsConfig struct {
