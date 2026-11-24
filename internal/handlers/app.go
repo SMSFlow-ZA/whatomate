@@ -256,6 +256,7 @@ func (a *App) requirePermission(r *fastglue.Request, userID uuid.UUID, resource,
 		return errEnvelopeSent
 	}
 	if !a.HasPermission(userID, resource, action, orgID) {
+		a.observeDenial(r, orgID, userID, resource, action)
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		return errEnvelopeSent
 	}
@@ -273,6 +274,7 @@ func (a *App) requireAuth(r *fastglue.Request, resource, action string) (orgID, 
 		return uuid.Nil, uuid.Nil, errEnvelopeSent
 	}
 	if !a.HasPermission(userID, resource, action, orgID) {
+		a.observeDenial(r, orgID, userID, resource, action)
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		return uuid.Nil, uuid.Nil, errEnvelopeSent
 	}

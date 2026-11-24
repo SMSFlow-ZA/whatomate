@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -79,28 +80,33 @@ func (a *App) Login(r *fastglue.Request) error {
 
 	// Check if user is active
 	if !user.IsActive {
+		a.observeSignIn(r, user.OrganizationID, user.ID, uuid.Nil, audit.Denied, audit.DisabledAccount)
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Account is disabled", nil, "")
 	}
 
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		a.observeSignIn(r, user.OrganizationID, user.ID, uuid.Nil, audit.Denied, audit.InvalidCredentials)
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid credentials", nil, "")
 	}
 
 	// Generate tokens
 	accessToken, err := a.generateAccessToken(&user)
 	if err != nil {
-		a.Log.Error("Failed to generate access token", "error", err)
+		a.observeSignIn(r, user.OrganizationID, user.ID, uuid.Nil, audit.Failed, audit.SessionCreationFailed)
+		a.Log.Error("Failed to generate access token", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
 
 	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
-		a.Log.Error("Failed to generate refresh token", "error", err)
+		a.observeSignIn(r, user.OrganizationID, user.ID, uuid.Nil, audit.Failed, audit.SessionCreationFailed)
+		a.Log.Error("Failed to generate refresh token", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
 	}
 
 	a.setAuthCookies(r, accessToken, refreshToken)
+	a.observeSignIn(r, user.OrganizationID, user.ID, user.ID, audit.Success, audit.Password)
 
 	return r.SendEnvelope(CookieAuthResponse{
 		ExpiresIn: a.Config.JWT.AccessExpiryMins * 60,
@@ -539,14 +545,23 @@ func (a *App) Logout(r *fastglue.Request) error {
 	if refreshTokenStr != "" {
 		claims, err := middleware.ParseToken(a.Config.JWT.Secret, refreshTokenStr, "refresh")
 		if err == nil && claims.ID != "" {
+			event := audit.SecurityEvent{OrganizationID: claims.OrganizationID, ActorID: claims.UserID, ResourceID: claims.UserID, ResourceType: "user", Kind: audit.SignOut, Outcome: audit.Failed, Reason: audit.SessionStorageUnavailable}
 			if a.Redis == nil {
+				a.observeSecurity(r, event)
 				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Session storage unavailable", nil, "")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)).Err(); err != nil {
+			removed, err := a.Redis.Del(ctx, refreshTokenKey(claims.ID), middleware.SessionKey(claims.SessionID), middleware.FamilyKey(claims.SessionFamily)).Result()
+			if err != nil {
+				a.observeSecurity(r, event)
 				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke session", nil, "")
 			}
+			event.Outcome, event.Reason = audit.Success, audit.SignedOut
+			if removed == 0 {
+				event.Reason = audit.AlreadySignedOut
+			}
+			a.observeSecurity(r, event)
 		}
 	}
 

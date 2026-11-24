@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -185,24 +186,22 @@ func (a *App) CreateRole(r *fastglue.Request) error {
 		Permissions:    permissions,
 	}
 
-	// If setting as default, unset other defaults (in a transaction)
-	if req.IsDefault {
-		if err := a.DB.Transaction(func(tx *gorm.DB) error {
-			tx.Model(&models.CustomRole{}).
+	// The role and its security event commit together. A failed capture also
+	// restores other defaults changed by this transaction.
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if req.IsDefault {
+			if err := tx.Model(&models.CustomRole{}).
 				Where("organization_id = ? AND is_default = ?", orgID, true).
-				Update("is_default", false)
-			return tx.Create(&role).Error
-		}); err != nil {
-			a.Log.Error("Failed to create role", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create role", nil, "")
+				Update("is_default", false).Error; err != nil {
+				return err
+			}
 		}
-		a.logAudit(orgID, userID,
-			"role", role.ID, models.AuditActionCreated, nil, roleAuditSnapshot(&role))
-		return r.SendEnvelope(roleToResponse(role, 0))
-	}
-
-	if err := a.DB.Create(&role).Error; err != nil {
-		a.Log.Error("Failed to create role", "error", err)
+		if err := tx.Create(&role).Error; err != nil {
+			return err
+		}
+		return a.recordRoleSecurity(r, tx, orgID, userID, role.ID, audit.RoleCreated)
+	}); err != nil {
+		a.Log.Error("Failed to create role", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create role", nil, "")
 	}
 
@@ -262,15 +261,11 @@ func (a *App) UpdateRole(r *fastglue.Request) error {
 				a.Log.Error("Failed to fetch permissions", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
 			}
-			if err := a.DB.Model(&role).Association("Permissions").Replace(permissions); err != nil {
-				a.Log.Error("Failed to update role permissions", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
-			}
 			role.Permissions = permissions
 		}
 
-		if err := a.DB.Save(&role).Error; err != nil {
-			a.Log.Error("Failed to update role", "error", err)
+		if err := a.saveRoleWithSecurity(r, orgID, userID, &role, isSuperAdmin && len(req.Permissions) > 0, false); err != nil {
+			a.Log.Error("Failed to update role", "code", audit.ErrorCode(err))
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
 		}
 
@@ -305,34 +300,14 @@ func (a *App) UpdateRole(r *fastglue.Request) error {
 			a.Log.Error("Failed to fetch permissions", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
 		}
-		// Replace associations
-		if err := a.DB.Model(&role).Association("Permissions").Replace(permissions); err != nil {
-			a.Log.Error("Failed to update role permissions", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
-		}
 		role.Permissions = permissions
 	}
 
-	// Handle default flag (in a transaction to prevent race conditions)
-	if req.IsDefault && !role.IsDefault {
-		role.IsDefault = true
-		if err := a.DB.Transaction(func(tx *gorm.DB) error {
-			tx.Model(&models.CustomRole{}).
-				Where("organization_id = ? AND is_default = ? AND id != ?", orgID, true, role.ID).
-				Update("is_default", false)
-			return tx.Save(&role).Error
-		}); err != nil {
-			a.Log.Error("Failed to update role", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
-		}
-	} else {
-		if !req.IsDefault && role.IsDefault {
-			role.IsDefault = false
-		}
-		if err := a.DB.Save(&role).Error; err != nil {
-			a.Log.Error("Failed to update role", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
-		}
+	clearDefaults := req.IsDefault && !role.IsDefault
+	role.IsDefault = req.IsDefault
+	if err := a.saveRoleWithSecurity(r, orgID, userID, &role, len(req.Permissions) > 0, clearDefaults); err != nil {
+		a.Log.Error("Failed to update role", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update role", nil, "")
 	}
 
 	// Invalidate permissions cache for all users with this role
@@ -382,9 +357,15 @@ func (a *App) DeleteRole(r *fastglue.Request) error {
 	_ = a.loadRolePermissions(role)
 	oldSnap := roleAuditSnapshot(role)
 
-	// Delete the role (permissions associations will be cleared automatically)
-	if err := a.DB.Delete(role).Error; err != nil {
-		a.Log.Error("Failed to delete role", "error", err)
+	// Soft deletion and its event are one transaction; the writer retains the
+	// verified deleted target without guessing ownership from an absent row.
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(role).Error; err != nil {
+			return err
+		}
+		return a.recordRoleSecurity(r, tx, orgID, userID, role.ID, audit.RoleDeleted)
+	}); err != nil {
+		a.Log.Error("Failed to delete role", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete role", nil, "")
 	}
 
@@ -392,6 +373,25 @@ func (a *App) DeleteRole(r *fastglue.Request) error {
 		"role", id, models.AuditActionDeleted, oldSnap, nil)
 
 	return r.SendEnvelope(map[string]string{"message": "Role deleted successfully"})
+}
+
+func (a *App) saveRoleWithSecurity(r *fastglue.Request, orgID, actorID uuid.UUID, role *models.CustomRole, replacePermissions, clearDefaults bool) error {
+	return a.DB.Transaction(func(tx *gorm.DB) error {
+		if clearDefaults {
+			if err := tx.Model(&models.CustomRole{}).Where("organization_id=? AND is_default AND id<>?", orgID, role.ID).Update("is_default", false).Error; err != nil {
+				return err
+			}
+		}
+		if replacePermissions {
+			if err := tx.Model(role).Association("Permissions").Replace(role.Permissions); err != nil {
+				return err
+			}
+		}
+		if err := tx.Omit("Permissions").Save(role).Error; err != nil {
+			return err
+		}
+		return a.recordRoleSecurity(r, tx, orgID, actorID, role.ID, audit.RoleChanged)
+	})
 }
 
 // ListPermissions returns all available permissions

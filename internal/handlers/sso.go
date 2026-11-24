@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	appcrypto "github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -251,7 +252,7 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	oauthConfig := a.buildOAuthConfig(provider, &ssoConfig, r)
 	token, err := oauthConfig.Exchange(context.Background(), code)
 	if err != nil {
-		a.Log.Error("Failed to exchange OAuth code", "error", err, "provider", provider)
+		a.Log.Error("Failed to exchange OAuth code", "code", "provider_exchange_failed", "provider", provider)
 		a.redirectWithError(r, "Failed to authenticate with provider")
 		return nil
 	}
@@ -259,7 +260,7 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	// Fetch user info from provider
 	userInfo, err := a.fetchUserInfo(provider, &ssoConfig, token)
 	if err != nil {
-		a.Log.Error("Failed to fetch user info", "error", err, "provider", provider)
+		a.Log.Error("Failed to fetch user info", "code", "provider_identity_failed", "provider", provider)
 		a.redirectWithError(r, "Failed to get user information")
 		return nil
 	}
@@ -354,12 +355,16 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	} else {
 		// Linking an existing account requires explicit administrator setup.
 		if user.OrganizationID != orgID || user.SSOProvider != provider || user.SSOProviderID != userInfo.ID || user.SSOBinding == "" || user.SSOBinding != SSOProviderBinding(&ssoConfig) {
+			if user.OrganizationID == orgID {
+				a.observeSignIn(r, orgID, user.ID, uuid.Nil, audit.Denied, audit.InvalidCredentials)
+			}
 			a.redirectWithError(r, "SSO identity is not linked. Contact your administrator.")
 			return nil
 		}
 
 		// Check if user is active
 		if !user.IsActive {
+			a.observeSignIn(r, orgID, user.ID, uuid.Nil, audit.Denied, audit.DisabledAccount)
 			a.redirectWithError(r, "Account is disabled")
 			return nil
 		}
@@ -368,20 +373,27 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 	// Generate JWT tokens
 	accessToken, err := a.generateAccessToken(&user)
 	if err != nil {
-		a.Log.Error("Failed to generate access token", "error", err)
+		a.observeSignIn(r, orgID, user.ID, uuid.Nil, audit.Failed, audit.SessionCreationFailed)
+		a.Log.Error("Failed to generate access token", "code", audit.ErrorCode(err))
 		a.redirectWithError(r, "Failed to complete authentication")
 		return nil
 	}
 
 	refreshToken, err := a.generateRefreshToken(&user, accessToken)
 	if err != nil {
-		a.Log.Error("Failed to generate refresh token", "error", err)
+		a.observeSignIn(r, orgID, user.ID, uuid.Nil, audit.Failed, audit.SessionCreationFailed)
+		a.Log.Error("Failed to generate refresh token", "code", audit.ErrorCode(err))
 		a.redirectWithError(r, "Failed to complete authentication")
 		return nil
 	}
 
 	// Set auth cookies (tokens no longer exposed in URL)
 	a.setAuthCookies(r, accessToken, refreshToken)
+	reason := audit.FederatedSSO
+	if provider == "microsoft" {
+		reason = audit.MicrosoftSSO
+	}
+	a.observeSignIn(r, orgID, user.ID, user.ID, audit.Success, reason)
 
 	// Redirect to frontend SSO callback page (cookies already set)
 	basePath := sanitizeRedirectPath(a.Config.Server.BasePath)

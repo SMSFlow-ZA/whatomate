@@ -488,6 +488,7 @@ func runWorker(args []string) {
 // ============================================================================
 
 func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePath string, rdb *redis.Client, cfg *config.Config) {
+	g.Before(app.AuditRequestContext())
 	// Health check
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)

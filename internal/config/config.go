@@ -32,6 +32,7 @@ type Config struct {
 	Plan            PlanConfig            `koanf:"plan"`
 	Channels        ChannelsConfig        `koanf:"channels"`
 	InboxAutomation InboxAutomationConfig `koanf:"inbox_automation"`
+	Audit           AuditConfig           `koanf:"audit"`
 }
 
 type InboxAutomationConfig struct {
@@ -238,6 +239,9 @@ func Load(configPath string) (*Config, error) {
 	// Set defaults
 	setDefaults(&cfg)
 	if err := ValidatePlan(&cfg); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Audit.TrustedProxies(); err != nil {
 		return nil, err
 	}
 

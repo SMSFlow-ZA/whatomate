@@ -217,6 +217,9 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 		if resource != "" && a.HasPermission(userID, resource, action, orgID) {
 			return r
 		}
+		if resource != "" {
+			a.observeDenial(r, orgID, userID, resource, action)
+		}
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		return nil
 	}

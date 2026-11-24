@@ -39,6 +39,8 @@ type Reason string
 const (
 	Password                  Reason = "password"
 	MicrosoftSSO              Reason = "microsoft_sso"
+	FederatedSSO              Reason = "federated_sso"
+	SessionCreationFailed     Reason = "session_creation_failed"
 	InvalidCredentials        Reason = "invalid_credentials"
 	DisabledAccount           Reason = "disabled_account"
 	SessionStorageUnavailable Reason = "session_storage_unavailable"
@@ -73,7 +75,7 @@ var ErrInvalidEvent = errors.New("invalid security audit event")
 var ErrConflictingEvent = errors.New("conflicting security audit event")
 
 var eventReasons = map[EventKind][]Reason{
-	SignIn:              {Password, MicrosoftSSO, InvalidCredentials, DisabledAccount, SessionStorageUnavailable},
+	SignIn:              {Password, MicrosoftSSO, FederatedSSO, InvalidCredentials, DisabledAccount, SessionStorageUnavailable, SessionCreationFailed},
 	SignOut:             {SignedOut, AlreadySignedOut, SessionStorageUnavailable},
 	SessionsRevoked:     {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, RoleChanged, ManualRevocation},
 	PermissionChanged:   {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, UserRoleChanged},
@@ -131,13 +133,13 @@ func eventAllowed(e SecurityEvent) bool {
 		return false
 	}
 	if e.Kind == SignIn {
-		if e.Outcome == Success && e.Reason != Password && e.Reason != MicrosoftSSO {
+		if e.Outcome == Success && e.Reason != Password && e.Reason != MicrosoftSSO && e.Reason != FederatedSSO {
 			return false
 		}
 		if e.Outcome == Denied && (e.ActorID != uuid.Nil || (e.Reason != InvalidCredentials && e.Reason != DisabledAccount)) {
 			return false
 		}
-		if e.Outcome == Failed && e.Reason != SessionStorageUnavailable {
+		if e.Outcome == Failed && e.Reason != SessionStorageUnavailable && e.Reason != SessionCreationFailed {
 			return false
 		}
 	}
