@@ -10,6 +10,7 @@ import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
 import InboxTabs from '@/components/shared/InboxTabs.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import InboxIntegrations from '@/components/settings/InboxIntegrations.vue'
+import InboxIntegrationRun from '@/components/settings/InboxIntegrationRun.vue'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useRoute } from 'vue-router'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
@@ -58,7 +59,7 @@ import InboxFieldMatchers from '@/components/chat/InboxFieldMatchers.vue'
 import InboxConditionBuilder from '@/components/chat/InboxConditionBuilder.vue'
 import InboxWorkflowPreviewPanel from '@/components/chat/InboxWorkflowPreview.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
 const viewerContext = useInboxViewerContext()
@@ -168,6 +169,7 @@ const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
 const deleting = ref(false)
 const editing = ref(false)
 const showHistory = ref(false)
+const expandedRun = ref('')
 const confirmSends = ref(false)
 const query = ref('')
 const filtered = computed(() =>
@@ -281,10 +283,12 @@ function changeTab(value: string, force = false) {
   historyOffset.value = 0
   loadSequence++
   closePreview()
+  expandedRun.value = ''
   showTargets.value = value === 'sla'
   showIntegrations.value = value === 'integrations'
   if (showIntegrations.value) {
     showHistory.value = false
+    expandedRun.value = ''
     return
   }
   if (showTargets.value) {
@@ -458,6 +462,7 @@ watch(
     showIntegrations.value = false
     showHistory.value = false
     form.value = fresh()
+    expandedRun.value = ''
     id.value = ''
     caseId.value = ''
     cases.value = []
@@ -501,6 +506,7 @@ onMounted(async () => {
     auth.hasPermission('settings.general', 'write')
   )
     showIntegrations.value = true
+  if (route.query.tab === 'history') showHistory.value = true
   await load()
   if (!enabled.value) return
   loadLookups()
@@ -902,7 +908,14 @@ function pageHistory(delta: number) {
               <ul v-else class="inbox-list">
                 <li v-for="run in runs" :key="run.id" class="inbox-list-row">
                   <div class="inbox-list-copy">
-                    <p class="inbox-list-title">{{ run.workflow_name }}</p>
+                    <div class="flex flex-wrap items-start gap-2">
+                      <p class="inbox-list-title min-w-0 flex-1">
+                        {{ run.workflow_name }}
+                      </p>
+                      <span class="inbox-badge">{{
+                        t('inboxRules.runState.' + run.state)
+                      }}</span>
+                    </div>
                     <p class="inbox-caption mt-1">
                       {{ run.actor_name || t('inboxQuality.formerUser') }} ·
                       {{ run.account_name }}
@@ -971,8 +984,16 @@ function pageHistory(delta: number) {
                           :key="index"
                         >
                           {{ t('inboxRules.action.' + outcome.type) }} ·
-                          {{ t('inboxQuality.actionState.' + outcome.status) }}
-                          · {{ t('inboxQuality.preflight.' + outcome.reason) }}
+                          <template v-if="outcome.type === 'integration'">{{
+                            t('inboxIntegrationHistory.snapshotHelp')
+                          }}</template>
+                          <template v-else>
+                            {{
+                              t('inboxQuality.actionState.' + outcome.status)
+                            }}
+                            ·
+                            {{ t('inboxQuality.preflight.' + outcome.reason) }}
+                          </template>
                         </li>
                       </ul>
                       <p v-if="run.message_status" class="inbox-caption">
@@ -986,13 +1007,40 @@ function pageHistory(delta: number) {
                     <p class="inbox-caption">
                       {{ new Date(run.created_at).toLocaleString()
                       }}<span v-if="run.outcome">
-                        / {{ t('inboxRules.outcome.' + run.outcome) }}</span
+                        /
+                        {{
+                          run.sequenced &&
+                          !te?.('inboxRules.outcome.' + run.outcome)
+                            ? t('inboxIntegrationHistory.outcomeOther')
+                            : t('inboxRules.outcome.' + run.outcome)
+                        }}</span
                       >
                     </p>
+                    <details
+                      v-if="run.sequenced"
+                      class="mt-3"
+                      :open="expandedRun === run.id"
+                      @toggle="
+                        expandedRun = ($event.target as HTMLDetailsElement).open
+                          ? run.id
+                          : expandedRun === run.id
+                            ? ''
+                            : expandedRun
+                      "
+                    >
+                      <summary
+                        class="cursor-pointer py-2 text-sm font-medium min-h-11 sm:min-h-8"
+                      >
+                        {{ t('inboxIntegrationHistory.title') }}
+                      </summary>
+                      <InboxIntegrationRun
+                        v-if="expandedRun === run.id"
+                        :key="run.id"
+                        :run="run"
+                        :users="users"
+                      />
+                    </details>
                   </div>
-                  <span class="inbox-badge">{{
-                    t('inboxRules.runState.' + run.state)
-                  }}</span>
                 </li>
               </ul>
               <div

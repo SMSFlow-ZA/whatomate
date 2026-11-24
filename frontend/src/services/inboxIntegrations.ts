@@ -75,6 +75,10 @@ export interface IntegrationRecovery {
   from_state: string
   from_outcome?: string
   from_result_origin?: string
+  prior_started_at?: string
+  prior_completed_at?: string
+  provider_status?: number
+  duration_ms?: number
   attempt_count: number
   reason: string
   has_evidence: boolean

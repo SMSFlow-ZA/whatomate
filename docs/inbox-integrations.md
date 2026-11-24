@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. Definition/action editing and intent review screens are under local qualification. Operational history/recovery screens and full feature acceptance remain outstanding. Do not treat this checkpoint as an accepted customer release or enable live integrations from it.
+This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. Definition/action editing, intent review and read-only operation history screens are locally qualified. Operational recovery controls and full feature acceptance remain outstanding. Do not treat this checkpoint as an accepted customer release or enable live integrations from it.
 
 ## Approval and access
 
@@ -25,6 +25,14 @@ Dry run shows the destination origin/method, permitted known values, fields that
 If an input schema changes, refresh definitions in the action editor. Obsolete mapping names are shown with an explicit removal control; they are not silently discarded. Complete any renamed required input, remove only the obsolete mappings and save the repaired workflow. Valid mappings remain intact. Reference-property naming errors appear beside the field with the required lowercase identifier format.
 
 Failed lookups offer Retry. A save error keeps the draft, but an uncertain acknowledgement requires refreshing the list before creating a duplicate definition. Unsaved edits are protected when leaving the editor. Viewer, organisation or permission changes invalidate old lookups and clear private credential drafts. Integration settings do not change WhatsApp automatic-reply or SMS controls.
+
+## Inspect recorded operations
+
+Open **Settings → Inbox workflows → History**, then expand **Integration operations** on a sequenced run. Recorded execution state, result source, submission count, provider status and selected-output disposition are shown separately. An administrator's manual attestation is labelled as such; it is not a provider HTTP receipt. A workflow's stopped or blocked snapshot must not be mistaken for an external failure. An already submitted operation can finish after its parent workflow stops.
+
+Use Refresh to check the recorded operation state. Times use the viewer's displayed timezone; this screen is not a live provider query. A refresh failure retains the prior page with a warning that it may be stale. Newer/Older controls use bounded cursor pages, preserving the current page if a request fails. Empty history is not proof that all work has completed.
+
+Expand **Recovery decisions** to inspect recorded reasons, actors and audit identifiers. Each execution-scoped decision shows its action number when available, with the full operation and run identifiers under Audit identifiers. A workflow-level stop is labelled separately. Authorised operators can inspect an investigation reference through a separate request. Ordinary agents see only their scoped metadata and that a reference exists. General history never loads request bodies, response bodies, credentials or selected result values. It does not submit, retry, resume or reconcile an operation.
 
 ## Mappings
 
@@ -102,4 +110,4 @@ Cancellation stops remaining workflow steps. It does not retract an in-flight or
 - `GET /api/inbox/integration-executions/{execution_id}/recoveries/{recovery_id}/evidence` returns only the encrypted investigation reference after operator/case authorisation, with phone masking where applicable. It never returns the provider body, credential or encrypted payload.
 - `POST /api/inbox/workflow-runs/{run_id}/cancel-preview` returns whether cancellation is eligible and warns about unresolved or in-flight operations. `POST /api/inbox/workflow-runs/{run_id}/cancel` requires the fresh `confirmation`, safe nonempty `reason` and fresh UUID `operation_id`. `GET /api/inbox/workflow-runs/{run_id}/recoveries` lists scoped recovery metadata using the same bounded cursor paging, including cancellation before any integration execution existed.
 
-Operational history/recovery UI and full feature acceptance remain outstanding. Restore/rollback must keep integration dispatch and automatic replies off until pending and unknown work has been reconciled. Older binaries do not understand deferred review markers in encrypted plans; do not resume those plans on an older binary. Keep outbound work held and return to a compatible release for review. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.
+Operational recovery controls and full feature acceptance remain outstanding. Restore/rollback must keep integration dispatch and automatic replies off until pending and unknown work has been reconciled. Older binaries do not understand deferred review markers in encrypted plans; do not resume those plans on an older binary. Keep outbound work held and return to a compatible release for review. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.
