@@ -78,7 +78,7 @@ func TestBrowserInvestigationFixture(t *testing.T) {
 	}
 	scenarios := map[string]scenario{}
 	providerCalls := 0
-	for _, name := range []string{"typed", "no-effect", "provider-success"} {
+	for _, name := range []string{"typed", "no-effect", "provider-success", "emergency-stop"} {
 		contact := testutil.CreateTestContact(t, db, org.ID)
 		require.NoError(t, db.Model(contact).Update("profile_name", "Synthetic investigation "+name).Error)
 		c := newInboxCase(inboxThread{org.ID, account.ID, contact.ID}, time.Now().UTC(), &actor.ID, nil)
@@ -124,7 +124,7 @@ func TestBrowserInvestigationFixture(t *testing.T) {
 		require.Contains(t, []string{inboxSequenceUnknown, inboxSequenceReview, inboxSequenceBlocked}, paused.State)
 		scenarios[name] = scenario{run.ID, execution.ID, c.ID, c.ContactID, w.Name}
 	}
-	require.Equal(t, 3, providerCalls)
+	require.Equal(t, 4, providerCalls)
 	// Return organisation dispatch to its original held setting. Other browser
 	// journeys share the owned database but must not inherit fixture dispatch.
 	if hadDispatch {

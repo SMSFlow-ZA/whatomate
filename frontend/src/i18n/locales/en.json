@@ -3223,6 +3223,17 @@
       "invalid": "The stored value is invalid. Ask an authorised editor to correct it."
     }
   },
+  "inboxStop": {
+    "title": "Stop a workflow by run identifier",
+    "help": "Use this recovery control when normal history is unavailable or the inbox feature is disabled. A fresh review checks your current access and the remaining work before anything is stopped.",
+    "runId": "Workflow run identifier",
+    "identifierHelp": "Copy the full workflow run UUID from its audit identifiers. This is not a case, message or operation identifier. The review makes no external request.",
+    "invalidId": "Enter a complete, non-empty workflow run UUID from the audit history.",
+    "review": "Review stopping workflow",
+    "workflowRun": "Workflow run",
+    "caseId": "Case identifier",
+    "accountId": "WhatsApp account identifier"
+  },
   "inboxInvestigation": {
     "reviewReady": "Investigation review ready",
     "attestationHelp": "Record only an outcome you have independently verified. This records an operator's finding, not a provider receipt, and makes no external request.",

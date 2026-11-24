@@ -41,7 +41,9 @@ const runId = '11111111-1111-4111-8111-111111111111'
 const operationId = '22222222-2222-4222-8222-222222222222'
 const otherId = '33333333-3333-4333-8333-333333333333'
 const envelope = (data: unknown) => ({ data: { data } })
-const proposal = (id = operationId): IntegrationControlReview => ({
+const proposal = (
+  id = operationId,
+): Extract<IntegrationControlReview, { kind: 'retry' }> => ({
   kind: 'retry',
   run: {
     id: runId,
@@ -208,10 +210,14 @@ beforeEach(() => {
   mock.sequencePreview.mockResolvedValue(sequencePreview())
   mock.cancelPreview.mockResolvedValue(
     envelope({
+      run_id: runId,
+      case_id: '00000000-0000-4000-8000-000000000010',
+      account_id: '00000000-0000-4000-8000-000000000011',
       eligible: true,
       confirmation: 'a'.repeat(64),
       provider_outcome_unresolved: true,
       submission_in_progress: true,
+      does_not_retract_submitted_operations: true,
     }),
   )
 })
@@ -221,6 +227,106 @@ afterEach(() => {
     root.remove()
   }
   vi.restoreAllMocks()
+})
+
+it('reviews a known run identifier using only the current scoped cancellation response', async () => {
+  await mount({ kind: 'cancel', run: { id: runId } })
+  expect(mock.cancelPreview).toHaveBeenCalledExactlyOnceWith(runId)
+  expect(dialog().textContent).toContain('00000000-0000-4000-8000-000000000010')
+  expect(dialog().textContent).toContain('00000000-0000-4000-8000-000000000011')
+  expect(dialog().textContent).toContain('inboxStop.workflowRun')
+  await reason()
+  expect(button('inboxRecovery.confirmCancel').disabled).toBe(false)
+  expect(mock.cancel).not.toHaveBeenCalled()
+})
+
+it.each([
+  { run_id: 'another-run' },
+  { case_id: '00000000-0000-0000-0000-000000000000' },
+  { account_id: 'not-an-account' },
+  { does_not_retract_submitted_operations: false },
+  { confirmation: '' },
+])(
+  'rejects an inconsistent known-run cancellation review %j',
+  async (changes) => {
+    mock.cancelPreview.mockResolvedValueOnce(
+      envelope({
+        run_id: runId,
+        case_id: '00000000-0000-4000-8000-000000000010',
+        account_id: '00000000-0000-4000-8000-000000000011',
+        eligible: true,
+        confirmation: 'a'.repeat(64),
+        provider_outcome_unresolved: true,
+        submission_in_progress: false,
+        does_not_retract_submitted_operations: true,
+        ...changes,
+      }),
+    )
+    await mount({ kind: 'cancel', run: { id: runId } })
+    expect(dialog().textContent).toContain('inboxRecovery.previewError')
+    expect(button('inboxRecovery.confirmCancel').disabled).toBe(true)
+    expect(mock.cancel).not.toHaveBeenCalled()
+  },
+)
+
+it('keeps an ineligible cancellation review informative without allowing confirmation', async () => {
+  mock.cancelPreview.mockResolvedValueOnce(
+    envelope({
+      run_id: runId,
+      case_id: '00000000-0000-4000-8000-000000000010',
+      account_id: '00000000-0000-4000-8000-000000000011',
+      eligible: false,
+      confirmation: '',
+      reason: 'reconcile_message_submission_first',
+      provider_outcome_unresolved: false,
+      submission_in_progress: false,
+      does_not_retract_submitted_operations: true,
+    }),
+  )
+  await mount({ kind: 'cancel', run: { id: runId } })
+  expect(dialog().textContent).toContain(
+    'inboxRecovery.reason.reconcile_message_submission_first',
+  )
+  expect(dialog().textContent).not.toContain('inboxRecovery.previewError')
+  expect(button('inboxRecovery.confirmCancel').disabled).toBe(true)
+})
+
+it('drops a late cancellation preview after the selected known run changes', async () => {
+  const old = deferred()
+  const preview = (id: string, caseId: string) =>
+    envelope({
+      run_id: id,
+      case_id: caseId,
+      account_id: '00000000-0000-4000-8000-000000000011',
+      eligible: true,
+      confirmation: 'a'.repeat(64),
+      provider_outcome_unresolved: true,
+      submission_in_progress: false,
+      does_not_retract_submitted_operations: true,
+    })
+  mock.cancelPreview
+    .mockReturnValueOnce(old.promise)
+    .mockResolvedValueOnce(
+      preview(otherId, '00000000-0000-4000-8000-000000000012'),
+    )
+  const { request } = await mount({ kind: 'cancel', run: { id: runId } })
+  request.value = { kind: 'cancel', run: { id: otherId } }
+  await settle()
+  old.resolve(preview(runId, '00000000-0000-4000-8000-000000000010'))
+  await settle()
+  expect(dialog().textContent).toContain('00000000-0000-4000-8000-000000000012')
+  expect(dialog().textContent).not.toContain(
+    '00000000-0000-4000-8000-000000000010',
+  )
+  expect(mock.cancelPreview).toHaveBeenCalledTimes(2)
+})
+it('rejects a cancellation response inconsistent with already known account scope', async () => {
+  await mount({
+    kind: 'cancel',
+    run: { id: runId, account_id: '00000000-0000-4000-8000-000000000099' },
+  })
+  expect(dialog().textContent).toContain('inboxRecovery.previewError')
+  expect(button('inboxRecovery.confirmCancel').disabled).toBe(true)
 })
 
 it('reviews a fact-only manual finding before requesting a reason and a durable recovery decision', async () => {

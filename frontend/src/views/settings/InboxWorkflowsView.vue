@@ -20,6 +20,7 @@ import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import InboxIntegrations from '@/components/settings/InboxIntegrations.vue'
 import InboxIntegrationRun from '@/components/settings/InboxIntegrationRun.vue'
 import InboxIntegrationReview from '@/components/settings/InboxIntegrationReview.vue'
+import InboxWorkflowStop from '@/components/settings/InboxWorkflowStop.vue'
 import type { IntegrationControlReview } from '@/services/inboxIntegrations'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useRoute } from 'vue-router'
@@ -607,6 +608,11 @@ async function recoveryChanged(runId: string) {
     </PageHeader>
     <div class="inbox-page-scroll">
       <div class="inbox-container">
+        <InboxWorkflowStop
+          v-if="!editing && !showTargets && !showIntegrations"
+          :disabled="!!recoveryReviewer?.pending"
+          @review="recoveryRequest = $event"
+        />
         <div v-if="failed" role="alert" class="inbox-notice">
           {{ t('inboxRules.loadError')
           }}<Button variant="outline" size="sm" @click="load">{{

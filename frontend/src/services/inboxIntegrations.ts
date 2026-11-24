@@ -90,7 +90,10 @@ export interface IntegrationRecovery {
 }
 export type IntegrationControlReview =
   | { kind: 'retry'; run: InboxWorkflowRun; execution: IntegrationExecution }
-  | { kind: 'cancel'; run: InboxWorkflowRun }
+  | {
+      kind: 'cancel'
+      run: Pick<InboxWorkflowRun, 'id'> & Partial<InboxWorkflowRun>
+    }
   | { kind: 'resume'; run: InboxWorkflowRun }
   | {
       kind: 'recover'
@@ -259,11 +262,15 @@ export const inboxIntegrations = {
   cancelPreview: (id: string) =>
     api.post<
       Envelope<{
+        run_id: string
+        case_id: string
+        account_id: string
         eligible: boolean
         reason?: string
         confirmation: string
         provider_outcome_unresolved: boolean
         submission_in_progress: boolean
+        does_not_retract_submitted_operations: true
       }>
     >(runPath(id) + '/cancel-preview'),
   cancel: (

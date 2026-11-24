@@ -339,8 +339,29 @@ async function loadPreview() {
         retry.value = data.data
     } else {
       const { data } = await inboxIntegrations.cancelPreview(selection.run.id)
-      if (request === generation && context === viewer.value)
-        cancellation.value = data.data
+      if (request !== generation || context !== viewer.value) return
+      const preview = data.data
+      const validId = (value: string) =>
+        typeof value === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          value,
+        ) &&
+        value !== '00000000-0000-0000-0000-000000000000'
+      if (
+        preview.run_id !== selection.run.id ||
+        !validId(preview.case_id) ||
+        !validId(preview.account_id) ||
+        (selection.run.case_id && selection.run.case_id !== preview.case_id) ||
+        (selection.run.account_id &&
+          selection.run.account_id !== preview.account_id) ||
+        typeof preview.eligible !== 'boolean' ||
+        typeof preview.provider_outcome_unresolved !== 'boolean' ||
+        typeof preview.submission_in_progress !== 'boolean' ||
+        preview.does_not_retract_submitted_operations !== true ||
+        (preview.eligible && !/^[a-f0-9]{64}$/.test(preview.confirmation))
+      )
+        throw new Error('Inconsistent workflow stopping review')
+      cancellation.value = preview
     }
   } catch {
     if (request === generation && context === viewer.value) failed.value = true
@@ -479,9 +500,12 @@ defineExpose({
       <template v-if="selected">
         <div class="grid gap-1 text-sm">
           <p class="font-semibold break-words">
-            {{ selected.run.workflow_name }}
+            {{ selected.run.workflow_name || t('inboxStop.workflowRun') }}
           </p>
-          <p class="inbox-caption break-words">
+          <p
+            v-if="selected.run.contact_name || selected.run.account_name"
+            class="inbox-caption break-words"
+          >
             {{ selected.run.contact_name || t('inboxQuality.caseLabel') }} ·
             {{ selected.run.account_name }}
           </p>
@@ -495,6 +519,19 @@ defineExpose({
             }}: {{ target }}
           </p>
         </div>
+        <dl
+          v-if="selected.kind === 'cancel' && cancellation"
+          class="grid gap-2 text-sm"
+        >
+          <div>
+            <dt class="inbox-caption">{{ t('inboxStop.caseId') }}</dt>
+            <dd class="break-all">{{ cancellation.case_id }}</dd>
+          </div>
+          <div>
+            <dt class="inbox-caption">{{ t('inboxStop.accountId') }}</dt>
+            <dd class="break-all">{{ cancellation.account_id }}</dd>
+          </div>
+        </dl>
         <InboxIntegrationRecoveryForm
           v-if="selected.kind === 'recover' && manualAction && operator"
           v-show="!recoveryPreview"

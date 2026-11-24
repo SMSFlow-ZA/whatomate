@@ -2,6 +2,7 @@
 import { createApp, nextTick, reactive } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import InboxWorkflowsView from './InboxWorkflowsView.vue'
+import { inboxService } from '@/services/inbox'
 
 const mock = vi.hoisted(() => ({
   definitions: vi.fn(),
@@ -86,6 +87,23 @@ const settle = async () => {
   }
 }
 const mounts: { app: ReturnType<typeof createApp>; root: HTMLElement }[] = []
+
+it('keeps scoped emergency stopping available while the feature is disabled', async () => {
+  vi.mocked(inboxService.settings).mockResolvedValueOnce({
+    data: { data: { enabled: false } },
+  } as any)
+  const root = await mount()
+  expect(root.textContent).toContain('inboxRules.enableFirst')
+  expect(root.querySelector('[data-inbox-workflow-stop]')).toBeTruthy()
+})
+it('does not hide emergency stopping when ordinary settings cannot load', async () => {
+  vi.mocked(inboxService.settings).mockRejectedValueOnce(
+    new Error('Synthetic lookup unavailable'),
+  )
+  const root = await mount()
+  expect(root.textContent).toContain('inboxRules.loadError')
+  expect(root.querySelector('[data-inbox-workflow-stop]')).toBeTruthy()
+})
 afterEach(() => {
   for (const { app, root } of mounts.splice(0)) {
     app.unmount()

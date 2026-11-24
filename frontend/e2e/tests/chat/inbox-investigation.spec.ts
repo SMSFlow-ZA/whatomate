@@ -54,7 +54,7 @@ test('records investigated facts, applies exact typed outputs and discards held 
     readFileSync(process.env.INBOX_INVESTIGATION_FIXTURE!, 'utf8'),
   )
   expect(fixture.synthetic).toBe(true)
-  expect(fixture.fake_provider_calls).toBe(3)
+  expect(fixture.fake_provider_calls).toBe(4)
   const api = new ApiHelper(request)
   await api.loginAsAdmin()
   const profile = (await (await api.get('/api/me')).json()).data
