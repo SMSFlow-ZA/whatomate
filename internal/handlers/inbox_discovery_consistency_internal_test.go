@@ -55,6 +55,12 @@ func TestInboxDiscoveryChangedWorkRequiresRefreshWithoutLeakingOtherAccounts(t *
 			require.Equal(t, 409, testutil.GetResponseStatusCode(r), string(r.RequestCtx.Response.Body()))
 			require.Contains(t, string(r.RequestCtx.Response.Body()), "inbox_queue_changed")
 			require.NotContains(t, string(r.RequestCtx.Response.Body()), `"cases"`)
+			// Previous-page navigation back to page1 must retain the same freshness
+			// contract even though that page has no incoming keyset cursor.
+			back := f.request(t, f.admin.ID, filter, &d, "")
+			back.RequestCtx.QueryArgs().Set("revision", current.Revision)
+			require.NoError(t, f.a.ListInboxQueue(back))
+			require.Equal(t, 409, testutil.GetResponseStatusCode(back))
 			// Refreshing explicitly obtains a new valid starting page.
 			f.page(t, f.request(t, f.admin.ID, filter, &d, ""))
 		})
@@ -71,6 +77,10 @@ func TestInboxDiscoveryChangedWorkRequiresRefreshWithoutLeakingOtherAccounts(t *
 		r := f.request(t, f.admin.ID, filter, &d, base64.RawURLEncoding.EncodeToString(data))
 		require.NoError(t, f.a.ListInboxQueue(r))
 		require.Equal(t, 400, testutil.GetResponseStatusCode(r))
+		firstPage := f.request(t, f.admin.ID, filter, &d, "")
+		firstPage.RequestCtx.QueryArgs().Set("revision", revision)
+		require.NoError(t, f.a.ListInboxQueue(firstPage))
+		require.Equal(t, 400, testutil.GetResponseStatusCode(firstPage))
 	}
 }
 

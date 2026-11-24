@@ -2,8 +2,8 @@ import type { Page } from '@playwright/test'
 
 // Measure rendered feature text against composited ancestor backgrounds.
 // Disabled controls and hidden/inert content are excluded from text contrast.
-export async function inboxContrast(page: Page) {
-  return page.evaluate(() => {
+export async function inboxContrast(page: Page, includeAlerts = false) {
+  return page.evaluate((includeAlerts) => {
     type Colour = [number, number, number, number]
     function colour(raw: string): Colour {
       const values = (raw.match(/[\d.]+/g) ?? []).map(Number)
@@ -42,7 +42,8 @@ export async function inboxContrast(page: Page) {
     }
     return Array.from(
       document.querySelectorAll<HTMLElement>(
-        '.inbox-ui .inbox-caption,.inbox-ui button,.inbox-ui select,.inbox-ui .text-muted-foreground',
+        '.inbox-ui .inbox-caption,.inbox-ui button,.inbox-ui select,.inbox-ui .text-muted-foreground' +
+          (includeAlerts ? ',.inbox-ui [role=alert]' : ''),
       ),
     )
       .filter(
@@ -83,5 +84,5 @@ export async function inboxContrast(page: Page) {
           minimum: large ? 3 : 4.5,
         }
       })
-  })
+  }, includeAlerts)
 }

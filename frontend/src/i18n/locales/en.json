@@ -3011,7 +3011,7 @@
     "resetFilters": "Clear filters",
     "caseDetails": "Case details",
     "queueEmptyHelp": "Start a case from a conversation, or adjust the filters to see more work.",
-    "viewSaveHelp": "Save the current filters for yourself or an authorized team.",
+    "viewSaveHelp": "Save the current queue, filters, sort and date ranges as a personal or team view.",
     "showFilters": "Show filters",
     "hideFilters": "Hide filters",
     "capacityDescription": "Balance active work across the team, for each WhatsApp inbox.",
@@ -3758,5 +3758,57 @@
       "legacy_transfer_covered": "Covered by the existing transfer escalation"
     },
     "featureDisabled": "Inbox workflows are disabled for this workspace. Ask an administrator to review the setting. Existing notice history is preserved."
+  },
+  "inboxDiscovery": {
+    "sort": "Sort",
+    "orderDetails": "About this order",
+    "dates": "Date ranges",
+    "dateHelp": "From and Through include the selected local dates. Activity means customer messages and human replies in this case; notes and delivery receipts do not move it.",
+    "opened": "Entered human queue",
+    "activity": "Last conversation activity",
+    "from": "From",
+    "through": "Through",
+    "timezone": "Date timezone",
+    "applyDates": "Apply dates",
+    "clearDates": "Clear date ranges",
+    "replaceDates": "Replace with calendar dates",
+    "exactHelp": "This view uses exact time boundaries. They stay unchanged unless you explicitly replace or clear them.",
+    "opened_from": "Queue entry — from (inclusive)",
+    "opened_before": "Queue entry — before (exclusive)",
+    "activity_from": "Activity — from (inclusive)",
+    "activity_before": "Activity — before (exclusive)",
+    "appliedDates": "Date filters applied · {timezone}",
+    "navigationReset": "Unavailable saved preferences were reset. Review the current queue before continuing.",
+    "dismiss": "Dismiss",
+    "resetDiscovery": "Reset sort and dates",
+    "changed": "Matching work changed. Your current page is preserved; refresh from the first page to see the latest results.",
+    "invalidPage": "This paging context is no longer valid. Refresh from the first page, or reset sort and dates.",
+    "selectionRefresh": "Refreshing clears the current case selection and bulk review.",
+    "refreshStart": "Refresh from first page",
+    "denied": "You can no longer read this queue. Its displayed data has been cleared. Retry after restoring access, or choose another queue.",
+    "page": "Page {number}",
+    "historyTrimmed": "Earlier navigation has been cleared to keep this session bounded.",
+    "order": {
+      "priority_waiting": "Priority, then longest waiting",
+      "latest_activity": "Latest activity",
+      "longest_unanswered": "Longest unanswered",
+      "newest": "Newest case",
+      "oldest": "Oldest case",
+      "nearest_deadline": "Nearest response deadline"
+    },
+    "orderHelp": {
+      "priority_waiting": "Urgent to low priority, then earliest entry into the human queue.",
+      "latest_activity": "Most recent customer message or human reply in this case. Notes, status changes and receipts are excluded.",
+      "longest_unanswered": "Oldest outstanding first or next human reply. Cases with no unanswered customer message appear last.",
+      "newest": "Most recent entry into the human queue.",
+      "oldest": "Earliest entry into the human queue.",
+      "nearest_deadline": "Earliest current, incomplete and unpaused response target. Cases without a verified actionable deadline appear last."
+    },
+    "error": {
+      "timezone": "Choose a valid IANA timezone, such as Africa/Johannesburg.",
+      "range": "Through must be on or after From for each range.",
+      "skippedDay": "That calendar date does not exist in the selected timezone. Choose another date.",
+      "dates": "Enter valid calendar dates within the supported range. Through must be before 31 December 9999."
+    }
   }
 }

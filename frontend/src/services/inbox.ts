@@ -524,12 +524,20 @@ export const inboxService = {
     offset = 0,
     include_counts = false,
     view_id?: string,
+    discovery?: InboxQueueDiscovery,
+    cursor?: string,
+    revision?: string,
   ) =>
     api.get<
       Envelope<{
         cases: QueueCase[]
         has_more: boolean
         counts?: Record<string, number>
+        next_cursor?: string
+        queue_revision?: string
+        updated_at?: string
+        discovery?: InboxQueueDiscovery
+        discovery_version?: number
       }>
     >('/inbox/queue', {
       params: {
@@ -537,6 +545,9 @@ export const inboxService = {
         offset,
         include_counts,
         view_id,
+        ...(discovery ? { discovery: JSON.stringify(discovery) } : {}),
+        ...(cursor ? { cursor } : {}),
+        ...(revision ? { revision } : {}),
       },
     }),
   views: () =>
@@ -546,22 +557,30 @@ export const inboxService = {
         publish_teams?: { id: string; name: string }[]
       }>
     >('/inbox/views'),
-  saveView: (name: string, filters: InboxFilters, team_id?: string) =>
+  saveView: (
+    name: string,
+    filters: InboxFilters,
+    team_id?: string,
+    discovery?: InboxQueueDiscovery,
+  ) =>
     api.post<Envelope<{ view: SavedInboxView }>>('/inbox/views', {
       name,
       filters,
       team_id,
+      ...(discovery ? { discovery } : {}),
     }),
   updateView: (
     id: string,
     name: string,
     filters: InboxFilters,
     team_id?: string,
+    discovery?: InboxQueueDiscovery,
   ) =>
     api.put('/inbox/views/' + encodeURIComponent(id), {
       name,
       filters,
       team_id,
+      ...(discovery ? { discovery } : {}),
     }),
   deleteView: (id: string) =>
     api.delete('/inbox/views/' + encodeURIComponent(id)),
@@ -665,5 +684,22 @@ export interface SavedInboxView {
   team_id?: string
   name: string
   filters: InboxFilters
+  discovery?: InboxQueueDiscovery
   capabilities?: { edit: boolean; remove: boolean; share: boolean }
+}
+
+export type InboxQueueOrder =
+  | 'priority_waiting'
+  | 'latest_activity'
+  | 'longest_unanswered'
+  | 'newest'
+  | 'oldest'
+  | 'nearest_deadline'
+export interface InboxQueueDiscovery {
+  order?: InboxQueueOrder
+  timezone?: string
+  opened_from?: string
+  opened_before?: string
+  activity_from?: string
+  activity_before?: string
 }

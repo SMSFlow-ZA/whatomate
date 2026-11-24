@@ -39,6 +39,9 @@ func normalizeInboxDiscovery(value models.InboxQueueDiscovery) (models.InboxQueu
 			return value, errInboxTransition
 		}
 		canonical := timestamp.UTC()
+		if canonical.Year() < 1 || canonical.Year() > 9999 {
+			return value, errInboxTransition
+		}
 		*boundary = &canonical
 		hasDates = true
 	}
@@ -160,10 +163,7 @@ func readInboxDiscoveryCursor(raw, context, order string) (*inboxDiscoveryCursor
 	if decoder.Decode(&cursor) != nil || decoder.Decode(new(any)) != io.EOF || cursor.Version != inboxDiscoveryVersion || cursor.Context != context || cursor.Order != order || cursor.ID == uuid.Nil {
 		return nil, errInboxTransition
 	}
-	if len(cursor.Revision) != 64 {
-		return nil, errInboxTransition
-	}
-	if _, err := hex.DecodeString(cursor.Revision); err != nil {
+	if !validInboxDiscoveryRevision(cursor.Revision) {
 		return nil, errInboxTransition
 	}
 	_, _, nullable := inboxDiscoveryExpression(order)
@@ -174,6 +174,14 @@ func readInboxDiscoveryCursor(raw, context, order string) (*inboxDiscoveryCursor
 		return nil, errInboxTransition
 	}
 	return &cursor, nil
+}
+
+func validInboxDiscoveryRevision(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func pageInboxDiscovery(q *gorm.DB, discovery models.InboxQueueDiscovery, cursor *inboxDiscoveryCursor) *gorm.DB {

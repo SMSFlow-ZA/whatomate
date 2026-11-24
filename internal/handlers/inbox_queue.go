@@ -93,7 +93,11 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxDiscoveryCursor.Error(), nil, "inbox_discovery_invalid")
 	}
-	keyset := args.Has("discovery") || args.Has("cursor")
+	keyset := args.Has("discovery") || args.Has("cursor") || args.Has("revision")
+	expectedRevision := string(args.Peek("revision"))
+	if args.Has("revision") && !validInboxDiscoveryRevision(expectedRevision) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxDiscoveryCursor.Error(), nil, "inbox_discovery_invalid")
+	}
 	if keyset && string(args.Peek("offset")) != "" && string(args.Peek("offset")) != "0" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxDiscoveryCursor.Error(), nil, "inbox_discovery_invalid")
 	}
@@ -143,7 +147,7 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 			if e != nil {
 				return e
 			}
-			if cursor != nil && cursor.Revision != revision {
+			if (cursor != nil && cursor.Revision != revision) || (expectedRevision != "" && expectedRevision != revision) {
 				return errInboxQueueChanged
 			}
 		}
@@ -173,6 +177,9 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 			paging = "keyset"
 		}
 		response = map[string]any{"cases": rows, "has_more": more, "next_cursor": next, "discovery": discovery, "discovery_version": inboxDiscoveryVersion, "paging": paging, "updated_at": time.Now().UTC()}
+		if keyset {
+			response["queue_revision"] = revision
+		}
 		if string(args.Peek("include_counts")) == "true" {
 			counts := map[string]int64{}
 			for _, queue := range []string{"", "mine", "unassigned", "awaiting_reply", "follow_ups"} {

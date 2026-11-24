@@ -35,6 +35,7 @@ type inboxDiscoveryPage struct {
 	Cases    []inboxQueueRow            `json:"cases"`
 	More     bool                       `json:"has_more"`
 	Next     string                     `json:"next_cursor"`
+	Revision string                     `json:"queue_revision"`
 	Paging   string                     `json:"paging"`
 	Version  int                        `json:"discovery_version"`
 	Selected models.InboxQueueDiscovery `json:"discovery"`
@@ -222,7 +223,7 @@ func TestInboxDiscoveryRejectsInvalidPreferencesAndMismatchedCursors(t *testing.
 	}
 	d := models.InboxQueueDiscovery{Order: "oldest"}
 	first := f.page(t, f.request(t, f.admin.ID, models.InboxQueueFilter{}, &d, ""))
-	for _, raw := range []string{`null`, `[]`, `{"order":"sql;drop table inbox_cases"}`, `{"order":"oldest","arbitrary":true}`, `{"opened_from":"2026-11-24T10:00:00Z"}`, `{"timezone":"Local"}`, `{"timezone":"../etc/passwd"}`, `{"timezone":"UTC","opened_from":"2026-11-24T10:00:00.000000001Z"}`, `{"timezone":"UTC","opened_from":"2026-11-25T00:00:00Z","opened_before":"2026-11-24T00:00:00Z"}`, `{"timezone":"UTC","activity_from":"0001-01-01T00:00:00Z"}`} {
+	for _, raw := range []string{`null`, `[]`, `{"order":"sql;drop table inbox_cases"}`, `{"order":"oldest","arbitrary":true}`, `{"opened_from":"2026-11-24T10:00:00Z"}`, `{"timezone":"Local"}`, `{"timezone":"../etc/passwd"}`, `{"timezone":"UTC","opened_from":"2026-11-24T10:00:00.000000001Z"}`, `{"timezone":"UTC","opened_from":"2026-11-25T00:00:00Z","opened_before":"2026-11-24T00:00:00Z"}`, `{"timezone":"UTC","activity_from":"0001-01-01T00:00:00Z"}`, `{"timezone":"UTC","activity_from":"9999-12-31T23:00:00-02:00"}`, `{"timezone":"UTC","activity_from":"0001-01-01T00:00:00+01:00"}`} {
 		r := f.request(t, f.admin.ID, models.InboxQueueFilter{}, &d, "")
 		r.RequestCtx.QueryArgs().Set("discovery", raw)
 		require.NoError(t, f.a.ListInboxQueue(r))

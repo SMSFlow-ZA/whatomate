@@ -1,9 +1,38 @@
 # Queue ordering and date discovery
 
 The queue-discovery API extends existing inbox filters without changing workflow
-conditions. The backend foundation is implemented; the new sort/date controls and
-their complete managed-release acceptance remain in progress. Existing queue UI
-and legacy offset requests keep their current behaviour.
+conditions. Sort and date controls are implemented in the existing queue surface;
+their local qualification and combined managed-release acceptance are separate
+gates. Legacy clients without discovery retain their current offset behaviour.
+
+## Using queues and dates
+
+Use **Sort** below the queue shortcuts to choose priority/waiting, activity,
+unanswered work, case age or a response deadline. **About this order** explains
+what participates. The default remains priority followed by longest waiting.
+
+Open **Filters → Date ranges**, choose the timezone, then From and Through dates
+for human-queue entry and/or last conversation activity. **Apply dates** commits
+the draft; Cancel or closing Filters leaves applied dates unchanged. Through
+includes the selected local date, including 23/25-hour daylight-saving days.
+Skipped local dates and reversed ranges reject with an associated explanation.
+Clear date ranges preserves sorting; Reset sort and dates restores both defaults.
+
+Saving or updating a personal/team view includes applied sort/date preferences.
+Navigation retains them within the viewer/organisation context and selected
+account filter. Switching views copies preferences; editing a draft does not
+change its saved definition. Legacy views use the default sort. Invalid saved
+preferences reset visibly. API-authored exact instants remain exact until an
+explicit replacement with calendar dates or reset; opening the editor never
+silently widens their interval.
+
+New matching work does not silently move the displayed page. Background refresh
+holds while cases are selected or bulk changes are under review. When results
+change, **Refresh from first page** replaces the result set and clears selection;
+the conversation thread stays independent. Confirmed queue access loss clears
+displayed case/lookup data. Temporary failures keep a recoverable page. Forward
+paging remains unrestricted; the latest 50 previous-page cursors are retained,
+with an explicit first-page action for earlier navigation.
 
 ## Queue requests
 
@@ -58,6 +87,12 @@ mix a nonzero offset with keyset paging. Invalid or context-mismatched cursors u
 HTTP400 and `inbox_discovery_invalid`. Cursors never grant access; every page
 reapplies the current mandatory scope.
 
+Keyset responses also return opaque `queue_revision`. Send it as `revision` to
+keep the same freshness contract during polling or previous-page navigation,
+including return to a cursorless first page. A malformed marker uses HTTP400;
+changed matching work uses HTTP409. Omit revision only for an explicit new
+first-page refresh. This marker is a freshness check, never an access token.
+
 Responses advertise `discovery_version: 1`, effective `discovery`, `paging`
 (`keyset` or `offset`) and `updated_at`. Legacy requests without discovery/cursor
 retain offset paging. A missing order resolves to `priority_waiting`.
@@ -72,8 +107,8 @@ authorisation. Older clients without discovery retain their offset behaviour.
 
 Keep older displayed pages in place, expose their age and offer an explicit
 first-page refresh when this conflict or scoped updates/reconnection invalidate them.
-The new queue UI and shared live invalidation transport are separate acceptance
-work; this API foundation does not claim that those interactions are complete.
+The shared live invalidation/reconnect transport remains separate acceptance
+work; these queue controls do not claim that transport is complete.
 
 ## Saved views and upgrade behaviour
 

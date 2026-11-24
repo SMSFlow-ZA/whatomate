@@ -7,12 +7,27 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { Filter, Bookmark, Inbox, RotateCw } from 'lucide-vue-next'
+import { Filter, Bookmark, Inbox, RotateCw, Info } from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import InboxFieldMatchers from './InboxFieldMatchers.vue'
 import InboxConditionBuilder from './InboxConditionBuilder.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import InboxQueueDates from './InboxQueueDates.vue'
+import {
+  inboxDateKeys,
+  inboxQueueOrders,
+  readInboxDiscovery,
+} from '@/lib/inboxDiscovery'
+import { useInboxQueuePage } from '@/composables/useInboxQueuePage'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  useId,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsService, tagsService, usersService } from '@/services/api'
 import {
@@ -25,6 +40,7 @@ import {
   type InboxQueue,
   type QueueCase,
   type SavedInboxView,
+  type InboxQueueDiscovery,
 } from '@/services/inbox'
 import { useAuthStore } from '@/stores/auth'
 import { useTeamsStore } from '@/stores/teams'
@@ -43,8 +59,11 @@ let lookupsLoaded = false
 const emit = defineEmits<{ open: [row: QueueCase]; changed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
+const root = ref<HTMLElement>(),
+  queueID = useId()
 const filters = ref<InboxFilters>({ tags: [], queue: 'mine' })
-const rows = ref<QueueCase[]>([])
+const discovery = ref<InboxQueueDiscovery>({ order: 'priority_waiting' })
+const navigationReset = ref(false)
 const views = ref<SavedInboxView[]>([])
 const publishTeams = ref<{ id: string; name: string }[]>([])
 const accounts = ref<{ id: string; name: string }[]>([])
@@ -55,8 +74,6 @@ const selected = ref<string[]>([])
 const results = ref<Record<string, BulkInboxResult>>({})
 const resultContacts = ref<Record<string, string>>({})
 const resultRows = ref<Record<string, QueueCase>>({})
-const counts = ref<Record<string, number>>({})
-const updatedAt = ref('')
 const editingView = ref(false)
 const currentView = computed(() =>
   views.value.find((view) => view.id === activeView.value),
@@ -69,23 +86,58 @@ function restoreNavigation() {
     const raw = storageKey.value ? localStorage.getItem(storageKey.value) : null
     const state = raw ? JSON.parse(raw) : null
     filters.value =
-      state?.filters && typeof state.filters === 'object'
+      state?.filters &&
+      typeof state.filters === 'object' &&
+      !Array.isArray(state.filters)
         ? state.filters
         : { tags: [], queue: 'mine' }
     activeView.value = typeof state?.view === 'string' ? state.view : ''
+    const loaded = readInboxDiscovery(state?.discovery)
+    discovery.value = loaded ?? { order: 'priority_waiting' }
+    navigationReset.value = !loaded
+    if (!loaded) activeView.value = ''
   } catch {
     filters.value = { tags: [], queue: 'mine' }
+    discovery.value = { order: 'priority_waiting' }
+    activeView.value = ''
+    navigationReset.value = true
   }
 }
-const loading = ref(false)
-const failed = ref(false)
-const offset = ref(0)
-const hasMore = ref(false)
 const saving = ref(false)
 const viewName = ref('')
 const viewTeam = ref('')
 const activeView = ref('')
 restoreNavigation()
+const queueContext = () =>
+  JSON.stringify([
+    props.contextKey,
+    props.active,
+    selectedFilters(),
+    discovery.value,
+    activeView.value,
+  ])
+const pager = useInboxQueuePage(queueContext, async (cursor, revision) => {
+  const response = await inboxService.queue(
+    selectedFilters(),
+    0,
+    true,
+    activeView.value || undefined,
+    { ...discovery.value },
+    cursor,
+    revision,
+  )
+  return response.data.data
+})
+const { rows, counts, loading, failed, hasMore } = pager
+const offset = computed(() => pager.position.value * 50)
+const updatedAt = computed(() =>
+  pager.updatedAt.value
+    ? new Date(pager.updatedAt.value).toLocaleTimeString()
+    : '',
+)
+const dateCount = computed(
+  () => inboxDateKeys.filter((key) => discovery.value[key]).length,
+)
 const action = ref<BulkInboxAction>('resolve')
 const actionValue = ref('')
 const overrideReason = ref('')
@@ -123,7 +175,8 @@ const filterCount = computed(
     ].filter((key) => !!filters.value[key as keyof InboxFilters]).length +
     (filters.value.tags?.length ?? 0) +
     (filters.value.fields?.length ?? 0) +
-    (filters.value.predicates?.length ?? 0),
+    (filters.value.predicates?.length ?? 0) +
+    dateCount.value,
 )
 const selectable = computed(() =>
   rows.value.filter((row) => row.status !== 'resolved'),
@@ -141,6 +194,12 @@ function selectPage() {
 function clearFilters() {
   activeView.value = ''
   filters.value = { tags: [], queue: filters.value.queue }
+  discovery.value = { order: discovery.value.order }
+}
+function resetDiscovery() {
+  discovery.value = { order: 'priority_waiting' }
+  activeView.value = ''
+  navigationReset.value = false
 }
 const clock = ref(Date.now())
 const ageTimer = setInterval(() => {
@@ -176,11 +235,19 @@ const selectedCases = computed(() =>
 const actionReady = computed(
   () =>
     selectedCases.value.length > 0 &&
+    !pager.changed.value &&
+    !pager.denied.value &&
     (action.value === 'resolve' || actionValue.value !== ''),
 )
-let revision = 0
+let viewGeneration = 0
+let lookupGeneration = 0
+let mutationGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-let lastFilterShape = JSON.stringify({ ...filters.value, search: undefined })
+let lastFilterShape = JSON.stringify([
+  { ...filters.value, search: undefined },
+  discovery.value,
+  activeView.value,
+])
 
 function isCurrent(row: QueueCase) {
   return (
@@ -198,34 +265,38 @@ function selectedFilters() {
 
 async function refresh() {
   if (!props.active || document.visibilityState !== 'visible') return
-  const id = ++revision
-  loading.value = true
-  failed.value = false
-  try {
-    const { data } = await inboxService.queue(
-      selectedFilters(),
-      offset.value,
-      true,
-      activeView.value || undefined,
+  selected.value = []
+  reviewing.value = false
+  await pager.refresh()
+}
+async function refreshFromStart() {
+  await refresh()
+  if (!failed.value && !pager.changed.value && !pager.denied.value)
+    await nextTick(() =>
+      root.value
+        ?.querySelector<HTMLButtonElement>('[data-queue-refresh]')
+        ?.focus(),
     )
-    if (id !== revision) return
-    counts.value = data.data.counts ?? {}
-    updatedAt.value = new Date().toLocaleTimeString()
-    rows.value = data.data.cases
-    hasMore.value = data.data.has_more
-    selected.value = selected.value.filter((selectedId) =>
-      rows.value.some((row) => row.id === selectedId),
-    )
-  } catch {
-    if (id === revision) failed.value = true
-  } finally {
-    if (id === revision) loading.value = false
-  }
+}
+function poll() {
+  if (
+    !props.active ||
+    document.visibilityState !== 'visible' ||
+    loading.value ||
+    reviewing.value ||
+    saving.value ||
+    selected.value.length
+  )
+    return
+  return pager.poll()
 }
 
 async function refreshViews() {
+  const request = ++viewGeneration,
+    context = props.contextKey
   try {
     const response = (await inboxService.views()).data.data
+    if (request !== viewGeneration || context !== props.contextKey) return
     views.value = response.views
     publishTeams.value = response.publish_teams ?? []
     if (
@@ -234,36 +305,47 @@ async function refreshViews() {
     ) {
       activeView.value = ''
       filters.value = { tags: [], queue: 'mine' }
+      discovery.value = { order: 'priority_waiting' }
+      navigationReset.value = true
     }
   } catch {
+    if (request !== viewGeneration || context !== props.contextKey) return
     toast.error(t('inboxQueue.loadViewsError'))
   }
 }
 
 watch(
-  filters,
+  [filters, discovery, activeView],
   () => {
     if (storageKey.value)
       try {
         localStorage.setItem(
           storageKey.value,
-          JSON.stringify({ filters: filters.value, view: activeView.value }),
+          JSON.stringify({
+            filters: filters.value,
+            view: activeView.value,
+            discovery: discovery.value,
+          }),
         )
       } catch {
         /* Storage can be disabled by the browser. */
       }
-    offset.value = 0
     selected.value = []
     results.value = {}
+    resultContacts.value = {}
+    resultRows.value = {}
+    mutationGeneration++
+    saving.value = false
     reviewing.value = false
-    revision++
+    pager.reset()
     clearTimeout(searchTimer)
-    const shape = JSON.stringify({ ...filters.value, search: undefined })
+    const shape = JSON.stringify([
+      { ...filters.value, search: undefined },
+      discovery.value,
+      activeView.value,
+    ])
     const searching = shape === lastFilterShape && !!filters.value.search
     lastFilterShape = shape
-    rows.value = []
-    counts.value = {}
-    updatedAt.value = ''
     if (searching) {
       loading.value = true
       searchTimer = setTimeout(() => void refresh(), 250)
@@ -273,53 +355,46 @@ watch(
 )
 
 async function loadLookups() {
+  const request = ++lookupGeneration,
+    context = props.contextKey
   lookupFailed.value = false
   const results = await Promise.allSettled([
-    accountsService.list().then((res) => {
-      accounts.value = res.data.data?.accounts ?? []
-      if (
-        filters.value.account_id &&
-        !accounts.value.some((item) => item.id === filters.value.account_id)
-      ) {
-        filters.value.account_id = undefined
-        activeView.value = ''
-      }
-    }),
-    teamsStore.fetchTeams({ limit: 100 }).then((result) => {
-      teams.value = result.teams
-      if (
-        filters.value.team_id &&
-        !teams.value.some((item) => item.id === filters.value.team_id)
-      ) {
-        filters.value.team_id = undefined
-        activeView.value = ''
-      }
-    }),
-    usersService.list({ limit: 100 }).then((res) => {
-      agents.value = res.data.data?.users ?? []
-    }),
-    tagsService.list({ limit: 100 }).then((res) => {
-      tags.value = (res.data as any).data?.tags ?? []
-    }),
+    accountsService.list(),
+    teamsStore.fetchTeams({ limit: 100 }),
+    usersService.list({ limit: 100 }),
+    tagsService.list({ limit: 100 }),
   ])
-  if (
-    accounts.value.length &&
-    filters.value.account_id &&
-    !accounts.value.some((item) => item.id === filters.value.account_id)
-  )
-    filters.value.account_id = undefined
-  if (
-    teams.value.length &&
-    filters.value.team_id &&
-    !teams.value.some((item) => item.id === filters.value.team_id)
-  )
-    filters.value.team_id = undefined
+  if (request !== lookupGeneration || context !== props.contextKey) return
+  if (results[0].status === 'fulfilled')
+    accounts.value = results[0].value.data.data?.accounts ?? []
+  if (results[1].status === 'fulfilled') teams.value = results[1].value.teams
+  if (results[2].status === 'fulfilled')
+    agents.value = results[2].value.data.data?.users ?? []
+  if (results[3].status === 'fulfilled')
+    tags.value =
+      (results[3].value.data as { data?: { tags?: { name: string }[] } }).data
+        ?.tags ?? []
+  for (const [index, list, field] of [
+    [0, accounts.value, 'account_id'],
+    [1, teams.value, 'team_id'],
+  ] as const) {
+    if (
+      results[index].status === 'fulfilled' &&
+      filters.value[field] &&
+      !list.some((item) => item.id === filters.value[field])
+    ) {
+      filters.value[field] = undefined
+      activeView.value = ''
+      navigationReset.value = true
+    }
+  }
   lookupsLoaded = results.every((result) => result.status === 'fulfilled')
   lookupFailed.value = !lookupsLoaded
 }
 function activate() {
   if (!props.active || document.visibilityState !== 'visible') return
-  void refresh()
+  if (pager.updatedAt.value) void poll()
+  else void refresh()
   void refreshViews()
   if (!lookupsLoaded) void loadLookups()
 }
@@ -332,31 +407,59 @@ watch(
   (active) => {
     if (active) activate()
     else {
-      revision++
-      loading.value = false
+      pager.invalidate()
     }
   },
 )
 watch(
   () => props.contextKey,
   () => {
-    revision++
-    rows.value = []
+    pager.reset()
+    viewGeneration++
+    lookupGeneration++
+    views.value = []
+    publishTeams.value = []
+    accounts.value = []
+    teams.value = []
+    agents.value = []
+    tags.value = []
     selected.value = []
-    offset.value = 0
     lookupsLoaded = false
     restoreNavigation()
-    activate()
+    if (props.active && document.visibilityState === 'visible') {
+      void refreshViews()
+      void loadLookups()
+    }
   },
 )
 watch(selected, () => {
   reviewing.value = false
 })
+watch(pager.denied, (denied) => {
+  if (!denied) return
+  selected.value = []
+  results.value = {}
+  resultContacts.value = {}
+  resultRows.value = {}
+  reviewing.value = false
+  views.value = []
+  publishTeams.value = []
+  accounts.value = []
+  teams.value = []
+  agents.value = []
+  tags.value = []
+  lookupsLoaded = false
+  viewGeneration++
+  lookupGeneration++
+})
 const refreshTimer = setInterval(() => {
-  if (!loading.value && !reviewing.value && !saving.value) void refresh()
+  void poll()
 }, 20_000)
 onUnmounted(() => {
-  revision++
+  pager.invalidate()
+  mutationGeneration++
+  viewGeneration++
+  lookupGeneration++
   clearInterval(refreshTimer)
   clearTimeout(searchTimer)
   document.removeEventListener('visibilitychange', activate)
@@ -365,6 +468,10 @@ onUnmounted(() => {
 function chooseView() {
   editingView.value = false
   const view = views.value.find((view) => view.id === activeView.value)
+  const loaded = readInboxDiscovery(view?.discovery)
+  discovery.value = loaded ?? { order: 'priority_waiting' }
+  navigationReset.value = !loaded
+  if (!loaded) activeView.value = ''
   filters.value = view
     ? {
         tags: [],
@@ -379,10 +486,10 @@ function changeTeam() {
 }
 
 function pageBy(delta: number) {
-  offset.value = Math.max(0, offset.value + delta)
   selected.value = []
   results.value = {}
-  void refresh()
+  if (delta > 0) void pager.older()
+  else void pager.newer()
 }
 
 function editView() {
@@ -400,55 +507,83 @@ async function updateView() {
   )
     return
   saving.value = true
+  const request = ++mutationGeneration,
+    context = queueContext()
   try {
     await inboxService.updateView(
       activeView.value,
       viewName.value.trim(),
       selectedFilters(),
       viewTeam.value || undefined,
+      { ...discovery.value },
     )
+    if (request !== mutationGeneration || context !== queueContext()) return
     editingView.value = false
     await refreshViews()
   } catch {
-    toast.error(t('inboxQueue.saveError'))
+    if (request === mutationGeneration && context === queueContext())
+      toast.error(t('inboxQueue.saveError'))
   } finally {
-    saving.value = false
+    if (request === mutationGeneration) saving.value = false
   }
 }
 async function saveView() {
   if (!viewName.value.trim() || saving.value) return
   saving.value = true
+  const request = ++mutationGeneration,
+    context = queueContext()
   try {
     const { data } = await inboxService.saveView(
       viewName.value.trim(),
       selectedFilters(),
       viewTeam.value || undefined,
+      { ...discovery.value },
     )
+    if (request !== mutationGeneration || context !== queueContext()) return
     viewName.value = ''
     viewTeam.value = ''
     activeView.value = data.data.view.id
+    const saved = data.data.view
+    filters.value = {
+      tags: [],
+      ...saved.filters,
+      ...(saved.team_id ? { team_id: saved.team_id } : {}),
+    }
+    discovery.value = readInboxDiscovery(saved.discovery) ?? {
+      order: 'priority_waiting',
+    }
     await refreshViews()
-    chooseView()
   } catch {
-    toast.error(t('inboxQueue.saveError'))
+    if (request === mutationGeneration && context === queueContext())
+      toast.error(t('inboxQueue.saveError'))
   } finally {
-    saving.value = false
+    if (request === mutationGeneration) saving.value = false
   }
 }
 
 async function removeView() {
+  if (saving.value || !currentView.value?.capabilities?.remove) return
+  saving.value = true
+  const request = ++mutationGeneration,
+    context = queueContext()
   try {
     await inboxService.deleteView(activeView.value)
-    await refreshViews()
+    if (request !== mutationGeneration || context !== queueContext()) return
     activeView.value = ''
+    await refreshViews()
   } catch {
-    toast.error(t('inboxQueue.saveError'))
+    if (request === mutationGeneration && context === queueContext())
+      toast.error(t('inboxQueue.saveError'))
+  } finally {
+    if (request === mutationGeneration) saving.value = false
   }
 }
 
 async function applyBulk() {
   if (!actionReady.value || saving.value) return
   saving.value = true
+  const request = ++mutationGeneration,
+    context = queueContext()
   try {
     const snapshot = [...selectedCases.value]
     resultRows.value = Object.fromEntries(snapshot.map((row) => [row.id, row]))
@@ -464,6 +599,7 @@ async function applyBulk() {
         ? overrideReason.value.trim() || undefined
         : undefined,
     )
+    if (request !== mutationGeneration || context !== queueContext()) return
     results.value = Object.fromEntries(
       data.data.results.map((item) => [item.id, item.result]),
     )
@@ -479,15 +615,17 @@ async function applyBulk() {
     emit('changed')
     await refresh()
   } catch {
-    toast.error(t('inboxQueue.bulkError'))
+    if (request === mutationGeneration && context === queueContext())
+      toast.error(t('inboxQueue.bulkError'))
   } finally {
-    saving.value = false
+    if (request === mutationGeneration) saving.value = false
   }
 }
 </script>
 
 <template>
   <section
+    ref="root"
     v-show="active"
     class="inbox-ui inbox-queue"
     :aria-label="t('inboxQueue.title')"
@@ -529,7 +667,14 @@ async function applyBulk() {
               }}</Button
             ></PopoverTrigger
           ><PopoverContent
-            class="inbox-ui max-h-[75dvh] w-80 overflow-auto"
+            class="inbox-ui w-80 overflow-auto"
+            style="
+              max-height: min(
+                75dvh,
+                var(--reka-popper-available-height, 75dvh)
+              );
+            "
+            :collision-padding="12"
             align="start"
             ><h2 class="inbox-section-heading mb-4">
               {{ t('inboxUX.queueFilters') }}
@@ -626,6 +771,7 @@ async function applyBulk() {
                   /><InboxConditionBuilder v-model="filters" />
                 </div>
               </details>
+              <InboxQueueDates v-model="discovery" :disabled="saving" />
               <Button variant="outline" size="sm" @click="clearFilters">{{
                 t('inboxUX.resetFilters')
               }}</Button>
@@ -640,7 +786,14 @@ async function applyBulk() {
               }}</Button
             ></PopoverTrigger
           ><PopoverContent
-            class="inbox-ui w-80 max-h-[75dvh] overflow-auto"
+            class="inbox-ui w-80 overflow-auto"
+            style="
+              max-height: min(
+                75dvh,
+                var(--reka-popper-available-height, 75dvh)
+              );
+            "
+            :collision-padding="12"
             align="start"
             ><h2 class="inbox-section-heading mb-3">
               {{ t('inboxQueue.savedViews') }}
@@ -723,10 +876,61 @@ async function applyBulk() {
           class="ml-auto h-8 w-8"
           :aria-label="t('inboxQuality.refresh')"
           :disabled="loading"
+          data-queue-refresh
           @click="refresh"
           ><RotateCw class="h-3.5 w-3.5" aria-hidden="true"
         /></Button>
       </div>
+      <div class="mt-3 flex items-end gap-2">
+        <label class="inbox-label min-w-0 flex-1" :for="queueID + '-sort'"
+          >{{ t('inboxDiscovery.sort') }}
+          <select
+            :id="queueID + '-sort'"
+            v-model="discovery.order"
+            class="min-w-0 w-full"
+            :disabled="saving"
+          >
+            <option
+              v-for="order in inboxQueueOrders"
+              :key="order"
+              :value="order"
+            >
+              {{ t('inboxDiscovery.order.' + order) }}
+            </option>
+          </select>
+        </label>
+        <Popover
+          ><PopoverTrigger as-child
+            ><Button
+              variant="ghost"
+              size="icon"
+              class="min-h-[44px] min-w-[44px]"
+              :aria-label="t('inboxDiscovery.orderDetails')"
+              ><Info
+                class="h-4 w-4"
+                aria-hidden="true" /></Button></PopoverTrigger
+          ><PopoverContent
+            class="inbox-ui max-w-[calc(100vw-2rem)] w-72"
+            align="end"
+            ><p class="text-sm">
+              {{ t('inboxDiscovery.orderHelp.' + discovery.order) }}
+            </p></PopoverContent
+          ></Popover
+        >
+      </div>
+      <p v-if="dateCount" class="inbox-caption mt-2">
+        {{ t('inboxDiscovery.appliedDates', { timezone: discovery.timezone }) }}
+      </p>
+      <p v-if="navigationReset" role="status" class="inbox-caption mt-2">
+        {{ t('inboxDiscovery.navigationReset') }}
+        <button
+          type="button"
+          class="min-h-[44px] underline"
+          @click="navigationReset = false"
+        >
+          {{ t('inboxDiscovery.dismiss') }}
+        </button>
+      </p>
       <div v-if="filterCount" class="mt-2 grid gap-1">
         <InboxFilterSummary
           :filters="filters"
@@ -762,6 +966,56 @@ async function applyBulk() {
           {{ t('common.retry') }}
         </button>
       </p>
+    </div>
+    <div
+      v-if="pager.changed.value"
+      role="status"
+      data-queue-refresh-notice
+      class="border-y border-border p-3"
+    >
+      <p class="text-sm">
+        {{
+          t(
+            pager.invalid.value
+              ? 'inboxDiscovery.invalidPage'
+              : 'inboxDiscovery.changed',
+          )
+        }}
+      </p>
+      <p v-if="selected.length" class="inbox-caption mt-1">
+        {{ t('inboxDiscovery.selectionRefresh') }}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        class="mt-2"
+        :disabled="loading"
+        @click="refreshFromStart"
+        >{{ t('inboxDiscovery.refreshStart') }}</Button
+      >
+      <Button
+        v-if="pager.invalid.value"
+        variant="ghost"
+        size="sm"
+        :disabled="loading"
+        @click="resetDiscovery"
+        >{{ t('inboxDiscovery.resetDiscovery') }}</Button
+      >
+    </div>
+    <div
+      v-if="pager.denied.value"
+      role="alert"
+      class="border-y border-border p-3"
+    >
+      <p class="text-sm">{{ t('inboxDiscovery.denied') }}</p>
+      <Button
+        variant="outline"
+        size="sm"
+        class="mt-2"
+        :disabled="loading"
+        @click="refresh"
+        >{{ t('common.retry') }}</Button
+      >
     </div>
     <div v-if="canEdit && selectedCases.length" class="inbox-queue-bulk">
       <p class="mb-2 text-sm font-medium">
@@ -882,7 +1136,10 @@ async function applyBulk() {
           aria-hidden="true"
         />
       </div>
-      <div v-else-if="!rows.length && !failed" class="inbox-empty px-5">
+      <div
+        v-else-if="!rows.length && !failed && !pager.denied.value"
+        class="inbox-empty px-5"
+      >
         <Inbox class="h-7 w-7" aria-hidden="true" />
         <h3>{{ t('inboxQueue.empty') }}</h3>
         <p>{{ t('inboxUX.queueEmptyHelp') }}</p>
@@ -957,20 +1214,36 @@ async function applyBulk() {
         </li>
       </ul>
     </div>
-    <div v-if="offset || hasMore" class="flex gap-2 border-t border-border p-3">
+    <div
+      v-if="offset || hasMore"
+      class="flex flex-wrap items-center gap-2 border-t border-border p-3"
+    >
       <Button
         variant="outline"
         size="sm"
-        :disabled="!offset || loading"
+        :disabled="!pager.hasPrevious.value || loading || pager.changed.value"
         @click="pageBy(-50)"
         >{{ t('inboxQueue.previous') }}</Button
       ><Button
         variant="outline"
         size="sm"
-        :disabled="!hasMore || loading"
+        :disabled="!hasMore || loading || pager.changed.value"
         @click="pageBy(50)"
         >{{ t('inboxQueue.next') }}</Button
       >
+      <span class="inbox-caption">{{
+        t('inboxDiscovery.page', { number: pager.position.value + 1 })
+      }}</span>
+      <p v-if="pager.historyTrimmed.value" class="inbox-caption w-full">
+        {{ t('inboxDiscovery.historyTrimmed') }}
+        <button
+          type="button"
+          class="min-h-[44px] underline"
+          @click="refreshFromStart"
+        >
+          {{ t('inboxDiscovery.refreshStart') }}
+        </button>
+      </p>
     </div>
   </section>
 </template>
