@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth'
+import { inboxActorName } from '@/lib/inboxActors'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useInboxCursorPage } from '@/composables/useInboxCursorPage'
 import {
@@ -21,6 +22,14 @@ const props = defineProps<{
 const emit = defineEmits<{ review: [request: IntegrationControlReview] }>()
 const { t, te } = useI18n()
 const auth = useAuthStore()
+const knownActors = computed(() =>
+  props.run.actor_id && props.run.actor_name
+    ? [
+        { id: props.run.actor_id, full_name: props.run.actor_name },
+        ...(props.users || []),
+      ]
+    : props.users,
+)
 const viewer = useInboxViewerContext()
 const operator = computed(() =>
   ['settings.general', 'chat', 'custom_actions'].every((resource) =>
@@ -98,8 +107,10 @@ function disposition(item: IntegrationExecution) {
 }
 function actor(id: string) {
   return (
-    props.users?.find((user) => user.id === id)?.full_name ||
-    t('inboxQuality.formerUser')
+    inboxActorName(id, auth.user, knownActors.value) ||
+    (id
+      ? t('inboxIntegrationHistory.actorIdentifier', { id })
+      : t('inboxIntegrationHistory.actorUnavailable'))
   )
 }
 </script>
@@ -420,7 +431,7 @@ function actor(id: string) {
         v-if="runRecords"
         :key="run.id + viewer"
         :run-id="run.id"
-        :users="users"
+        :users="knownActors"
         :operations="items"
       />
     </div>

@@ -3361,6 +3361,8 @@
     "fieldDisposition": "Field updates",
     "attempts": "Submission attempts",
     "originalActor": "Original execution actor",
+    "actorIdentifier": "User {id}",
+    "actorUnavailable": "User name unavailable",
     "providerStatus": "Recorded provider status",
     "duration": "Recorded response time",
     "started": "Last submission started",

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useInboxCursorPage } from '@/composables/useInboxCursorPage'
 import { useAuthStore } from '@/stores/auth'
+import { inboxActorName } from '@/lib/inboxActors'
 import {
   inboxIntegrations,
   type IntegrationRecovery,
@@ -133,8 +134,10 @@ function operationLabel(record: IntegrationRecovery) {
 }
 function actor(id: string) {
   return (
-    props.users?.find((user) => user.id === id)?.full_name ||
-    t('inboxQuality.formerUser')
+    inboxActorName(id, auth.user, props.users) ||
+    (id
+      ? t('inboxIntegrationHistory.actorIdentifier', { id })
+      : t('inboxIntegrationHistory.actorUnavailable'))
   )
 }
 function priorState(value: string) {

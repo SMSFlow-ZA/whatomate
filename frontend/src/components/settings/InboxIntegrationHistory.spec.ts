@@ -130,6 +130,65 @@ afterEach(() => {
   }
 })
 
+it('uses the already scoped run actor name for its matching execution and recovery records', async () => {
+  mock.auth.user.id = 'different-viewer'
+  mock.runRecoveries.mockResolvedValue(recordPage())
+  const { root } = await mount(
+    InboxIntegrationRun,
+    reactive({
+      run: { ...run(), actor_id: 'viewer-a', actor_name: 'Scoped operator' },
+      users: [],
+    }),
+  )
+  expect(root.textContent).toContain('Scoped operator')
+  expect(root.textContent).not.toContain(
+    'inboxIntegrationHistory.actorIdentifier:viewer-a',
+  )
+  expect(mock.recoveryEvidence).not.toHaveBeenCalled()
+})
+
+it.each([InboxIntegrationRun, InboxIntegrationRecords])(
+  'uses the current actor name without a directory lookup in %s',
+  async (component) => {
+    mock.auth.user.full_name = 'Current operator'
+    mock.runRecoveries.mockResolvedValue(recordPage())
+    const { root } = await mount(
+      component,
+      reactive({ run: run(), runId: 'run-a', users: [] }),
+    )
+    expect(root.textContent).toContain('Current operator')
+    expect(root.textContent).not.toContain('inboxQuality.formerUser')
+    expect(mock.recoveryEvidence).not.toHaveBeenCalled()
+  },
+)
+it.each([InboxIntegrationRun, InboxIntegrationRecords])(
+  'shows an honest identifier fallback for another actor in %s',
+  async (component) => {
+    mock.executions.mockResolvedValue(
+      envelope({
+        executions: [{ ...operation(), actor_id: 'unknown-actor' }],
+        has_more: false,
+        next_cursor: '',
+      }),
+    )
+    mock.runRecoveries.mockResolvedValue(
+      envelope({
+        recoveries: [{ ...decision(), actor_id: 'unknown-actor' }],
+        has_more: false,
+        next_cursor: '',
+      }),
+    )
+    const { root } = await mount(
+      component,
+      reactive({ run: run(), runId: 'run-a', users: [] }),
+    )
+    expect(root.textContent).toContain(
+      'inboxIntegrationHistory.actorIdentifier:unknown-actor',
+    )
+    expect(root.textContent).not.toContain('inboxQuality.formerUser')
+  },
+)
+
 it('shows provider truth after parent cancellation without requesting private values or evidence', async () => {
   mock.executions.mockResolvedValue(
     envelope({
