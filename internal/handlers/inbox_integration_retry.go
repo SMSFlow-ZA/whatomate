@@ -28,7 +28,19 @@ type inboxIntegrationRetryPreview struct {
 }
 
 func (a *App) integrationRecoveryAuth(r *fastglue.Request) (uuid.UUID, uuid.UUID, bool) {
-	org, actor, ok := a.inboxFeatureAuth(r, models.ActionWrite)
+	return a.integrationOperatorAuth(r, false)
+}
+
+func (a *App) integrationOperatorAuth(r *fastglue.Request, allowDisabled bool) (uuid.UUID, uuid.UUID, bool) {
+	var org, actor uuid.UUID
+	var ok bool
+	if allowDisabled {
+		var err error
+		org, actor, err = a.requireAuth(r, models.ResourceChat, models.ActionWrite)
+		ok = err == nil
+	} else {
+		org, actor, ok = a.inboxFeatureAuth(r, models.ActionWrite)
+	}
 	if !ok {
 		return uuid.Nil, uuid.Nil, false
 	}
@@ -181,7 +193,7 @@ func (a *App) RetryInboxIntegration(r *fastglue.Request) error {
 	// operation ID makes an uncertain HTTP acknowledgement safe to replay.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		enabled, err := inboxWorkflowEnabled(tx, org, true)
 		if err != nil {
 			return err
@@ -254,12 +266,14 @@ func (a *App) RetryInboxIntegration(r *fastglue.Request) error {
 		}
 		recovery = models.InboxIntegrationRecovery{BaseModel: models.BaseModel{ID: input.OperationID}, OrganizationID: org, ExecutionID: id, ActorID: actor, Kind: "retry", FromState: execution.State, FromOutcome: execution.Outcome, AttemptCount: execution.AttemptCount, Reason: input.Reason, RequestDigest: requestDigest}
 		recovery.PriorStartedAt, recovery.PriorCompletedAt, recovery.ProviderStatus, recovery.DurationMillis = execution.StartedAt, execution.CompletedAt, execution.ProviderStatus, execution.DurationMillis
+		runID := execution.RunID
+		recovery.RunID, recovery.FromResultOrigin = &runID, execution.ResultOrigin
 		if err := tx.Create(&recovery).Error; err != nil {
 			return err
 		}
 		// Retain exact request, operation ID, actor and immutable expiry. This
 		// queues work only; it never enables a dispatch switch or calls HTTP.
-		if err := tx.Model(&execution).Updates(map[string]any{"state": "pending", "outcome": "", "retry_requested": true, "started_at": nil, "completed_at": nil, "provider_status": 0, "duration_millis": 0, "reconciled_by_id": actor, "reconciliation_reason": input.Reason}).Error; err != nil {
+		if err := tx.Model(&execution).Updates(map[string]any{"state": "pending", "outcome": "", "retry_requested": true, "result_origin": "", "started_at": nil, "completed_at": nil, "provider_status": 0, "duration_millis": 0, "reconciled_by_id": actor, "reconciliation_reason": input.Reason}).Error; err != nil {
 			return err
 		}
 		if run.NextAction < 0 || run.NextAction >= len(run.ActionOutcomes) {

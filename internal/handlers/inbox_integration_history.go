@@ -26,26 +26,28 @@ func (a *App) scopedInboxIntegrationHistory(db *gorm.DB, org, actor uuid.UUID) *
 }
 
 type inboxIntegrationHistoryItem struct {
-	ID               uuid.UUID  `json:"id"`
-	RunID            uuid.UUID  `json:"run_id"`
-	ActionIndex      int        `json:"action_index"`
-	IntegrationID    uuid.UUID  `json:"integration_id"`
-	CaseID           uuid.UUID  `json:"case_id"`
-	AccountID        uuid.UUID  `json:"account_id"`
-	ActorID          uuid.UUID  `json:"actor_id"`
-	State            string     `json:"state"`
-	Outcome          string     `json:"outcome,omitempty"`
-	AttemptCount     int        `json:"attempt_count"`
-	CreatedAt        time.Time  `json:"created_at"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
-	OutputsAppliedAt *time.Time `json:"outputs_applied_at,omitempty"`
-	RetryUntil       *time.Time `json:"retry_until,omitempty"`
-	ProviderStatus   int        `json:"provider_status,omitempty"`
-	DurationMillis   int64      `json:"duration_ms,omitempty"`
+	ID                 uuid.UUID  `json:"id"`
+	RunID              uuid.UUID  `json:"run_id"`
+	ActionIndex        int        `json:"action_index"`
+	IntegrationID      uuid.UUID  `json:"integration_id"`
+	CaseID             uuid.UUID  `json:"case_id"`
+	AccountID          uuid.UUID  `json:"account_id"`
+	ActorID            uuid.UUID  `json:"actor_id"`
+	State              string     `json:"state"`
+	Outcome            string     `json:"outcome,omitempty"`
+	AttemptCount       int        `json:"attempt_count"`
+	CreatedAt          time.Time  `json:"created_at"`
+	StartedAt          *time.Time `json:"started_at,omitempty"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	OutputsAppliedAt   *time.Time `json:"outputs_applied_at,omitempty"`
+	OutputsDiscardedAt *time.Time `json:"outputs_discarded_at,omitempty"`
+	ResultOrigin       string     `json:"result_origin,omitempty"`
+	RetryUntil         *time.Time `json:"retry_until,omitempty"`
+	ProviderStatus     int        `json:"provider_status,omitempty"`
+	DurationMillis     int64      `json:"duration_ms,omitempty"`
 }
 
-const integrationHistoryColumns = "id,run_id,action_index,integration_id,case_id,account_id,actor_id,state,outcome,attempt_count,created_at,started_at,completed_at,outputs_applied_at,retry_until,provider_status,duration_millis"
+const integrationHistoryColumns = "id,run_id,action_index,integration_id,case_id,account_id,actor_id,state,outcome,attempt_count,created_at,started_at,completed_at,outputs_applied_at,outputs_discarded_at,result_origin,retry_until,provider_status,duration_millis"
 
 type inboxIntegrationHistoryCursor struct {
 	CreatedAt time.Time `json:"at"`
@@ -143,6 +145,9 @@ func (a *App) ListInboxIntegrationRecoveries(r *fastglue.Request) error {
 	if more {
 		items = items[:50]
 		next = integrationHistoryCursor(items[49].CreatedAt, items[49].ID)
+	}
+	for i := range items {
+		items[i].HasEvidence = items[i].EncryptedEvidence != ""
 	}
 	return r.SendEnvelope(map[string]any{"recoveries": items, "has_more": more, "next_cursor": next})
 }

@@ -201,10 +201,13 @@ func (a *App) advanceInboxSequence(ctx context.Context, id, org uuid.UUID) (inbo
 			if err == nil {
 				switch execution.State {
 				case "succeeded":
-					if execution.OutputsAppliedAt == nil {
+					if execution.OutputsAppliedAt == nil && execution.OutputsDiscardedAt == nil {
 						return stopInboxSequence(tx, &run, inboxSequenceReview, "output_context_changed")
 					}
 					run.ActionOutcomes[run.NextAction].Status, run.ActionOutcomes[run.NextAction].Reason = "succeeded", "integration_completed"
+					if execution.OutputsDiscardedAt != nil {
+						run.ActionOutcomes[run.NextAction].Reason = "integration_outputs_discarded"
+					}
 					run.NextAction++
 					return saveInboxSequence(tx, &run)
 				case "pending":

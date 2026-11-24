@@ -84,7 +84,7 @@ func (a *App) claimInboxIntegration(ctx context.Context, id uuid.UUID) (models.I
 	var execution models.InboxIntegrationExecution
 	var prepared preparedInboxIntegration
 	claimed := false
-	err := a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := privateInboxIntegrationDB(a.DB).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "inbox-integration-dispatch").Error; err != nil {
 			return err
 		}
@@ -217,28 +217,13 @@ func (a *App) executeClaimedInboxIntegration(ctx context.Context, execution mode
 		return a.finishInboxIntegration(ctx, execution, "unknown", "needs_reconciliation", response)
 	}
 	// Validate selected outputs before persisting anything the provider returned.
-	selected := map[string]json.RawMessage{}
 	fields, err := a.integrationOutputFields(a.DB, prepared.Definition, execution.ActorID)
 	if err != nil {
 		return a.finishInboxIntegration(ctx, execution, "unknown", "output_access_changed", response)
 	}
-	for _, output := range prepared.Definition.Outputs {
-		value, ok := response.Fields[output.Name]
-		if !ok || fields[output.DefinitionID].ValidateValue(value) != nil || emptyInboxField(value) {
-			return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
-		}
-		if inboxIntegrationResultContainsCredential(value, credential) {
-			return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
-		}
-		selected[output.Name] = value
-	}
-	if prepared.Definition.ReferenceKey != "" {
-		value, ok := response.Fields[prepared.Definition.ReferenceKey]
-		var reference string
-		if !ok || json.Unmarshal(value, &reference) != nil || strings.TrimSpace(reference) == "" || len(reference) > 200 || strings.ContainsAny(reference, "\r\n\x00") || (credential != "" && strings.Contains(reference, credential)) {
-			return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
-		}
-		selected[prepared.Definition.ReferenceKey] = value
+	selected, err := selectInboxIntegrationResult(prepared.Definition, fields, response.Fields, credential, false)
+	if err != nil {
+		return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
 	}
 	raw, err := json.Marshal(selected)
 	if err != nil {
@@ -248,6 +233,7 @@ func (a *App) executeClaimedInboxIntegration(ctx context.Context, execution mode
 	if err != nil {
 		return err
 	}
+	execution.ResultOrigin = "provider"
 	return a.finishInboxIntegration(ctx, execution, "succeeded", "", response)
 }
 
@@ -281,7 +267,7 @@ func (a *App) finishInboxIntegration(ctx context.Context, execution models.Inbox
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := privateInboxIntegrationDB(a.DB).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var stored models.InboxIntegrationExecution
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&stored, "id=? AND organization_id=?", execution.ID, execution.OrganizationID).Error; err != nil {
 			return err
@@ -290,7 +276,7 @@ func (a *App) finishInboxIntegration(ctx context.Context, execution models.Inbox
 			return nil
 		}
 		now := time.Now().UTC()
-		updates := map[string]any{"state": state, "outcome": outcome, "encrypted_result": execution.EncryptedResult, "provider_status": response.Status, "duration_millis": response.Duration.Milliseconds(), "completed_at": now}
+		updates := map[string]any{"state": state, "outcome": outcome, "encrypted_result": execution.EncryptedResult, "result_origin": execution.ResultOrigin, "provider_status": response.Status, "duration_millis": response.Duration.Milliseconds(), "completed_at": now}
 		if state == "succeeded" {
 			applied, err := a.applyInboxIntegrationOutputs(tx, execution, now)
 			if err != nil {
@@ -304,6 +290,7 @@ func (a *App) finishInboxIntegration(ctx context.Context, execution models.Inbox
 		}
 		return tx.Model(&stored).Updates(updates).Error
 	})
+	return inboxIntegrationPersistenceError(err)
 }
 
 func (a *App) reconcileInterruptedInboxIntegrations(ctx context.Context, now time.Time) error {

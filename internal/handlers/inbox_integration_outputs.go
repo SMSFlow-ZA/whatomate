@@ -14,7 +14,16 @@ import (
 // A provider receipt cannot overwrite a newer edit or a subsequent case. The
 // full field batch and its marker commit together; no rule-triggering activity
 // is emitted by integration results.
-func (a *App) applyInboxIntegrationOutputs(tx *gorm.DB, execution models.InboxIntegrationExecution, now time.Time) (bool, error) {
+func (a *App) applyInboxIntegrationOutputs(tx *gorm.DB, execution models.InboxIntegrationExecution, now time.Time, review ...inboxIntegrationOutputReview) (bool, error) {
+	tx = privateInboxIntegrationDB(tx)
+	if len(review) > 1 {
+		return false, errInboxTransition
+	}
+	if len(review) == 1 {
+		// A signed reviewer acts with their current rights/context. The copy is
+		// never saved back over the original external actor/request snapshot.
+		execution.ActorID, execution.CaseDigest = review[0].ActorID, review[0].CaseDigest
+	}
 	if err := lockInboxFieldDefinitions(tx, execution.OrganizationID); err != nil {
 		return false, err
 	}
@@ -44,7 +53,11 @@ func (a *App) applyInboxIntegrationOutputs(tx *gorm.DB, execution models.InboxIn
 	if err := tx.First(&run, "id=? AND organization_id=?", execution.RunID, execution.OrganizationID).Error; err != nil {
 		return false, err
 	}
-	if run.State != inboxRunApplied && run.State != "integrating" {
+	manual := len(review) == 1
+	if !manual && run.State != inboxRunApplied && run.State != "integrating" {
+		return false, nil
+	}
+	if manual && (!run.Sequenced || run.NextAction != execution.ActionIndex || (run.State != inboxSequenceRunning && run.State != inboxSequenceReview && run.State != inboxSequenceUnknown && run.State != inboxSequenceBlocked)) {
 		return false, nil
 	}
 	var workflow models.InboxWorkflow
