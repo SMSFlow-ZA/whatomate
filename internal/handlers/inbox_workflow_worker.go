@@ -60,6 +60,9 @@ func (a *App) processInboxRuleEvent(ctx context.Context, event models.InboxCaseA
 		}
 		if latest.ID == c.ID {
 			if err := a.applyInboxRules(tx, event, latest, now); err != nil {
+				if errors.Is(err, errInboxSequencePending) {
+					return nil
+				}
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return a.finishOrphanInboxEvent(tx, event, "conversation_missing")
 				}
@@ -83,6 +86,23 @@ func (a *App) finishOrphanInboxEvent(tx *gorm.DB, event models.InboxCaseActivity
 }
 
 func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c models.InboxCase, now time.Time) error {
+	var previousRuns []models.InboxWorkflowRun
+	if err := tx.Where("organization_id=? AND event_id=?", event.OrganizationID, event.ID).Find(&previousRuns).Error; err != nil {
+		return err
+	}
+	completed := map[uuid.UUID]bool{}
+	sendSelected := false
+	for _, run := range previousRuns {
+		if run.Sequenced && run.State != inboxRunApplied && run.State != inboxRunSent && run.State != inboxSequenceCancelled {
+			return errInboxSequencePending
+		}
+		completed[run.WorkflowID] = true
+		if run.Sequenced {
+			sendSelected = sendSelected || run.SequenceSendReserved
+		} else {
+			sendSelected = sendSelected || run.SendDigest != ""
+		}
+	}
 	var workflows []models.InboxWorkflow
 	if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
 		Where("organization_id = ? AND kind = 'rule' AND trigger IN ? AND enabled_at <= ?",
@@ -101,7 +121,6 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 	if err := tx.Select("inbox_automation_sends_enabled").First(&org, "id = ?", c.OrganizationID).Error; err != nil {
 		return err
 	}
-	sendSelected := false
 	triggerText := ""
 	if event.EventKey != nil && (event.WorkflowTrigger == "incoming_message" || event.WorkflowTrigger == "entry_message") {
 		var message models.Message
@@ -114,6 +133,9 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 		}
 	}
 	for _, w := range workflows {
+		if completed[w.ID] {
+			continue
+		}
 		user := w.CreatedByID
 		if w.UpdatedByID != nil {
 			user = *w.UpdatedByID
@@ -159,6 +181,31 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 		run.ActionOutcomes, run.ConditionsMatched = preview.ActionOutcomes, &preview.Matches
 		run.ConditionOutcomes = preview.ConditionOutcomes
 		run.EventID = &event.ID
+		if inboxWorkflowHasIntegration(w) {
+			if !preview.ActionsEligible {
+				run.State, run.Outcome = inboxRunBlocked, "action_rejected"
+				if err := saveInboxWorkflowRun(tx, c, &run); err != nil {
+					return err
+				}
+				continue
+			}
+			reserved, skip := false, ""
+			switch {
+			case preview.SendUnavailable:
+				skip = "send_ineligible"
+			case preview.Digest == "":
+			case sendSelected:
+				skip = "event_send_already_selected"
+			case !org.InboxAutomationSendsEnabled || !a.inboxDispatchAllowed():
+				skip = "sending_disabled"
+			default:
+				reserved = true
+			}
+			if err := a.queueInboxSequence(tx, c, &run, preview, reserved, skip); err != nil {
+				return err
+			}
+			return errInboxSequencePending
+		}
 		nextCase, nextContact := c, contact
 		if err := tx.Transaction(func(inner *gorm.DB) error {
 			return a.runInboxWorkflowActions(inner, &nextCase, &nextContact, user, w, now, &run.ActionOutcomes)
@@ -326,6 +373,7 @@ func (a *App) dispatchClaimedInboxSend(ctx context.Context, run models.InboxWork
 		req.BodyParams, req.HeaderParams = preview.BodyParameters, preview.HeaderParameters
 	}
 	opts := DefaultSendOptions()
+	opts.SequencedWorkflow = run.Sequenced
 	opts.Async = false
 	if w.Kind == "macro" {
 		opts.SentByUserID = &run.ActorID
@@ -378,6 +426,8 @@ func (a *App) runInboxWorkflowCycle(ctx context.Context) error {
 	if err := a.DB.WithContext(ctx).
 		Where("workflow_processed_at IS NULL AND workflow_trigger <> ''").
 		Where("EXISTS (SELECT 1 FROM organizations o WHERE o.id = inbox_case_activities.organization_id AND o.inbox_workflows_enabled AND o.deleted_at IS NULL)").
+		Where("NOT EXISTS (SELECT 1 FROM inbox_workflow_runs r WHERE r.organization_id=inbox_case_activities.organization_id AND r.event_id=inbox_case_activities.id AND r.sequenced AND r.deleted_at IS NULL AND r.state NOT IN ?)", []string{inboxRunApplied, inboxRunSent, inboxSequenceCancelled}).
+		Where("NOT EXISTS (SELECT 1 FROM inbox_case_activities earlier WHERE earlier.organization_id=inbox_case_activities.organization_id AND earlier.case_id=inbox_case_activities.case_id AND earlier.deleted_at IS NULL AND earlier.workflow_processed_at IS NULL AND earlier.workflow_trigger<>'' AND (earlier.created_at,earlier.id)<(inbox_case_activities.created_at,inbox_case_activities.id))").
 		Order("created_at, id").Limit(50).Find(&events).Error; err != nil {
 		return err
 	}
@@ -385,6 +435,9 @@ func (a *App) runInboxWorkflowCycle(ctx context.Context) error {
 		if err := a.processInboxRuleEvent(ctx, event); err != nil {
 			return err
 		}
+	}
+	if err := a.runInboxSequences(ctx); err != nil {
+		return err
 	}
 	now := time.Now().UTC()
 	if err := a.reconcileInboxSends(ctx, now); err != nil {

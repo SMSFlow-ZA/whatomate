@@ -9,9 +9,14 @@ import (
 // InboxWorkflowRun is also the outbound work queue. A submitting run is
 // reconciled against its message ID after interruption, never submitted again.
 type InboxWorkflowRun struct {
-	ConditionOutcomes []InboxConditionOutcome `gorm:"serializer:json;type:jsonb" json:"condition_outcomes,omitempty"`
-	ActionOutcomes    []InboxActionOutcome    `gorm:"serializer:json;type:jsonb" json:"action_outcomes,omitempty"`
-	ConditionsMatched *bool                   `json:"conditions_matched,omitempty"`
+	InitiatedByID         *uuid.UUID              `gorm:"type:uuid" json:"initiated_by_id,omitempty"`
+	Sequenced             bool                    `gorm:"not null;default:false;index:idx_inbox_sequence_work,priority:1" json:"sequenced,omitempty"`
+	NextAction            int                     `gorm:"not null;default:0" json:"next_action,omitempty"`
+	SequenceSendReserved  bool                    `gorm:"not null;default:false" json:"-"`
+	EncryptedSequencePlan string                  `gorm:"type:text;not null;default:''" json:"-"`
+	ConditionOutcomes     []InboxConditionOutcome `gorm:"serializer:json;type:jsonb" json:"condition_outcomes,omitempty"`
+	ActionOutcomes        []InboxActionOutcome    `gorm:"serializer:json;type:jsonb" json:"action_outcomes,omitempty"`
+	ConditionsMatched     *bool                   `json:"conditions_matched,omitempty"`
 	BaseModel
 	OrganizationID      uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
 	WorkflowID          uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:inbox_rule_event,priority:1" json:"workflow_id"`
@@ -23,7 +28,7 @@ type InboxWorkflowRun struct {
 	Kind                string     `gorm:"size:10;not null" json:"kind"`
 	WorkflowName        string     `gorm:"size:100;not null" json:"workflow_name"`
 	WorkflowUpdatedAt   time.Time  `gorm:"not null" json:"-"`
-	State               string     `gorm:"size:24;not null;index" json:"state"`
+	State               string     `gorm:"size:24;not null;index;index:idx_inbox_sequence_work,priority:2" json:"state"`
 	Outcome             string     `gorm:"size:50" json:"outcome,omitempty"`
 	SendDigest          string     `gorm:"size:64" json:"-"`
 	CaseDigest          string     `gorm:"size:64" json:"-"`

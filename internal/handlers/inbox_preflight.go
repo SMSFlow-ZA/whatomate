@@ -12,17 +12,40 @@ import (
 
 // Read-only predictions. No case, assignment, capacity, note or message writes
 // are made here. Execution repeats authorization and all stateful checks.
-func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c models.InboxCase, user uuid.UUID, now time.Time) ([]models.InboxActionOutcome, bool, error) {
+func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c models.InboxCase, user uuid.UUID, now time.Time, integrations ...map[int]preparedInboxIntegration) ([]models.InboxActionOutcome, bool, error) {
 	out := make([]models.InboxActionOutcome, 0, len(w.Actions))
 	eligible := true
 	canAssign := a.HasPermission(user, models.ResourceContacts, models.ActionWrite, c.OrganizationID)
 	canWrite := a.HasPermission(user, models.ResourceChat, models.ActionWrite, c.OrganizationID)
+	plannedFields := map[uuid.UUID]bool{}
 	for i, action := range w.Actions {
 		item := models.InboxActionOutcome{Index: i, Type: action.Type, Status: "ready", Reason: "will_apply"}
 		if !canWrite {
 			item.Status, item.Reason = "blocked", "permission_required"
 		} else {
 			switch action.Type {
+			case "integration":
+				id, err := uuid.Parse(action.Value)
+				if err != nil {
+					return nil, false, errInboxTransition
+				}
+				prepared, err := a.prepareInboxIntegration(db, c, user, id, action.IntegrationInputs)
+				if len(integrations) > 0 {
+					integrations[0][i] = prepared
+				}
+				item.Detail = prepared.Intent.Name
+				if err != nil {
+					item.Status, item.Reason = "blocked", integrationProblemReason(err)
+				} else if !prepared.Intent.Available {
+					item.Status, item.Reason = "blocked", prepared.Intent.Reason
+				} else {
+					item.Reason = "integration_will_execute"
+				}
+				if item.Status != "blocked" {
+					for _, output := range prepared.Intent.Outputs {
+						plannedFields[output.ID] = true
+					}
+				}
 			case "assign":
 				if !canAssign {
 					item.Status, item.Reason = "blocked", "assignment_permission_required"
@@ -124,8 +147,16 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 						return nil, false, err
 					}
 					if len(missing) > 0 {
-						item.Status, item.Reason = "blocked", "required_details_missing"
-						item.Detail = strconv.Itoa(len(missing))
+						deferred := true
+						for _, field := range missing {
+							deferred = deferred && plannedFields[field.ID]
+						}
+						if deferred {
+							item.Reason = "required_details_from_integration"
+						} else {
+							item.Status, item.Reason = "blocked", "required_details_missing"
+							item.Detail = strconv.Itoa(len(missing))
+						}
 					}
 				}
 				if item.Status != "blocked" {

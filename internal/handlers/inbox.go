@@ -620,7 +620,7 @@ func (a *App) trackInboxIncoming(account *models.WhatsAppAccount, contact *model
 	}
 }
 
-func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *models.Message) {
+func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *models.Message, sequenced ...bool) {
 	enabled, err := inboxWorkflowEnabled(a.DB, account.OrganizationID, false)
 	if err != nil || !enabled || message.SentByUserID == nil {
 		return
@@ -645,6 +645,13 @@ func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *mo
 			Count(&recorded).Error; err != nil || recorded != 0 {
 			return err
 		}
+		beforeDigest := ""
+		if len(sequenced) > 0 && sequenced[0] {
+			beforeDigest, err = inboxSendCaseDigest(tx, c)
+			if err != nil {
+				return err
+			}
+		}
 		if c.FirstHumanReplyAt == nil {
 			c.FirstHumanReplyAt = &at
 		}
@@ -656,7 +663,19 @@ func (a *App) recordInboxHumanReply(account *models.WhatsAppAccount, message *mo
 		if err := tx.Save(&c).Error; err != nil {
 			return err
 		}
-		return appendInboxActivity(tx, c, models.InboxCaseActivity{Kind: "human_reply", EventKey: &eventKey, ActorID: message.SentByUserID})
+		if err := appendInboxActivity(tx, c, models.InboxCaseActivity{Kind: "human_reply", EventKey: &eventKey, ActorID: message.SentByUserID}); err != nil {
+			return err
+		}
+		if beforeDigest != "" {
+			afterDigest, err := inboxSendCaseDigest(tx, c)
+			if err != nil {
+				return err
+			}
+			// Advance only the digest representing this send's own change. A
+			// concurrent unrelated edit must still pause downstream actions.
+			return tx.Model(&models.InboxWorkflowRun{}).Where("id=? AND organization_id=? AND case_id=? AND sequenced AND state=? AND case_digest=?", message.ID, t.org, c.ID, inboxSequenceSending, beforeDigest).Update("case_digest", afterDigest).Error
+		}
+		return nil
 	})
 	if err != nil {
 		a.Log.Error("Could not record agent reply in inbox", "message_id", message.ID, "error", err)

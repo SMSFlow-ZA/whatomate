@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. This checkpoint contains approved endpoint configuration, definition APIs, durable execution primitives and atomic result application. It is not yet connected to macro/rule execution or the settings UI. Reconciliation and safe retry controls remain to be implemented. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
+This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application and ordered macro/rule processing are implemented. The settings/action editor, complete execution history and external-outcome reconciliation controls remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
 
 ## Approval and access
 
@@ -28,11 +28,27 @@ Credentials are write-only and encrypted with the instance key. Secure storage f
 
 Each run/action index has one stable execution ID and immutable request digest. Atomic claims permit at most two integration submissions across workers in one instance database. Calls run after the claim transaction has committed, without holding the case lock. Completed work is never submitted again. A lost response or interrupted submission becomes `unknown` with `needs_reconciliation`; a non-success HTTP response is not proof that no external write occurred. Definitions, workflow visibility, actor permissions and case context are rechecked before dispatch.
 
-## Administrative API foundation
+## Ordered workflow execution
+
+An `integration` action references a definition UUID in `value` and maps its declared inputs using `integration_inputs`. Workflow validation rejects missing definitions, unknown input names and missing required mappings. Integrations do not change the legacy execution path for workflows without integration actions.
+
+An integration workflow advances a durable cursor in authored action order. Each local action commits with its cursor change; integration submission and WhatsApp sends happen outside those database locks. A later step waits for the preceding operation's durable result. Required resolution fields can be populated by a preceding integration, but resolution checks the actual validated values again before committing.
+
+Macro review includes the intended destination origin, method, typed inputs and permitted output labels. Its signed confirmation binds the definition and exact request values. Changed definitions, case context or reviewed replies stop the sequence for a new review. Completed operations keep their identities and are not repeated when later work resumes. A message already submitted stays submitted even when a concurrent edit requires review of subsequent steps.
+
+Rule events wait for an integration sequence before evaluating later rules. Later events for the same case wait too; unrelated cases continue. One automatic reply reservation is retained across all rules for the original event. Delivery receipts and integration result activity do not create new rule triggers. Paused work is excluded before selecting a runnable batch, so held replies and unresolved results cannot occupy the whole batch.
+
+Sequence states distinguish work in progress (`integrating`), a message being submitted (`sequence_sending`), changed context requiring review (`sequence_review`), blocked work (`sequence_blocked`) and uncertain external outcomes (`sequence_unknown`). A worker restart reconciles accepted message receipts without sending again. Unknown integration outcomes remain held; a new context review is not external-outcome reconciliation.
+
+## Administrative and workflow APIs
 
 - `GET/POST /api/inbox/integrations` and `PUT/DELETE /api/inbox/integrations/{integration_id}` manage definitions. Requests specify `endpoint_key`, not a URL. Updating without a credential preserves the existing encrypted value. Responses expose `has_credential`, never the credential or ciphertext.
-- `GET /api/inbox/integration-catalogue` exposes scoped definition metadata/input schemas for the future action editor.
+- `GET /api/inbox/integration-catalogue` exposes scoped definition metadata/input schemas for the action editor.
 - `GET/PUT /api/inbox/integration-settings` read or change the workspace hold without changing unrelated organisation settings.
 - Deletion rejects definitions still referenced by workflows or unresolved executions; use disable to stop future dispatch.
 
-Execution/preview endpoints, reconciliation controls, ordered workflow processing and user-interface acceptance remain outstanding. Restore/rollback must keep integration dispatch off until pending and unknown work has been reconciled.
+- Existing workflow preview/execute interfaces accept the integration action and return safe integration intent in `integrations`, indexed by action position. General run history includes sequence state, action cursor and original initiator; encrypted plans, requests and results stay private.
+- `POST /api/inbox/workflow-runs/{run_id}/preview` previews the remaining actions of a blocked/context-review sequence. `POST /api/inbox/workflow-runs/{run_id}/resume` requires that fresh `confirmation` and a nonempty `reason`. Both require current case access. A general-settings administrator may adopt remaining work using their own permissions while preserving the original initiator. Preview does not grant additional execution rights.
+- Resume rejects submitted/unknown external work. It may replace only a never-submitted pending/blocked request after a signed review, preserving its operation ID. A request locked by a dispatcher produces a conflict requiring refresh, rather than waiting while holding parent locks.
+
+External-outcome reconciliation, safe retry controls, integration editor/history UI and full browser acceptance remain outstanding. A header declaration alone does not qualify a provider's retry retention window. Restore/rollback must keep integration dispatch off until pending and unknown work has been reconciled.

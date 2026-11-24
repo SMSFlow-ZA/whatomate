@@ -28,6 +28,7 @@ const (
 )
 
 type inboxWorkflowPreview struct {
+	Integrations          map[int]preparedInboxIntegration
 	ConditionOutcomes     []models.InboxConditionOutcome
 	ActionOutcomes        []models.InboxActionOutcome
 	ActionsEligible       bool
@@ -67,7 +68,8 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 	if hasAny {
 		out.Matches = out.Matches && anyMatched
 	}
-	out.ActionOutcomes, out.ActionsEligible, err = a.preflightInboxActions(tx, w, c, user, now)
+	out.Integrations = map[int]preparedInboxIntegration{}
+	out.ActionOutcomes, out.ActionsEligible, err = a.preflightInboxActions(tx, w, c, user, now, out.Integrations)
 	if err != nil {
 		return out, err
 	}
@@ -92,7 +94,11 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 	if err != nil {
 		return out, err
 	}
-	out.Confirmation = inboxPreviewConfirmation([]any{stateDigest, w.ID, w.UpdatedAt, c.ID, c.Version, user, out.Digest, out.SendUnavailable, out.ActionOutcomes})
+	confirmationParts := []any{stateDigest, w.ID, w.UpdatedAt, c.ID, c.Version, user, out.Digest, out.SendUnavailable, out.ActionOutcomes}
+	if len(out.Integrations) > 0 {
+		confirmationParts = append(confirmationParts, inboxSequenceApprovals(out.Integrations))
+	}
+	out.Confirmation = inboxPreviewConfirmation(confirmationParts)
 	return out, nil
 }
 
@@ -260,7 +266,8 @@ func (a *App) ExecuteInboxMacro(r *fastglue.Request) error {
 			if run.OrganizationID != org || run.ActorID != user || run.CaseID != input.CaseID || run.WorkflowID != id || run.Kind != "macro" {
 				return errInboxConflict
 			}
-			return nil
+			var scoped models.InboxCase
+			return a.scopeInboxCases(tx.Model(&scoped), user, org).First(&scoped, "inbox_cases.id=?", run.CaseID).Error
 		}
 		if !errors.Is(lookup, gorm.ErrRecordNotFound) {
 			return lookup
@@ -302,6 +309,10 @@ func (a *App) ExecuteInboxMacro(r *fastglue.Request) error {
 		if preview.Digest != "" && !a.inboxDispatchAllowed() {
 			return errInboxSendIneligible
 		}
+		if inboxWorkflowHasIntegration(workflow) {
+			run = newInboxWorkflowRun(input.RunID, workflow, latest, user)
+			return a.queueInboxSequence(tx, latest, &run, preview, preview.Digest != "", "")
+		}
 		actualOutcomes := append([]models.InboxActionOutcome{}, preview.ActionOutcomes...)
 		if err := a.runInboxWorkflowActions(tx, &latest, &contact, user, workflow, now, &actualOutcomes); err != nil {
 			return err
@@ -338,7 +349,9 @@ func saveInboxWorkflowRun(tx *gorm.DB, c models.InboxCase, run *models.InboxWork
 	}
 	for i := range run.ActionOutcomes {
 		item := &run.ActionOutcomes[i]
-		if run.State == inboxRunFailed {
+		if run.Sequenced {
+			item.Status = "pending"
+		} else if run.State == inboxRunFailed {
 			item.Status = "rolled_back"
 		} else if run.ConditionsMatched != nil && !*run.ConditionsMatched {
 			item.Status = "not_applied"
@@ -387,7 +400,7 @@ func (a *App) ListInboxWorkflowRuns(r *fastglue.Request) error {
 	cases := a.scopeInboxCaseHistory(a.DB.Model(&models.InboxCase{}), user, org).Select("inbox_cases.id")
 	q := a.DB.Model(&models.InboxWorkflowRun{}).Where("inbox_workflow_runs.organization_id = ? AND case_id IN (?)", org, cases)
 	if !a.HasPermission(user, models.ResourceSettingsGeneral, models.ActionWrite, org) {
-		q = q.Where("actor_id = ? AND kind = 'macro'", user)
+		q = q.Where("(actor_id = ? OR initiated_by_id = ?) AND kind = 'macro'", user, user)
 	}
 	if id := strings.TrimSpace(string(r.RequestCtx.QueryArgs().Peek("case_id"))); id != "" {
 		caseID, err := uuid.Parse(id)

@@ -186,7 +186,8 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{
-		"matches": preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
+		"integrations": inboxIntegrationIntents(preview.Integrations),
+		"matches":      preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
 		"recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name,
 		"reply": preview.Reply, "send_unavailable": preview.SendUnavailable, "send_unavailable_reason": preview.SendUnavailableReason, "confirmation": preview.Confirmation,
 		"condition_outcomes": preview.ConditionOutcomes, "action_outcomes": preview.ActionOutcomes, "actions_eligible": preview.ActionsEligible, "trigger_text_is_synthetic": input.TriggerText != "",

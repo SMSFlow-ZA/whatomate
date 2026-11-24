@@ -101,6 +101,9 @@ func (a *App) claimInboxIntegration(ctx context.Context, id uuid.UUID) (models.I
 		if run.State != inboxRunApplied && run.State != "integrating" {
 			return blockIntegration(tx, &execution, "workflow_stopped")
 		}
+		if run.Sequenced && run.NextAction != execution.ActionIndex {
+			return blockIntegration(tx, &execution, "action_order_changed")
+		}
 		var workflow models.InboxWorkflow
 		if err := a.visibleInboxWorkflows(tx, run.OrganizationID, run.ActorID).First(&workflow, "id=?", run.WorkflowID).Error; err != nil {
 			return blockIntegration(tx, &execution, "workflow_access_changed")

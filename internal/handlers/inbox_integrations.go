@@ -113,6 +113,33 @@ func (a *App) validateInboxIntegration(db *gorm.DB, d models.InboxIntegration) e
 	return nil
 }
 
+func (a *App) validateInboxWorkflowIntegrations(db *gorm.DB, org uuid.UUID, w models.InboxWorkflow) error {
+	for _, action := range w.Actions {
+		if action.Type != "integration" {
+			continue
+		}
+		var definition models.InboxIntegration
+		if err := db.First(&definition, "id=? AND organization_id=?", action.Value, org).Error; err != nil {
+			return err
+		}
+		inputs := map[string]bool{}
+		for _, input := range definition.Inputs {
+			inputs[input.Name] = true
+			if input.Required {
+				if _, ok := action.IntegrationInputs[input.Name]; !ok {
+					return errInboxTransition
+				}
+			}
+		}
+		for name := range action.IntegrationInputs {
+			if !inputs[name] {
+				return errInboxTransition
+			}
+		}
+	}
+	return nil
+}
+
 func (a *App) ListInboxIntegrations(r *fastglue.Request) error {
 	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {

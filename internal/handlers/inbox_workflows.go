@@ -6,6 +6,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxintegration"
+	"github.com/shridarpatil/whatomate/internal/inboxtext"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -38,10 +40,32 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 	}
 	sends := 0
 	for _, action := range w.Actions {
+		if action.Type != "integration" && len(action.IntegrationInputs) != 0 {
+			return false
+		}
 		if !validInboxPersonalisation(action) {
 			return false
 		}
 		switch action.Type {
+		case "integration":
+			if id, err := uuid.Parse(action.Value); err != nil || id == uuid.Nil {
+				return false
+			}
+			if len(action.IntegrationInputs) > 32 {
+				return false
+			}
+			texts := []string{}
+			total := 0
+			for key, value := range action.IntegrationInputs {
+				if !inboxintegration.Identifier(key) {
+					return false
+				}
+				texts = append(texts, value)
+				total += len(value)
+			}
+			if _, err := inboxtext.KeysForTexts(texts); err != nil || total > inboxintegration.MaxBody {
+				return false
+			}
 		case "snooze":
 			if action.DurationMinutes < 1 || action.DurationMinutes > 43200 || action.Value != "" {
 				return false
@@ -150,6 +174,9 @@ func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
 	if err := validateInboxPredicates(a.DB, org, w.Conditions, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
 		return a.inboxError(r, err)
 	}
+	if err := a.validateInboxWorkflowIntegrations(a.DB, org, w); err != nil {
+		return a.inboxError(r, err)
+	}
 	if err := a.DB.Create(&w).Error; err != nil {
 		return a.inboxError(r, err)
 	}
@@ -214,6 +241,9 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 			return errInboxTransition
 		}
 		if err := validateInboxPredicates(tx, org, w.Conditions, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)); err != nil {
+			return err
+		}
+		if err := a.validateInboxWorkflowIntegrations(tx, org, w); err != nil {
 			return err
 		}
 		w.EnabledAt = nil

@@ -100,6 +100,7 @@ type SMSFallbackOptions struct {
 
 // MessageSendOptions configures optional behaviors for message sending
 type MessageSendOptions struct {
+	SequencedWorkflow bool
 	// BroadcastWebSocket enables WebSocket broadcast to org (default: true)
 	BroadcastWebSocket bool
 
@@ -595,7 +596,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 	}
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
 	if msg.SentByUserID != nil {
-		a.recordInboxHumanReply(req.Account, msg)
+		a.recordInboxHumanReply(req.Account, msg, opts.SequencedWorkflow)
 	}
 
 	// Dispatch webhook for successful send
