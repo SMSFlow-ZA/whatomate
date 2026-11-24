@@ -16,7 +16,10 @@ import (
 
 func PolicyClock(p models.InboxSLAPolicy) (inboxsla.Clock, error) {
 	if p.BusinessHours {
-		return inboxsla.BusinessClock(p.Timezone, p.Shifts)
+		return inboxsla.BusinessClockWithExceptions(p.Timezone, p.Shifts, p.DateExceptions)
+	}
+	if len(p.DateExceptions) > 0 {
+		return inboxsla.Clock{}, errors.New("calendar date exceptions require business hours")
 	}
 	return inboxsla.ElapsedClock(), nil
 }
@@ -32,7 +35,9 @@ func EnsureVersion(tx *gorm.DB, p *models.InboxSLAPolicy, legacy bool) error {
 			return err
 		}
 		known := existing.Policy
-		if known.FirstReplyMinutes == p.FirstReplyMinutes && known.NextReplyMinutes == p.NextReplyMinutes && known.ResolutionMinutes == p.ResolutionMinutes && known.Timezone == p.Timezone && known.BusinessHours == p.BusinessHours && slices.Equal(known.Shifts, p.Shifts) {
+		if known.FirstReplyMinutes == p.FirstReplyMinutes && known.NextReplyMinutes == p.NextReplyMinutes && known.ResolutionMinutes == p.ResolutionMinutes && known.Timezone == p.Timezone && known.BusinessHours == p.BusinessHours && slices.Equal(known.Shifts, p.Shifts) && slices.EqualFunc(known.DateExceptions, p.DateExceptions, func(a, b inboxsla.DateException) bool {
+			return a.Date == b.Date && slices.Equal(a.Intervals, b.Intervals)
+		}) {
 			return nil
 		}
 		// An older application can edit the active policy without knowing about

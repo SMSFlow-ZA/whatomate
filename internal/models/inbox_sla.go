@@ -7,15 +7,16 @@ import (
 )
 
 type InboxSLAPolicy struct {
-	OrganizationID    uuid.UUID        `gorm:"type:uuid;primaryKey" json:"-"`
-	AccountID         uuid.UUID        `gorm:"type:uuid;primaryKey" json:"account_id"`
-	VersionID         *uuid.UUID       `gorm:"type:uuid" json:"version_id,omitempty"`
-	FirstReplyMinutes int              `json:"first_reply_minutes"`
-	NextReplyMinutes  int              `json:"next_reply_minutes"`
-	ResolutionMinutes int              `json:"resolution_minutes"`
-	Timezone          string           `json:"timezone"`
-	BusinessHours     bool             `json:"business_hours"`
-	Shifts            []inboxsla.Shift `gorm:"serializer:json;type:jsonb" json:"shifts"`
+	OrganizationID    uuid.UUID                `gorm:"type:uuid;primaryKey" json:"-"`
+	AccountID         uuid.UUID                `gorm:"type:uuid;primaryKey" json:"account_id"`
+	VersionID         *uuid.UUID               `gorm:"type:uuid" json:"version_id,omitempty"`
+	FirstReplyMinutes int                      `json:"first_reply_minutes"`
+	NextReplyMinutes  int                      `json:"next_reply_minutes"`
+	ResolutionMinutes int                      `json:"resolution_minutes"`
+	Timezone          string                   `json:"timezone"`
+	BusinessHours     bool                     `json:"business_hours"`
+	Shifts            []inboxsla.Shift         `gorm:"serializer:json;type:jsonb" json:"shifts"`
+	DateExceptions    []inboxsla.DateException `gorm:"serializer:json;type:jsonb" json:"date_exceptions"`
 }
 
 // InboxSLAVersion is an immutable policy assigned on entry to the human queue.

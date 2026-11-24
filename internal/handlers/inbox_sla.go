@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -36,10 +37,7 @@ type inboxSLACase struct {
 }
 
 func inboxPolicyClock(p models.InboxSLAPolicy) (inboxsla.Clock, error) {
-	if p.BusinessHours {
-		return inboxsla.BusinessClock(p.Timezone, p.Shifts)
-	}
-	return inboxsla.ElapsedClock(), nil
+	return inboxquality.PolicyClock(p)
 }
 
 func measureInboxTarget(clock inboxsla.Clock, start time.Time, stop *time.Time, now time.Time, minutes int, pauses []inboxsla.Pause) *inboxSLATarget {
@@ -228,20 +226,40 @@ func (a *App) SetInboxSLAPolicy(r *fastglue.Request) error {
 	if _, err := findByIDAndOrg[models.WhatsAppAccount](a.DB, r, account, org, "WhatsApp account"); err != nil {
 		return nil
 	}
-	var input models.InboxSLAPolicy
-	if a.decodeRequest(r, &input) != nil {
+	var payload struct {
+		models.InboxSLAPolicy
+		Calendar json.RawMessage `json:"date_exceptions"`
+	}
+	if a.decodeRequest(r, &payload) != nil {
 		return nil
+	}
+	input := payload.InboxSLAPolicy
+	if len(payload.Calendar) > 0 {
+		if err := json.Unmarshal(payload.Calendar, &input.DateExceptions); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "calendar date exceptions must be a list", nil, "")
+		}
 	}
 	input.OrganizationID, input.AccountID = org, account
 	if input.Timezone == "" {
 		input.Timezone = "UTC"
 	}
-	if err := validateInboxPolicy(input); err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
-	}
+	var invalid error
 	if err := a.DB.Transaction(func(tx *gorm.DB) error {
 		if err := inboxquality.PolicyLock(tx, org, account); err != nil {
 			return err
+		}
+		if len(payload.Calendar) == 0 {
+			// A client that does not know this additive field must not silently
+			// erase an existing calendar while changing other target settings.
+			var existing models.InboxSLAPolicy
+			err := tx.Select("date_exceptions").First(&existing, "organization_id=? AND account_id=?", org, account).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			input.DateExceptions = existing.DateExceptions
+		}
+		if invalid = validateInboxPolicy(input); invalid != nil {
+			return invalid
 		}
 		input.VersionID = nil
 		version := models.InboxSLAVersion{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org, AccountID: account, Policy: input}
@@ -251,6 +269,9 @@ func (a *App) SetInboxSLAPolicy(r *fastglue.Request) error {
 		input.VersionID = &version.ID
 		return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&input).Error
 	}); err != nil {
+		if invalid != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, invalid.Error(), nil, "")
+		}
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{"policy": input})

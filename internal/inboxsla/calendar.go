@@ -14,20 +14,41 @@ type Shift struct {
 	EndMinute   int
 }
 
+// Interval is a half-open local wall-time interval on a particular date.
+type Interval struct {
+	StartMinute int `json:"start_minute"`
+	EndMinute   int `json:"end_minute"`
+}
+
+// DateException replaces the complete weekly schedule for this local date.
+// No intervals means closed; exceptions do not recur in subsequent years.
+type DateException struct {
+	Date      string     `json:"date"`
+	Intervals []Interval `json:"intervals"`
+}
+
 type Pause struct {
 	Start time.Time
 	End   time.Time // Zero means the case is still waiting for the customer.
 }
 
 type Clock struct {
-	location *time.Location
-	shifts   [7][]Shift
+	location   *time.Location
+	shifts     [7][]Shift
+	exceptions map[string][]Shift
 }
 
 // ElapsedClock counts all elapsed time, including weekends.
 func ElapsedClock() Clock { return Clock{} }
 
 func BusinessClock(zone string, shifts []Shift) (Clock, error) {
+	return BusinessClockWithExceptions(zone, shifts, nil)
+}
+
+// BusinessClockWithExceptions preserves weekly behaviour outside the explicitly
+// named local dates. Finite exceptions and a nonempty weekly schedule ensure
+// Deadline can always advance after the last exception.
+func BusinessClockWithExceptions(zone string, shifts []Shift, exceptions []DateException) (Clock, error) {
 	if zone == "" || zone == "Local" || len(shifts) == 0 || len(shifts) > 28 {
 		return Clock{}, errors.New("a timezone and business schedule are required")
 	}
@@ -50,6 +71,33 @@ func BusinessClock(zone string, shifts []Shift) (Clock, error) {
 				return Clock{}, errors.New("business hours overlap")
 			}
 		}
+	}
+	if len(exceptions) > 366 {
+		return Clock{}, errors.New("at most 366 calendar date exceptions are permitted")
+	}
+	clock.exceptions = make(map[string][]Shift, len(exceptions))
+	for _, exception := range exceptions {
+		date, err := time.Parse("2006-01-02", exception.Date)
+		if err != nil || date.Year() < 1 || date.Format("2006-01-02") != exception.Date || len(exception.Intervals) > 28 {
+			return Clock{}, errors.New("invalid calendar date exception")
+		}
+		if _, exists := clock.exceptions[exception.Date]; exists {
+			return Clock{}, errors.New("calendar date exceptions must be unique")
+		}
+		intervals := make([]Shift, 0, len(exception.Intervals))
+		for _, interval := range exception.Intervals {
+			if interval.StartMinute < 0 || interval.StartMinute >= interval.EndMinute || interval.EndMinute > 24*60 {
+				return Clock{}, errors.New("invalid calendar exception hours")
+			}
+			intervals = append(intervals, Shift{Day: date.Weekday(), StartMinute: interval.StartMinute, EndMinute: interval.EndMinute})
+		}
+		slices.SortFunc(intervals, func(a, b Shift) int { return a.StartMinute - b.StartMinute })
+		for i := 1; i < len(intervals); i++ {
+			if intervals[i].StartMinute < intervals[i-1].EndMinute {
+				return Clock{}, errors.New("calendar exception hours overlap")
+			}
+		}
+		clock.exceptions[exception.Date] = intervals
 	}
 	return clock, nil
 }
@@ -106,6 +154,24 @@ func (c Clock) Deadline(start time.Time, budget time.Duration) time.Time {
 	}
 }
 
+// NextWorkingTime returns start if it is inside an open interval, otherwise
+// the next opening. It uses the same calendar and DST intervals as deadlines.
+func (c Clock) NextWorkingTime(start time.Time) time.Time {
+	if c.location == nil {
+		return start.UTC()
+	}
+	for day := civilDate(start.In(c.location)); ; day = day.AddDate(0, 0, 1) {
+		for _, interval := range c.intervals(day) {
+			if start.Before(interval.End) {
+				if start.After(interval.Start) {
+					return start.UTC()
+				}
+				return interval.Start.UTC()
+			}
+		}
+	}
+}
+
 func (c Clock) scheduledBetween(start, end time.Time) time.Duration {
 	if !start.Before(end) {
 		return 0
@@ -141,6 +207,9 @@ func civilDate(t time.Time) time.Time {
 // and separate shifts stay separate through either transition.
 func (c Clock) intervals(day time.Time) []Pause {
 	shifts := c.shifts[day.Weekday()]
+	if replacement, exists := c.exceptions[day.Format("2006-01-02")]; exists {
+		shifts = replacement
+	}
 	if len(shifts) == 0 {
 		return nil
 	}

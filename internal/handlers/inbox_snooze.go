@@ -23,24 +23,9 @@ func inboxSnoozeOptions(policy models.InboxSLAPolicy, now time.Time) []inboxSnoo
 	tomorrow := local.AddDate(0, 0, 1)
 	options = append(options, inboxSnoozeOption{"tomorrow", time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 9, 0, 0, 0, location), location.String()})
 	if policy.BusinessHours {
-		var next time.Time
-		// Weekly schedules repeat; AddDate preserves local dates across DST.
-		for day := 1; day <= 7; day++ {
-			date := local.AddDate(0, 0, day)
-			for _, shift := range policy.Shifts {
-				if shift.Day != date.Weekday() {
-					continue
-				}
-				start := time.Date(date.Year(), date.Month(), date.Day(), shift.StartMinute/60, shift.StartMinute%60, 0, 0, location)
-				if next.IsZero() || start.Before(next) {
-					next = start
-				}
-			}
-			if !next.IsZero() {
-				break
-			}
-		}
-		if !next.IsZero() {
+		if clock, err := inboxPolicyClock(policy); err == nil {
+			midnight := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 0, 0, 0, 0, location)
+			next := clock.NextWorkingTime(midnight).In(location)
 			options = append(options, inboxSnoozeOption{"working_day", next, location.String()})
 		}
 	}
