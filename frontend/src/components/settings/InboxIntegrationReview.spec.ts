@@ -11,6 +11,8 @@ const mock = vi.hoisted(() => ({
   update: [] as (() => unknown)[],
   retryPreview: vi.fn(),
   cancelPreview: vi.fn(),
+  sequencePreview: vi.fn(),
+  resume: vi.fn(),
   retry: vi.fn(),
   cancel: vi.fn(),
   recover: vi.fn(),
@@ -71,6 +73,33 @@ const retryPreview = (name = 'Synthetic service', changes = {}) =>
       inputs: { count: 0, active: false },
       outputs: [],
     },
+    ...changes,
+  })
+const resumeProposal = (): IntegrationControlReview => ({
+  kind: 'resume',
+  run: {
+    ...proposal().run,
+    actor_id: 'reviewer',
+    case_id: 'case-a',
+    state: 'sequence_review',
+    sequenced: true,
+    next_action: 2,
+  },
+})
+const sequencePreview = (changes = {}) =>
+  envelope({
+    run_id: runId,
+    case_id: 'case-a',
+    next_action: 2,
+    matches: true,
+    actions_eligible: true,
+    confirmation: 'a'.repeat(64),
+    send_will_be_skipped: false,
+    send_unavailable: false,
+    recipient: { name: 'Current synthetic recipient', phone: '+12025550123' },
+    account: 'Current synthetic account',
+    actions: [{ type: 'send_text', value: 'Authored synthetic reply' }],
+    reply: { text: 'Exact reviewed synthetic reply' },
     ...changes,
   })
 function deferred() {
@@ -140,6 +169,7 @@ beforeEach(() => {
   })
   mock.org = reactive({ selectedOrgId: 'org-a' })
   mock.retryPreview.mockResolvedValue(retryPreview())
+  mock.sequencePreview.mockResolvedValue(sequencePreview())
   mock.cancelPreview.mockResolvedValue(
     envelope({
       eligible: true,
@@ -155,6 +185,225 @@ afterEach(() => {
     root.remove()
   }
   vi.restoreAllMocks()
+})
+
+it('lets an owning agent review and authorise the exact remainder without operator permissions', async () => {
+  mock.auth.hasPermission = (resource: string) => resource === 'chat'
+  mock.resume.mockImplementation((target, _confirmation, _reason, operation) =>
+    Promise.resolve(
+      envelope({
+        recovery: { id: operation, kind: 'resume_sequence', run_id: target },
+      }),
+    ),
+  )
+  const { changed } = await mount(resumeProposal())
+  expect(mock.sequencePreview).toHaveBeenCalledWith(runId)
+  expect(dialog().textContent).toContain('Current synthetic recipient')
+  expect(dialog().textContent).toContain('Current synthetic account')
+  expect(dialog().textContent).toContain('Exact reviewed synthetic reply')
+  expect(dialog().textContent).not.toContain('inboxRules.matches')
+  expect(
+    dialog().querySelector('.inbox-action-number')?.textContent?.trim(),
+  ).toBe('3')
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+  expect(dialog().querySelector('textarea')!.required).toBe(true)
+  expect(
+    dialog().querySelector('textarea')!.getAttribute('aria-required'),
+  ).toBe('true')
+  expect(dialog().textContent).toContain('common.required')
+  expect(mock.resume).not.toHaveBeenCalled()
+  await reason('Reviewed known remaining work')
+  button('inboxRecovery.confirmResume').click()
+  await settle()
+  expect(mock.resume).toHaveBeenCalledWith(
+    runId,
+    'a'.repeat(64),
+    'Reviewed known remaining work',
+    expect.stringMatching(/^[a-f0-9-]{36}$/),
+  )
+  expect(changed).toHaveBeenCalledWith(runId)
+  expect(mock.retry).not.toHaveBeenCalled()
+  expect(mock.cancel).not.toHaveBeenCalled()
+})
+
+it('preserves a skipped reply and deferred input explanation without requiring a new send reservation', async () => {
+  mock.sequencePreview.mockResolvedValue(
+    sequencePreview({
+      send_will_be_skipped: true,
+      send_unavailable: true,
+      send_unavailable_reason: 'outside_window',
+      actions: [{ type: 'integration', value: 'definition-a' }],
+      integrations: {
+        0: {
+          id: 'definition-a',
+          name: 'Current service',
+          method: 'POST',
+          destination: 'https://service.example.invalid',
+          available: true,
+          inputs: { count: 0, active: false },
+          deferred_inputs: { reference: ['case.reference'] },
+          outputs: [],
+        },
+      },
+      reply: {
+        text: 'Authored reply for context',
+        deferred_variables: ['case.reference'],
+      },
+    }),
+  )
+  await mount(resumeProposal())
+  expect(dialog().textContent).toContain('Authored reply for context')
+  expect(dialog().textContent).toContain('inboxRecovery.sendSkipped')
+  expect(dialog().textContent).toContain('inboxIntegrations.deferredReply')
+  expect(dialog().textContent).toContain('case.reference')
+  expect(dialog().textContent).toContain('false')
+  expect(dialog().textContent).not.toContain(
+    'inboxQuality.sendReason.outside_window',
+  )
+  await reason()
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(false)
+  expect(mock.resume).not.toHaveBeenCalled()
+})
+
+it('keeps exact authored intent visible when the reserved reply or another remaining action is blocked', async () => {
+  mock.sequencePreview.mockResolvedValueOnce(
+    sequencePreview({
+      send_unavailable: true,
+      send_unavailable_reason: 'outside_window',
+    }),
+  )
+  const { request } = await mount(resumeProposal())
+  expect(dialog().textContent).toContain('Exact reviewed synthetic reply')
+  expect(dialog().textContent).toContain(
+    'inboxQuality.sendReason.outside_window',
+  )
+  await reason()
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+  await reason('')
+  mock.sequencePreview.mockResolvedValueOnce(
+    sequencePreview({
+      actions_eligible: false,
+      send_will_be_skipped: true,
+    }),
+  )
+  request.value = resumeProposal()
+  await settle()
+  await reason()
+  expect(dialog().textContent).toContain(
+    'inboxRecovery.reason.remaining_actions_blocked',
+  )
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+  expect(mock.resume).not.toHaveBeenCalled()
+})
+
+it('rejects mismatched preview identities and permits an explicit fresh lookup without exposing the bad preview', async () => {
+  mock.sequencePreview.mockResolvedValueOnce(
+    sequencePreview({
+      run_id: otherId,
+      account: 'WRONG_CONTEXT',
+    }),
+  )
+  await mount(resumeProposal())
+  expect(dialog().textContent).toContain('inboxRecovery.previewError')
+  expect(dialog().textContent).not.toContain('WRONG_CONTEXT')
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+  button('common.retry').click()
+  await settle()
+  expect(dialog().textContent).toContain('Current synthetic account')
+  await reason()
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(false)
+})
+
+it('rejects a mismatched case or incomplete eligibility flags instead of treating absence as approval', async () => {
+  mock.sequencePreview
+    .mockResolvedValueOnce(sequencePreview({ case_id: 'different-case' }))
+    .mockResolvedValueOnce(sequencePreview({ send_unavailable: undefined }))
+    .mockResolvedValueOnce(sequencePreview({ recipient: undefined }))
+  await mount(resumeProposal())
+  for (let attempt = 0; attempt < 3; attempt++) {
+    expect(dialog().textContent).toContain('inboxRecovery.previewError')
+    expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+    if (attempt < 2) {
+      button('common.retry').click()
+      await settle()
+    }
+  }
+  expect(mock.resume).not.toHaveBeenCalled()
+})
+
+it('ignores a late sequence preview after a rapid run switch or closing the review', async () => {
+  const old = deferred(),
+    closed = deferred()
+  mock.sequencePreview.mockReturnValueOnce(old.promise)
+  const { request } = await mount(resumeProposal())
+  const next = resumeProposal()
+  next.run.id = otherId
+  mock.sequencePreview.mockResolvedValueOnce(
+    sequencePreview({ run_id: otherId, account: 'Current second account' }),
+  )
+  request.value = next
+  await settle()
+  old.resolve(sequencePreview({ account: 'STALE_SEQUENCE' }))
+  await settle()
+  expect(dialog().textContent).toContain('Current second account')
+  expect(dialog().textContent).not.toContain('STALE_SEQUENCE')
+  mock.sequencePreview.mockReturnValueOnce(closed.promise)
+  request.value = resumeProposal()
+  await settle()
+  button('common.cancel').click()
+  await settle()
+  closed.resolve(sequencePreview({ account: 'CLOSED_SEQUENCE' }))
+  await settle()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
+  expect(mock.resume).not.toHaveBeenCalled()
+})
+
+it('does not offer a resume preview to another agent or a read-only owner', async () => {
+  mock.auth.hasPermission = (resource: string) => resource === 'chat'
+  const selection = resumeProposal()
+  selection.run.actor_id = 'another-agent'
+  const { request } = await mount(selection)
+  expect(mock.sequencePreview).not.toHaveBeenCalled()
+  expect(button('inboxRecovery.confirmResume').disabled).toBe(true)
+  mock.auth.hasPermission = () => false
+  request.value = resumeProposal()
+  await settle()
+  expect(mock.sequencePreview).not.toHaveBeenCalled()
+  expect(mock.resume).not.toHaveBeenCalled()
+})
+
+it('keeps a lost resume acknowledgement until its exact run decision is found', async () => {
+  mock.resume.mockRejectedValue(new Error('unknown acknowledgement'))
+  mock.runRecoveries.mockImplementation(() =>
+    Promise.resolve(
+      envelope({
+        recoveries: [
+          {
+            id: mock.resume.mock.calls[0]![3],
+            kind: 'resume_sequence',
+            run_id: runId,
+          },
+        ],
+        has_more: false,
+        next_cursor: '',
+      }),
+    ),
+  )
+  const { changed } = await mount(resumeProposal())
+  await reason()
+  button('inboxRecovery.confirmResume').click()
+  await settle()
+  expect(dialog().textContent).toContain('inboxRecovery.unconfirmedTitle')
+  expect(document.activeElement?.textContent?.trim()).toBe(
+    'inboxRecovery.unconfirmedTitle',
+  )
+  expect(mock.leave[0]!()).toBe(false)
+  expect(changed).not.toHaveBeenCalled()
+  button('inboxRecovery.checkRecord').click()
+  await settle()
+  expect(changed).toHaveBeenCalledWith(runId)
+  expect(mock.resume).toHaveBeenCalledTimes(1)
+  expect(mock.runRecoveries).toHaveBeenCalledWith(runId, undefined)
 })
 
 it('previews exact intent without dispatch, then records an explicitly confirmed original-operation decision', async () => {

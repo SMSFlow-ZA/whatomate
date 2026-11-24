@@ -4,7 +4,9 @@ import { CheckCircle2, AlertCircle } from 'lucide-vue-next'
 import type { InboxAction, InboxWorkflowPreview } from '@/services/inbox'
 import InboxIntegrationIntent from './InboxIntegrationIntent.vue'
 const props = defineProps<{
-  purpose?: 'workflow' | 'reply'
+  purpose?: 'workflow' | 'reply' | 'sequence'
+  startIndex?: number
+  sendWillBeSkipped?: boolean
   preview: InboxWorkflowPreview
   teams?: { id: string; name: string }[]
   users?: { id: string; full_name: string }[]
@@ -49,7 +51,10 @@ function actionValue(action: InboxAction, index: number) {
 <template>
   <div class="inbox-ui grid gap-4">
     <template v-if="purpose !== 'reply'">
-      <p class="flex items-center gap-2 text-sm font-medium">
+      <p
+        v-if="purpose !== 'sequence'"
+        class="flex items-center gap-2 text-sm font-medium"
+      >
         <CheckCircle2
           v-if="preview.matches"
           class="h-4 w-4"
@@ -58,8 +63,13 @@ function actionValue(action: InboxAction, index: number) {
           t(preview.matches ? 'inboxRules.matches' : 'inboxRules.noMatch')
         }}
       </p>
-      <p class="inbox-caption">{{ t('inboxQuality.preflightHelp') }}</p>
-      <ul v-if="preview.condition_outcomes?.length" class="grid gap-2 text-sm">
+      <p v-if="purpose !== 'sequence'" class="inbox-caption">
+        {{ t('inboxQuality.preflightHelp') }}
+      </p>
+      <ul
+        v-if="purpose !== 'sequence' && preview.condition_outcomes?.length"
+        class="grid gap-2 text-sm"
+      >
         <li
           v-for="(condition, index) in preview.condition_outcomes"
           :key="index"
@@ -86,14 +96,21 @@ function actionValue(action: InboxAction, index: number) {
           >
         </li>
       </ul>
-      <ol class="inbox-list">
+      <ol class="inbox-list" :start="(startIndex || 0) + 1">
         <li
           v-for="(action, index) in preview.actions"
           :key="index"
           class="flex gap-3 py-2"
         >
+          <span class="sr-only"
+            >{{
+              t('inboxIntegrationHistory.actionNumber', {
+                number: (startIndex || 0) + index + 1,
+              })
+            }}:
+          </span>
           <span class="inbox-action-number" aria-hidden="true">{{
-            index + 1
+            (startIndex || 0) + index + 1
           }}</span>
           <div class="min-w-0">
             <p class="text-sm font-medium">
@@ -129,7 +146,11 @@ function actionValue(action: InboxAction, index: number) {
         </li>
       </ol>
     </template>
-    <p v-if="preview.send_unavailable" role="alert" class="inbox-notice">
+    <p
+      v-if="preview.send_unavailable && !sendWillBeSkipped"
+      role="alert"
+      class="inbox-notice"
+    >
       {{
         t(
           'inboxQuality.sendReason.' +

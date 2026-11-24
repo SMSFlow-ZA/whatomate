@@ -46,8 +46,6 @@ const {
 } = useInboxCursorPage(
   () => scope.value,
   async (cursor) => {
-    if (props.runId && !operator.value)
-      throw new Error('Operator access required')
     const { data } = props.runId
       ? await inboxIntegrations.runRecoveries(props.runId, cursor)
       : await inboxIntegrations.recoveries(props.executionId!, cursor)

@@ -4,6 +4,7 @@ import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
 import { computed, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { RouterLink } from 'vue-router'
 import { Zap, Search } from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import { Button } from '@/components/ui/button'
@@ -195,6 +196,19 @@ const restoreDialogFocus = useInboxDialogFocus(open)
           t('common.retry')
         }}</Button>
       </p>
+      <Button
+        v-if="caseId && !applying"
+        as-child
+        variant="outline"
+        class="min-h-[44px] justify-self-start sm:min-h-9"
+      >
+        <RouterLink
+          :to="{ name: 'inbox-case-workflows', params: { caseId } }"
+          @click="changeOpen(false)"
+        >
+          {{ t('inboxRecovery.caseHistoryTitle') }}
+        </RouterLink>
+      </Button>
       <p v-if="busy && !caseId" role="status" class="inbox-caption">
         {{ t('common.loading') }}
       </p>

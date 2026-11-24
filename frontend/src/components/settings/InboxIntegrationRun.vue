@@ -27,7 +27,14 @@ const operator = computed(() =>
     auth.hasPermission(resource, 'write'),
   ),
 )
-const expanded = ref('')
+const canReviewSequence = computed(
+  () =>
+    props.run.sequenced &&
+    ['sequence_review', 'sequence_blocked'].includes(props.run.state) &&
+    auth.hasPermission('chat', 'write') &&
+    (props.run.actor_id === auth.user?.id ||
+      auth.hasPermission('settings.general', 'write')),
+)
 const heading = ref<HTMLElement>()
 async function movePage(direction: 'older' | 'newer') {
   const context = viewer.value,
@@ -295,25 +302,6 @@ function actor(id: string) {
           @click="emit('review', { kind: 'retry', run, execution: item })"
           >{{ t('inboxRecovery.reviewRetry') }}</Button
         >
-        <template v-if="!operator">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            class="justify-self-start"
-            :aria-expanded="expanded === item.id"
-            :disabled="busy"
-            @click="expanded = expanded === item.id ? '' : item.id"
-            >{{ t('inboxIntegrationHistory.decisions') }}</Button
-          >
-          <InboxIntegrationRecords
-            v-if="expanded === item.id"
-            :key="item.id"
-            :execution-id="item.id"
-            :users="users"
-            :operations="items"
-          />
-        </template>
       </li>
     </ol>
     <div v-if="position || hasOlder" class="flex flex-wrap items-center gap-2">
@@ -337,9 +325,22 @@ function actor(id: string) {
         >{{ t('inboxIntegrationHistory.older') }}</Button
       >
     </div>
-    <template v-if="operator">
+    <div class="grid gap-3">
       <Button
-        v-if="!['sequence_cancelled', 'sent', 'applied'].includes(run.state)"
+        v-if="canReviewSequence"
+        type="button"
+        variant="outline"
+        size="sm"
+        class="justify-self-start"
+        :disabled="busy || failed"
+        @click="emit('review', { kind: 'resume', run })"
+        >{{ t('inboxRecovery.reviewResume') }}</Button
+      >
+      <Button
+        v-if="
+          operator &&
+          !['sequence_cancelled', 'sent', 'applied'].includes(run.state)
+        "
         type="button"
         variant="outline"
         size="sm"
@@ -363,7 +364,7 @@ function actor(id: string) {
         :users="users"
         :operations="items"
       />
-    </template>
+    </div>
   </section>
 </template>
 <style scoped>

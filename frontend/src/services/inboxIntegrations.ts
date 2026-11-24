@@ -91,6 +91,7 @@ export interface IntegrationRecovery {
 export type IntegrationControlReview =
   | { kind: 'retry'; run: InboxWorkflowRun; execution: IntegrationExecution }
   | { kind: 'cancel'; run: InboxWorkflowRun }
+  | { kind: 'resume'; run: InboxWorkflowRun }
 export type IntegrationRecoveryAction =
   | 'confirm_succeeded'
   | 'confirm_not_applied'

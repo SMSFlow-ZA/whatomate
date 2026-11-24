@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import InboxIntegrationIntent from '@/components/chat/InboxIntegrationIntent.vue'
+import InboxWorkflowPreview from '@/components/chat/InboxWorkflowPreview.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
@@ -43,6 +44,7 @@ const open = ref(false),
   reason = ref('')
 const closeBlocked = ref(false),
   investigated = ref(false)
+const pendingHeading = ref<HTMLElement>()
 const reasonHelpId = 'inbox-recovery-reason-help-' + getCurrentInstance()!.uid
 const reasonErrorId = reasonHelpId + '-error'
 const reasonError = computed(
@@ -55,13 +57,24 @@ type RetryPreview = Awaited<
 type CancelPreview = Awaited<
   ReturnType<typeof inboxIntegrations.cancelPreview>
 >['data']['data']
+type SequencePreview = Awaited<
+  ReturnType<typeof inboxIntegrations.sequencePreview>
+>['data']['data']
 const retry = shallowRef<RetryPreview>(),
-  cancellation = shallowRef<CancelPreview>()
+  cancellation = shallowRef<CancelPreview>(),
+  sequence = shallowRef<SequencePreview>()
 let generation = 0
 const operator = computed(() =>
   ['settings.general', 'chat', 'custom_actions'].every((resource) =>
     auth.hasPermission(resource, 'write'),
   ),
+)
+const allowed = computed(() =>
+  selected.value?.kind === 'resume'
+    ? auth.hasPermission('chat', 'write') &&
+      (selected.value.run.actor_id === auth.user?.id ||
+        auth.hasPermission('settings.general', 'write'))
+    : operator.value,
 )
 const locked = computed(() => !!decision.pending.value)
 const target = computed(() =>
@@ -69,8 +82,30 @@ const target = computed(() =>
     ? selected.value.execution.id
     : selected.value?.run.id,
 )
-const result = computed(() =>
-  selected.value?.kind === 'retry' ? retry.value : cancellation.value,
+const result = computed(() => {
+  if (selected.value?.kind === 'retry') return retry.value
+  if (selected.value?.kind !== 'resume') return cancellation.value
+  const preview = sequence.value
+  if (!preview) return undefined
+  return {
+    eligible:
+      preview.actions_eligible === true &&
+      (preview.send_will_be_skipped || !preview.send_unavailable),
+    confirmation: preview.confirmation,
+    reason:
+      preview.actions_eligible !== true
+        ? 'remaining_actions_blocked'
+        : preview.send_unavailable_reason,
+  }
+})
+const reviewKind = computed(() => selected.value?.kind || 'cancel')
+const titleKey = computed(() => 'inboxRecovery.' + reviewKind.value + 'Title')
+const helpKey = computed(() => 'inboxRecovery.' + reviewKind.value + 'Help')
+const confirmKey = computed(
+  () =>
+    'inboxRecovery.confirm' +
+    reviewKind.value[0]!.toUpperCase() +
+    reviewKind.value.slice(1),
 )
 const retryIntent = computed(() => {
   const intent = retry.value?.intent
@@ -90,7 +125,7 @@ const retryGuarantee = computed(
 )
 const eligible = computed(
   () =>
-    operator.value &&
+    allowed.value &&
     !loading.value &&
     !failed.value &&
     !!result.value?.eligible &&
@@ -128,6 +163,7 @@ function clear() {
   selected.value = undefined
   retry.value = undefined
   cancellation.value = undefined
+  sequence.value = undefined
   reason.value = ''
   loading.value = false
   failed.value = false
@@ -187,11 +223,35 @@ async function loadPreview() {
     context = viewer.value
   retry.value = undefined
   cancellation.value = undefined
+  sequence.value = undefined
   loading.value = true
   failed.value = false
   try {
-    if (!operator.value) throw new Error('Operator access required')
-    if (selection.kind === 'retry') {
+    if (!allowed.value) throw new Error('Current review access required')
+    if (selection.kind === 'resume') {
+      const { data } = await inboxIntegrations.sequencePreview(selection.run.id)
+      if (request !== generation || context !== viewer.value) return
+      const preview = data.data
+      if (
+        preview.run_id !== selection.run.id ||
+        !preview.case_id ||
+        (selection.run.case_id && preview.case_id !== selection.run.case_id) ||
+        !Number.isInteger(preview.next_action) ||
+        preview.next_action < 0 ||
+        !Array.isArray(preview.actions) ||
+        !preview.actions.length ||
+        typeof preview.send_will_be_skipped !== 'boolean' ||
+        typeof preview.send_unavailable !== 'boolean' ||
+        typeof preview.actions_eligible !== 'boolean' ||
+        typeof preview.recipient?.name !== 'string' ||
+        typeof preview.recipient?.phone !== 'string' ||
+        typeof preview.account !== 'string' ||
+        !preview.account ||
+        !/^[a-f0-9]{64}$/.test(preview.confirmation)
+      )
+        throw new Error('Inconsistent remaining-workflow review')
+      sequence.value = preview
+    } else if (selection.kind === 'retry') {
       const { data } = await inboxIntegrations.retryPreview(
         selection.execution.id,
       )
@@ -232,6 +292,16 @@ watch(decision.confirmedId, (id) => {
   emit('close')
   emit('changed', run)
 })
+watch(decision.phase, (phase) => {
+  if (phase !== 'unconfirmed') return
+  const context = viewer.value
+  void nextTick(() => {
+    if (context !== viewer.value || decision.phase.value !== 'unconfirmed')
+      return
+    pendingHeading.value?.focus({ preventScroll: true })
+    pendingHeading.value?.scrollIntoView?.({ block: 'start', behavior: 'auto' })
+  })
+})
 async function freshReview() {
   if (!investigated.value || !decision.pending.value) return
   if (!decision.discardAfterReview(decision.pending.value.operation_id)) return
@@ -271,19 +341,9 @@ defineExpose({
     >
       <DialogHeader>
         <DialogTitle tabindex="-1" data-inbox-recovery-title class="pr-10">{{
-          t(
-            selected?.kind === 'retry'
-              ? 'inboxRecovery.retryTitle'
-              : 'inboxRecovery.cancelTitle',
-          )
+          t(titleKey)
         }}</DialogTitle>
-        <DialogDescription>{{
-          t(
-            selected?.kind === 'retry'
-              ? 'inboxRecovery.retryHelp'
-              : 'inboxRecovery.cancelHelp',
-          )
-        }}</DialogDescription>
+        <DialogDescription>{{ t(helpKey) }}</DialogDescription>
       </DialogHeader>
       <template v-if="selected">
         <div class="grid gap-1 text-sm">
@@ -328,6 +388,24 @@ defineExpose({
             {{ t('inboxRecovery.originalGuaranteeRequired') }}
           </p>
           <InboxIntegrationIntent v-if="retryIntent" :intent="retryIntent" />
+          <div v-if="sequence" class="grid gap-3">
+            <p
+              v-if="sequence.send_will_be_skipped"
+              class="inbox-notice"
+              role="status"
+            >
+              {{ t('inboxRecovery.sendSkipped') }}
+            </p>
+            <p class="inbox-caption">
+              {{ t('inboxRecovery.remainingReviewHelp') }}
+            </p>
+            <InboxWorkflowPreview
+              purpose="sequence"
+              :preview="sequence"
+              :start-index="sequence.next_action"
+              :send-will-be-skipped="sequence.send_will_be_skipped"
+            />
+          </div>
           <p v-if="retry?.retry_until" class="inbox-caption">
             {{ t('inboxIntegrationHistory.retryUntil') }}:
             <time :datetime="retry.retry_until">{{
@@ -345,9 +423,15 @@ defineExpose({
             {{ t('inboxRecovery.inFlightCancel') }}
           </p>
           <label class="inbox-label"
-            >{{ t('inboxRecovery.reasonLabel')
-            }}<textarea
+            ><span class="flex flex-wrap items-baseline gap-1"
+              >{{ t('inboxRecovery.reasonLabel') }}
+              <span aria-hidden="true" class="inbox-caption"
+                >({{ t('common.required') }})</span
+              > </span
+            ><textarea
               v-model="reason"
+              required
+              aria-required="true"
               maxlength="1000"
               rows="3"
               :disabled="locked"
@@ -372,7 +456,7 @@ defineExpose({
           class="grid gap-3 rounded-lg border border-border p-3"
           aria-live="polite"
         >
-          <h3 class="font-semibold">
+          <h3 ref="pendingHeading" tabindex="-1" class="font-semibold">
             {{
               t(
                 decision.phase.value === 'submitting'
@@ -469,11 +553,7 @@ defineExpose({
             >{{ t('common.cancel') }}</Button
           >
           <Button type="button" :disabled="!eligible" @click="confirm">{{
-            t(
-              selected.kind === 'retry'
-                ? 'inboxRecovery.confirmRetry'
-                : 'inboxRecovery.confirmCancel',
-            )
+            t(confirmKey)
           }}</Button>
         </div>
       </template>

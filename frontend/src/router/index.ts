@@ -53,6 +53,12 @@ const router = createRouter({
           meta: { permission: 'chat', stableKey: true }
         },
         {
+          path: 'inbox/cases/:caseId/workflows',
+          name: 'inbox-case-workflows',
+          component: () => import('@/views/chat/InboxWorkflowHistoryView.vue'),
+          meta: { permission: 'chat' }
+        },
+        {
           path: 'profile',
           name: 'profile',
           component: () => import('@/views/profile/ProfileView.vue')

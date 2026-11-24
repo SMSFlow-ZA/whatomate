@@ -249,14 +249,14 @@ it('separates manual attestations and applied/discarded outputs without inferrin
   )
 })
 
-it('keeps ordinary agents on execution-scoped recovery metadata without evidence controls', async () => {
+it('lets ordinary agents inspect run-scoped metadata including workflow decisions without evidence controls', async () => {
   mock.auth.allowOperator = false
-  mock.recoveries.mockResolvedValue(recordPage())
+  mock.runRecoveries.mockResolvedValue(recordPage())
   const { root } = await mount()
   button(root, 'inboxIntegrationHistory.decisions').click()
   await settle()
-  expect(mock.recoveries).toHaveBeenCalledWith('execution-a', undefined)
-  expect(mock.runRecoveries).not.toHaveBeenCalled()
+  expect(mock.runRecoveries).toHaveBeenCalledWith('run-a', undefined)
+  expect(mock.recoveries).not.toHaveBeenCalled()
   expect(root.textContent).toContain(
     'inboxIntegrationHistory.evidenceRestricted',
   )
@@ -264,6 +264,48 @@ it('keeps ordinary agents on execution-scoped recovery metadata without evidence
     'inboxIntegrationHistory.inspectEvidence',
   )
   expect(mock.recoveryEvidence).not.toHaveBeenCalled()
+})
+
+it('offers remaining-action review to its owning agent but keeps operator recovery controls hidden', async () => {
+  mock.auth.allowOperator = false
+  const reviewed = vi.fn()
+  const { root, props } = await mount(
+    InboxIntegrationRun,
+    reactive({
+      run: { ...run(), actor_id: 'viewer-a', state: 'sequence_review' },
+      onReview: reviewed,
+    }),
+  )
+  button(root, 'inboxRecovery.reviewResume').click()
+  expect(reviewed).toHaveBeenCalledWith({ kind: 'resume', run: props.run })
+  expect(root.textContent).not.toContain('inboxRecovery.reviewRetry')
+  expect(root.textContent).not.toContain('inboxRecovery.reviewCancel')
+  props.run.actor_id = 'another-agent'
+  await settle()
+  expect(root.textContent).not.toContain('inboxRecovery.reviewResume')
+  mock.auth.allowOperator = true
+  await settle()
+  expect(root.textContent).toContain('inboxRecovery.reviewResume')
+  props.run.state = 'sequence_unknown'
+  await settle()
+  expect(root.textContent).not.toContain('inboxRecovery.reviewResume')
+})
+
+it('retains read-only run receipts when server access is denied and offers a scoped retry', async () => {
+  mock.auth.allowOperator = false
+  mock.runRecoveries
+    .mockRejectedValueOnce(new Error('scope revoked'))
+    .mockResolvedValue(empty())
+  const { root } = await mount(
+    InboxIntegrationRecords,
+    reactive({ runId: 'run-a' }),
+  )
+  expect(root.textContent).toContain('inboxIntegrationHistory.recordsError')
+  expect(mock.recoveryEvidence).not.toHaveBeenCalled()
+  button(root, 'common.retry').click()
+  await settle()
+  expect(mock.runRecoveries).toHaveBeenCalledTimes(2)
+  expect(root.textContent).toContain('inboxIntegrationHistory.noDecisions')
 })
 
 it('loads evidence only explicitly, escapes references and clears it on page refresh', async () => {

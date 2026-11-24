@@ -79,6 +79,7 @@ test('configures approved integration actions with held dispatch and responsive 
       name: 'New integration',
       exact: true,
     })
+    await expect(newButton).toBeEnabled()
     await newButton.focus()
     await page.keyboard.press('Enter')
     await expect(

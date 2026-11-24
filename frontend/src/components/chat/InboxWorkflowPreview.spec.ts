@@ -2,7 +2,48 @@
 import { createApp, h } from 'vue'
 import { expect, it, vi } from 'vitest'
 import InboxWorkflowPreview from './InboxWorkflowPreview.vue'
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: { number: number }) =>
+      params ? key + ':' + params.number : key,
+  }),
+}))
+
+it('announces original action numbers in a remaining-sequence review', () => {
+  const root = document.createElement('div')
+  const app = createApp({
+    render: () =>
+      h(InboxWorkflowPreview, {
+        purpose: 'sequence',
+        startIndex: 5,
+        preview: {
+          matches: true,
+          confirmation: 'synthetic',
+          actions: [
+            { type: 'note', value: 'First remaining action' },
+            { type: 'note', value: 'Next remaining action' },
+          ],
+          send_unavailable: false,
+          recipient: { name: 'Synthetic customer', phone: '+12025550123' },
+          account: 'Synthetic account',
+        },
+      }),
+  })
+  app.mount(root)
+  try {
+    expect(root.querySelector('ol')?.getAttribute('start')).toBe('6')
+    expect(
+      [...root.querySelectorAll('ol li .sr-only')].map((item) =>
+        item.textContent?.trim(),
+      ),
+    ).toEqual([
+      'inboxIntegrationHistory.actionNumber:6:',
+      'inboxIntegrationHistory.actionNumber:7:',
+    ])
+  } finally {
+    app.unmount()
+  }
+})
 
 it('shows the selected agent name instead of an internal identifier in a review', () => {
   const id = '73cb156b-dc74-499c-a537-9a535aef2724'
