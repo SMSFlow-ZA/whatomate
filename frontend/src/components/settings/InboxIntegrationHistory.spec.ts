@@ -390,6 +390,13 @@ it('associates different run-wide decisions with their exact operations and dist
           kind: 'cancel_remaining',
           has_evidence: false,
         },
+        {
+          ...decision('resumed'),
+          execution_id: '00000000-0000-0000-0000-000000000000',
+          run_id: 'run-a',
+          kind: 'resume_sequence',
+          has_evidence: false,
+        },
       ],
       has_more: false,
       next_cursor: '',
@@ -421,6 +428,13 @@ it('associates different run-wide decisions with their exact operations and dist
   expect(records[2]!.textContent).not.toContain(
     '00000000-0000-0000-0000-000000000000',
   )
+  expect(records[3]!.textContent).toContain(
+    'inboxIntegrationHistory.workflowDecision',
+  )
+  expect(records[3]!.textContent).toContain(
+    'inboxIntegrationHistory.decision.resume_sequence',
+  )
+  expect(records[3]!.textContent).toContain('run-a')
 })
 
 it('retains the operation identifier when its action is not on the loaded execution page', async () => {

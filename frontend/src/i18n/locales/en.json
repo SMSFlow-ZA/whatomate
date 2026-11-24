@@ -3346,7 +3346,8 @@
       "confirm_not_applied": "No effect manually confirmed",
       "apply_outputs": "Selected outputs applied after review",
       "discard_outputs": "Selected outputs discarded after review",
-      "cancel_remaining": "Remaining workflow actions stopped"
+      "cancel_remaining": "Remaining workflow actions stopped",
+      "resume_sequence": "Remaining workflow review accepted"
     },
     "outcome": {
       "needs_reconciliation": "The submission outcome needs investigation before further action.",

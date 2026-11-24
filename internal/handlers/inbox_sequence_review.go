@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -117,8 +118,9 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
-		Confirmation string `json:"confirmation"`
-		Reason       string `json:"reason"`
+		OperationID  *uuid.UUID `json:"operation_id"`
+		Confirmation string     `json:"confirmation"`
+		Reason       string     `json:"reason"`
 	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
@@ -127,8 +129,44 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 	if len(input.Confirmation) != 64 || input.Reason == "" || utf8.RuneCountInString(input.Reason) > 1000 {
 		return a.inboxError(r, errInboxTransition)
 	}
+	operation := uuid.Nil
+	if input.OperationID != nil {
+		operation = *input.OperationID
+		if operation == uuid.Nil || strings.ContainsAny(input.Reason, "\x00\r\n") {
+			return a.inboxError(r, errInboxTransition)
+		}
+	}
+	digest := workflowDigest([]any{"resume_sequence", org, actor, id, input.Confirmation, input.Reason})
 	var resumed models.InboxWorkflowRun
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	var decision models.InboxIntegrationRecovery
+	// A disconnected caller must be able to recover an accepted decision by
+	// UUID. Legacy callers retain their fresh-review behaviour without one.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = privateInboxIntegrationDB(a.DB).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if operation != uuid.Nil {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "inbox-integration-recovery:"+operation.String()).Error; err != nil {
+				return err
+			}
+			var err error
+			resumed, err = a.inboxRecoveryRun(tx, org, actor, id)
+			if err != nil {
+				return err
+			}
+			if !resumed.Sequenced {
+				return gorm.ErrRecordNotFound
+			}
+			err = tx.First(&decision, "id=?", operation).Error
+			if err == nil {
+				if decision.OrganizationID != org || decision.ActorID != actor || decision.RunID == nil || *decision.RunID != id || decision.Kind != "resume_sequence" || decision.RequestDigest != digest {
+					return errInboxConflict
+				}
+				return nil // Receipt only: do not advance or dispatch again.
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
 		enabled, err := inboxWorkflowEnabled(tx, org, true)
 		if err != nil {
 			return err
@@ -154,6 +192,26 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 		}
 		if !snapshot.Preview.ActionsEligible || (snapshot.Run.SequenceSendReserved && snapshot.Preview.SendUnavailable) || !inboxPreviewMatches(snapshot.Confirmation, input.Confirmation) {
 			return errInboxConflict
+		}
+		if operation != uuid.Nil {
+			for _, prepared := range snapshot.Preview.Integrations {
+				credential := ""
+				if prepared.Definition.AuthMode != "none" {
+					key, err := a.integrationEncryptionKey()
+					if err != nil {
+						return err
+					}
+					credential, err = crypto.Decrypt(prepared.Definition.Credential, key)
+					if err != nil {
+						return errInboxTransition
+					}
+				}
+				if !safeInboxRecoveryText(input.Reason, 1000, credential, prepared.Endpoint) {
+					return errInboxTransition
+				}
+			}
+			before := models.InboxIntegrationExecution{State: snapshot.Run.State, Outcome: snapshot.Run.Outcome}
+			decision = newInboxIntegrationRecovery(operation, inboxIntegrationRecoveryContext{Run: snapshot.Run, Case: snapshot.Case, Execution: before}, actor, "resume_sequence", input.Reason, digest)
 		}
 		previous, err := a.inboxSequencePlan(resumed)
 		if err != nil {
@@ -237,10 +295,19 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 		if err := tx.Model(&resumed).Updates(map[string]any{"actor_id": actor, "encrypted_sequence_plan": encrypted}).Error; err != nil {
 			return err
 		}
+		if operation != uuid.Nil {
+			if err := tx.Create(&decision).Error; err != nil {
+				return err
+			}
+		}
 		return appendInboxActivity(tx, snapshot.Case, models.InboxCaseActivity{Kind: "workflow_sequence_reviewed", ActorID: &actor, Detail: input.Reason})
 	})
 	if err != nil {
-		return a.inboxError(r, err)
+		return a.inboxError(r, inboxIntegrationPersistenceError(err))
 	}
-	return r.SendEnvelope(map[string]any{"run": resumed})
+	out := map[string]any{"run": resumed}
+	if operation != uuid.Nil {
+		out["recovery"] = decision
+	}
+	return r.SendEnvelope(out)
 }

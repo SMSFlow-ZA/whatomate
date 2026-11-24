@@ -29,6 +29,7 @@ func (a *App) inboxRecoveryRun(db *gorm.DB, org, actor, id uuid.UUID) (models.In
 	var run models.InboxWorkflowRun
 	cases := a.scopeInboxCaseHistory(db.Session(&gorm.Session{NewDB: true}).Model(&models.InboxCase{}), actor, org).Select("inbox_cases.id")
 	q := db.Where("organization_id=? AND case_id IN (?)", org, cases)
+	q = q.Where("EXISTS (SELECT 1 FROM inbox_cases c WHERE c.id=inbox_workflow_runs.case_id AND c.organization_id=inbox_workflow_runs.organization_id AND c.account_id=inbox_workflow_runs.account_id AND c.contact_id=inbox_workflow_runs.contact_id AND c.deleted_at IS NULL)")
 	if !a.HasPermission(actor, models.ResourceSettingsGeneral, models.ActionWrite, org) {
 		q = q.Where("kind='macro' AND (actor_id=? OR initiated_by_id=?)", actor, actor)
 	}
@@ -220,19 +221,22 @@ func (a *App) CancelInboxSequence(r *fastglue.Request) error {
 }
 
 func (a *App) ListInboxRunRecoveries(r *fastglue.Request) error {
-	org, actor, ok := a.integrationOperatorAuth(r, true)
-	if !ok {
+	// Safe metadata follows the same current run/case/author visibility as
+	// execution history. Evidence decryption and recovery writes stay separate.
+	org, actor, authErr := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	if authErr != nil {
 		return nil
 	}
 	id, err := parsePathUUID(r, "run_id", "Workflow run")
 	if err != nil {
 		return nil
 	}
-	if _, err := a.inboxRecoveryRun(a.DB, org, actor, id); err != nil {
+	run, err := a.inboxRecoveryRun(a.DB, org, actor, id)
+	if err != nil {
 		return a.inboxError(r, err)
 	}
-	legacy := a.DB.Model(&models.InboxIntegrationExecution{}).Select("id").Where("run_id=? AND organization_id=?", id, org)
-	q, err := integrationHistoryPage(r, a.DB.Where("organization_id=? AND (run_id=? OR execution_id IN (?))", org, id, legacy))
+	legacy := a.DB.Model(&models.InboxIntegrationExecution{}).Select("id").Where("run_id=? AND organization_id=? AND case_id=? AND account_id=? AND contact_id=?", id, org, run.CaseID, run.AccountID, run.ContactID)
+	q, err := integrationHistoryPage(r, a.DB.Where("organization_id=? AND ((run_id=? AND (execution_id=? OR execution_id IN (?))) OR (run_id IS NULL AND execution_id IN (?)))", org, id, uuid.Nil, legacy, legacy))
 	if err != nil {
 		return a.inboxError(r, err)
 	}

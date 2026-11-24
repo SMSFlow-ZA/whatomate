@@ -122,7 +122,7 @@ function hasOperation(record: IntegrationRecovery) {
 function operationLabel(record: IntegrationRecovery) {
   if (!hasOperation(record))
     return t(
-      record.kind === 'cancel_remaining'
+      record.run_id || props.runId
         ? 'inboxIntegrationHistory.workflowDecision'
         : 'inboxIntegrationHistory.scopeNotRecorded',
     )
