@@ -75,7 +75,7 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 		if action.Type != "send_text" && action.Type != "send_template" {
 			continue
 		}
-		reply, err := previewInboxReplyWithDB(tx, c, account, contact, action, now)
+		reply, err := a.previewInboxReplyForActor(tx, c, account, contact, action, now, user)
 		if errors.Is(err, errInboxSendIneligible) {
 			out.SendUnavailable = true
 			out.SendUnavailableReason = inboxEligibilityReason(err)
@@ -92,12 +92,12 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 	if err != nil {
 		return out, err
 	}
-	out.Confirmation = workflowDigest([]any{stateDigest, w.ID, w.UpdatedAt, c.ID, c.Version, user, out.Digest, out.SendUnavailable, out.ActionOutcomes})
+	out.Confirmation = inboxPreviewConfirmation([]any{stateDigest, w.ID, w.UpdatedAt, c.ID, c.Version, user, out.Digest, out.SendUnavailable, out.ActionOutcomes})
 	return out, nil
 }
 
 func inboxReplyFingerprint(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, reply inboxReplyPreview) string {
-	return workflowDigest([]any{c.OrganizationID, account.ID, account.Name, account.PhoneID, contact.ID, contact.PhoneNumber, reply})
+	return workflowDigest([]any{c.OrganizationID, account.ID, account.Name, account.PhoneID, contact.ID, contact.PhoneNumber, reply, reply.TemplateRevision})
 }
 
 func (a *App) workflowActorActive(db *gorm.DB, org, user uuid.UUID) bool {
@@ -292,7 +292,7 @@ func (a *App) ExecuteInboxMacro(r *fastglue.Request) error {
 		if err != nil {
 			return err
 		}
-		if !preview.Matches || !preview.ActionsEligible || preview.Confirmation != input.Confirmation || preview.SendUnavailable {
+		if !preview.Matches || !preview.ActionsEligible || !inboxPreviewMatches(preview.Confirmation, input.Confirmation) || preview.SendUnavailable {
 			return errInboxConflict
 		}
 		if preview.Digest != "" && !a.inboxDispatchAllowed() {

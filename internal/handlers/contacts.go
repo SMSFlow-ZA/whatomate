@@ -587,12 +587,13 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 
 // SendMessageRequest represents a send message request
 type SendMessageRequest struct {
-	Channel             string              `json:"channel"`
-	ClientMessageID     string              `json:"client_message_id,omitempty"`
-	ChannelConnectionID uuid.UUID           `json:"channel_connection_id"`
-	ConsentConfirmed    bool                `json:"consent_confirmed"`
-	Fallback            *SMSFallbackOptions `json:"sms_fallback,omitempty"`
-	Type                models.MessageType  `json:"type"`
+	Personalisation     *inboxMessageConfirmation `json:"personalisation,omitempty"`
+	Channel             string                    `json:"channel"`
+	ClientMessageID     string                    `json:"client_message_id,omitempty"`
+	ChannelConnectionID uuid.UUID                 `json:"channel_connection_id"`
+	ConsentConfirmed    bool                      `json:"consent_confirmed"`
+	Fallback            *SMSFallbackOptions       `json:"sms_fallback,omitempty"`
+	Type                models.MessageType        `json:"type"`
 	Content             struct {
 		Body string `json:"body"`
 	} `json:"content"`
@@ -646,6 +647,9 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
+	if req.Personalisation != nil && (req.Type != models.MessageTypeText || (req.Channel != "" && req.Channel != "whatsapp")) {
+		return a.inboxError(r, errInboxTransition)
+	}
 
 	// Get contact (users without full read permission can only message their assigned contacts)
 	contact, caseOnly, err := a.findInboxChatContact(orgID, userID, contactID, req.WhatsAppAccount)
@@ -687,6 +691,21 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	}
 
 	// Handle reply context
+	var personalisationID uuid.UUID
+	if req.Personalisation != nil {
+		personalisationID, err = uuid.Parse(req.ClientMessageID)
+		if err != nil || personalisationID == uuid.Nil {
+			return a.inboxError(r, errInboxTransition)
+		}
+		rendered, err := a.confirmInboxMessage(a.DB, orgID, userID, *account, contact, *req.Personalisation)
+		if err != nil {
+			return a.inboxError(r, err)
+		}
+		if rendered != req.Content.Body {
+			return a.inboxError(r, errInboxConflict)
+		}
+		req.Content.Body = rendered
+	}
 	var replyToMessage *models.Message
 	if req.ReplyToMessageID != "" {
 		replyToID, err := uuid.Parse(req.ReplyToMessageID)
@@ -700,6 +719,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Build request and send using unified sender
 	msgReq := OutgoingMessageRequest{
+		IdempotencyKey: personalisationID,
 		Fallback:       req.Fallback,
 		Account:        account,
 		Contact:        &contact,

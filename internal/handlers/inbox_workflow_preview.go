@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxtext"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/zerodha/fastglue"
@@ -15,17 +16,21 @@ import (
 var errInboxSendIneligible = errors.New("message is not eligible for this conversation")
 
 type inboxReplyPreview struct {
-	Type        string `json:"type"`
-	Text        string `json:"text"`
-	Header      string `json:"header,omitempty"`
-	Footer      string `json:"footer,omitempty"`
-	Template    string `json:"template,omitempty"`
-	TemplateKey string `json:"template_key,omitempty"`
-	Language    string `json:"language,omitempty"`
+	Type             string              `json:"type"`
+	Text             string              `json:"text"`
+	Header           string              `json:"header,omitempty"`
+	Footer           string              `json:"footer,omitempty"`
+	Template         string              `json:"template,omitempty"`
+	TemplateKey      string              `json:"template_key,omitempty"`
+	Language         string              `json:"language,omitempty"`
+	BodyParameters   map[string]string   `json:"body_parameters,omitempty"`
+	HeaderParameters map[string]string   `json:"header_parameters,omitempty"`
+	Missing          []inboxtext.Missing `json:"missing_variables,omitempty"`
+	TemplateRevision string              `json:"-"`
 }
 
 func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
-	return previewInboxReplyWithDB(a.DB, c, account, contact, action, now)
+	return a.previewInboxReplyForActor(a.DB, c, account, contact, action, now, uuid.Nil)
 }
 
 type inboxEligibilityError struct{ reason string }
@@ -40,7 +45,7 @@ func inboxEligibilityReason(err error) string {
 	return "unavailable"
 }
 
-func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
+func (a *App) previewInboxReplyForActor(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time, actor uuid.UUID) (inboxReplyPreview, error) {
 	intent := inboxReplyPreview{Type: "text", Text: action.Value}
 	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
 		return intent, inboxEligibilityError{"unavailable"}
@@ -60,14 +65,33 @@ func previewInboxReplyWithDB(db *gorm.DB, c models.InboxCase, account models.Wha
 			return intent, err
 		}
 		intent = inboxReplyPreview{Type: "template", Text: template.BodyContent, Header: template.HeaderContent, Footer: template.FooterContent, Template: template.DisplayName, TemplateKey: template.Name, Language: template.Language}
+		if err := a.personaliseInboxTemplate(db, c, account, contact, actor, action, template, &intent); err != nil {
+			return intent, err
+		}
 		if template.Status != "APPROVED" || template.Category != "UTILITY" {
 			return intent, inboxEligibilityError{"template_not_approved"}
 		}
 		if !action.ConsentConfirmed || contact.MarketingOptOut {
 			return intent, inboxEligibilityError{"consent_missing"}
 		}
-		if (template.HeaderType != "" && template.HeaderType != "TEXT") || strings.Contains(template.HeaderContent, "{{") || strings.Contains(template.BodyContent, "{{") || strings.Contains(template.FooterContent, "{{") || len(template.Buttons) != 0 {
+		if (template.HeaderType != "" && template.HeaderType != "TEXT") || strings.Contains(template.FooterContent, "{{") || len(template.Buttons) != 0 {
 			return intent, inboxEligibilityError{"template_not_supported"}
+		}
+	}
+	if action.Type == "send_text" && action.Personalise {
+		rendered, err := a.renderInboxMessage(db, c, account, contact, actor, action.Value)
+		if err != nil {
+			if errors.Is(err, inboxtext.ErrInvalid) {
+				return intent, inboxEligibilityError{"variables_invalid"}
+			}
+			return intent, err
+		}
+		intent.Text, intent.Missing = rendered.Text, rendered.Missing
+		if len(intent.Missing) > 0 {
+			return intent, inboxEligibilityError{"variables_missing"}
+		}
+		if strings.TrimSpace(intent.Text) == "" {
+			return intent, inboxEligibilityError{"variables_invalid"}
 		}
 	}
 	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
@@ -145,7 +169,11 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return a.inboxError(r, err)
 	}
 	name, phone := contact.ProfileName, contact.PhoneNumber
-	if a.ShouldMaskPhoneNumbers(org) {
+	mask, err := inboxMessageMasking(a.DB, org)
+	if err != nil {
+		return a.inboxError(r, err)
+	}
+	if mask {
 		name = utils.MaskIfPhoneNumber(name)
 		phone = utils.MaskPhoneNumber(phone)
 	}

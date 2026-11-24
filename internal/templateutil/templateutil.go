@@ -141,21 +141,29 @@ func ReplaceWithStringParams(content string, params map[string]string) string {
 		return content
 	}
 
-	result := content
+	resolved := make(map[string]string, len(params))
 	paramNames := ExtParamNames(content)
 	for i, name := range paramNames {
 		// Try to get value by name first (works for both named and positional)
 		if val, ok := params[name]; ok {
-			result = strings.ReplaceAll(result, fmt.Sprintf("{{%s}}", name), val)
+			resolved[name] = val
 			continue
 		}
 		// Fall back to positional key (1-indexed)
 		key := fmt.Sprintf("%d", i+1)
 		if val, ok := params[key]; ok {
-			result = strings.ReplaceAll(result, fmt.Sprintf("{{%s}}", name), val)
+			resolved[name] = val
 		}
 	}
-	return result
+	// Substitute only placeholders from the authored source. Values containing
+	// braces remain data, matching the actual template parameters sent to Meta.
+	return ParameterPattern.ReplaceAllStringFunc(content, func(token string) string {
+		name := strings.TrimSpace(token[2 : len(token)-2])
+		if value, ok := resolved[name]; ok {
+			return value
+		}
+		return token
+	})
 }
 
 // ReplaceWithJSONBParams replaces both positional ({{1}}) and named ({{name}}) placeholders

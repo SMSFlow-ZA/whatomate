@@ -38,6 +38,9 @@ func validInboxWorkflow(w models.InboxWorkflow) bool {
 	}
 	sends := 0
 	for _, action := range w.Actions {
+		if !validInboxPersonalisation(action) {
+			return false
+		}
 		switch action.Type {
 		case "snooze":
 			if action.DurationMinutes < 1 || action.DurationMinutes > 43200 || action.Value != "" {

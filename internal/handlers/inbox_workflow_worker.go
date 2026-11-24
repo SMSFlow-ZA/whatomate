@@ -312,17 +312,18 @@ func (a *App) dispatchClaimedInboxSend(ctx context.Context, run models.InboxWork
 			break
 		}
 	}
-	preview, err := previewInboxReplyWithDB(a.DB, c, account, contact, action, time.Now().UTC())
+	preview, err := a.previewInboxReplyForActor(a.DB, c, account, contact, action, time.Now().UTC(), run.ActorID)
 	if err != nil || inboxReplyFingerprint(c, account, contact, preview) != run.SendDigest {
 		return inboxRunBlocked, "send_ineligible"
 	}
 	req := OutgoingMessageRequest{IdempotencyKey: run.ID, Account: &account, Contact: &contact, Type: models.MessageTypeText, Content: preview.Text}
 	if action.Type == "send_template" {
 		var template models.Template
-		if err := a.DB.First(&template, "id = ? AND organization_id = ? AND whats_app_account = ? AND status = 'APPROVED' AND category = 'UTILITY'", action.Value, run.OrganizationID, account.Name).Error; err != nil || template.Name != preview.TemplateKey || template.BodyContent != preview.Text || template.HeaderContent != preview.Header || template.FooterContent != preview.Footer || template.Language != preview.Language || (template.HeaderType != "" && template.HeaderType != "TEXT") || len(template.Buttons) != 0 {
+		if err := a.DB.First(&template, "id = ? AND organization_id = ? AND whats_app_account = ? AND status = 'APPROVED' AND category = 'UTILITY'", action.Value, run.OrganizationID, account.Name).Error; err != nil || inboxTemplateRevision(template) != preview.TemplateRevision {
 			return inboxRunBlocked, "send_ineligible"
 		}
 		req.Type, req.Template = models.MessageTypeTemplate, &template
+		req.BodyParams, req.HeaderParams = preview.BodyParameters, preview.HeaderParameters
 	}
 	opts := DefaultSendOptions()
 	opts.Async = false

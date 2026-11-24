@@ -7,10 +7,14 @@ import (
 )
 
 type InboxAction struct {
-	DurationMinutes  int    `json:"duration_minutes,omitempty"`
-	ConsentConfirmed bool   `json:"consent_confirmed,omitempty"`
-	Type             string `json:"type"`
-	Value            string `json:"value,omitempty"`
+	// Personalise is explicit so legacy authored braces remain literal.
+	Personalise      bool              `json:"personalise,omitempty"`
+	BodyParameters   map[string]string `json:"body_parameters,omitempty"`
+	HeaderParameters map[string]string `json:"header_parameters,omitempty"`
+	DurationMinutes  int               `json:"duration_minutes,omitempty"`
+	ConsentConfirmed bool              `json:"consent_confirmed,omitempty"`
+	Type             string            `json:"type"`
+	Value            string            `json:"value,omitempty"`
 }
 
 type InboxWorkflow struct {
