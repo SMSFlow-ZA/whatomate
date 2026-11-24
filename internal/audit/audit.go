@@ -141,12 +141,12 @@ func LogAudit(
 		UserID:         userID,
 		UserName:       userName,
 		Action:         action,
-		Changes:        changesArr,
+		Changes:        SanitizeChanges(changesArr),
 	}
 
 	go func() {
 		if err := db.Create(&entry).Error; err != nil {
-			slog.Error("failed to create audit log", "error", err)
+			slog.Error("failed to create audit log", "code", ErrorCode(err))
 		}
 	}()
 }

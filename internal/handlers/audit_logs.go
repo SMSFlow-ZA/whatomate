@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -93,7 +94,7 @@ func (a *App) ListAuditLogs(r *fastglue.Request) error {
 			UserID:       l.UserID,
 			UserName:     l.UserName,
 			Action:       l.Action,
-			Changes:      l.Changes,
+			Changes:      audit.SanitizeChanges(l.Changes),
 			CreatedAt:    l.CreatedAt,
 		}
 	}
@@ -125,7 +126,7 @@ func (a *App) GetAuditLog(r *fastglue.Request) error {
 		UserID:       log.UserID,
 		UserName:     log.UserName,
 		Action:       log.Action,
-		Changes:      log.Changes,
+		Changes:      audit.SanitizeChanges(log.Changes),
 		CreatedAt:    log.CreatedAt,
 	})
 }

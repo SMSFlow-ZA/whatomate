@@ -525,14 +525,15 @@ type WidgetFilter struct {
 // AuditLog represents a record-level audit trail entry
 type AuditLog struct {
 	ID             uuid.UUID   `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
-	OrganizationID uuid.UUID   `gorm:"type:uuid;index;not null" json:"organization_id"`
-	ResourceType   string      `gorm:"size:50;not null;index:idx_audit_resource" json:"resource_type"`
-	ResourceID     uuid.UUID   `gorm:"type:uuid;not null;index:idx_audit_resource" json:"resource_id"`
+	OrganizationID uuid.UUID   `gorm:"type:uuid;index;not null;uniqueIndex:idx_audit_request_event,priority:1,where:context_version = 1 AND request_id <> '' AND event <> ''" json:"organization_id"`
+	ResourceType   string      `gorm:"size:50;not null;index:idx_audit_resource;uniqueIndex:idx_audit_request_event,priority:4" json:"resource_type"`
+	ResourceID     uuid.UUID   `gorm:"type:uuid;not null;index:idx_audit_resource;uniqueIndex:idx_audit_request_event,priority:5" json:"resource_id"`
 	UserID         uuid.UUID   `gorm:"type:uuid;not null" json:"user_id"`
 	UserName       string      `gorm:"size:255;not null" json:"user_name"`
 	Action         AuditAction `gorm:"size:20;not null" json:"action"`
 	Changes        JSONBArray  `gorm:"type:jsonb;default:'[]'" json:"changes"`
 	CreatedAt      time.Time   `gorm:"autoCreateTime;index:idx_audit_resource" json:"created_at"`
+	AuditContext
 }
 
 func (AuditLog) TableName() string {
