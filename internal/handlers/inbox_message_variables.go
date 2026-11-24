@@ -72,7 +72,7 @@ func (a *App) ListInboxMessageVariables(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"variables": variables})
 }
 
-func (a *App) inboxMessageValues(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, keys []string) (map[string]inboxtext.Value, error) {
+func (a *App) inboxMessageValues(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, keys []string, deferred ...map[string]bool) (map[string]inboxtext.Value, error) {
 	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
 		return nil, errInboxTransition
 	}
@@ -172,15 +172,26 @@ func (a *App) inboxMessageValues(db *gorm.DB, c models.InboxCase, account models
 		}
 		values[key] = value
 	}
+	// Only an existing, permitted field from an earlier validated output can
+	// become deferred. Missing permissions, archived fields and masking stay
+	// unavailable. The marker is presentation, never a dispatchable value.
+	if len(deferred) == 1 {
+		for key := range deferred[0] {
+			value, exists := values[key]
+			if exists && (value.Reason == "" || value.Reason == "empty") {
+				values[key] = inboxtext.Value{Text: "…"}
+			}
+		}
+	}
 	return values, nil
 }
 
-func (a *App) renderInboxMessage(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, text string) (inboxtext.Result, error) {
+func (a *App) renderInboxMessage(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, text string, deferred ...map[string]bool) (inboxtext.Result, error) {
 	keys, err := inboxtext.Keys(text)
 	if err != nil {
 		return inboxtext.Result{}, err
 	}
-	values, err := a.inboxMessageValues(db, c, account, contact, actor, keys)
+	values, err := a.inboxMessageValues(db, c, account, contact, actor, keys, deferred...)
 	if err != nil {
 		return inboxtext.Result{}, err
 	}

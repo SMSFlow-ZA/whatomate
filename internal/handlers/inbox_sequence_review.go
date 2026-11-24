@@ -104,7 +104,7 @@ func (a *App) PreviewInboxSequence(r *fastglue.Request) error {
 	if mask {
 		name, phone = utils.MaskIfPhoneNumber(name), utils.MaskPhoneNumber(phone)
 	}
-	return r.SendEnvelope(map[string]any{"run_id": id, "next_action": snapshot.Run.NextAction, "case_id": snapshot.Case.ID, "case_version": snapshot.Case.Version, "actions": snapshot.Workflow.Actions[snapshot.Run.NextAction:], "condition_outcomes": snapshot.Preview.ConditionOutcomes, "action_outcomes": snapshot.Preview.ActionOutcomes, "integrations": inboxIntegrationIntents(snapshot.Preview.Integrations), "confirmation": snapshot.Confirmation, "matches": snapshot.Preview.Matches, "actions_eligible": snapshot.Preview.ActionsEligible, "send_unavailable": snapshot.Preview.SendUnavailable, "send_unavailable_reason": snapshot.Preview.SendUnavailableReason, "send_will_be_skipped": !snapshot.Run.SequenceSendReserved, "recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name, "reply": snapshot.Preview.Reply})
+	return r.SendEnvelope(map[string]any{"run_id": id, "next_action": snapshot.Run.NextAction, "case_id": snapshot.Case.ID, "case_version": snapshot.Case.Version, "actions": snapshot.Workflow.Actions[snapshot.Run.NextAction:], "condition_outcomes": snapshot.Preview.ConditionOutcomes, "action_outcomes": snapshot.Preview.ActionOutcomes, "integrations": inboxIntegrationIntents(snapshot.Preview.Integrations), "deferred_actions": snapshot.Preview.DeferredActions, "confirmation": snapshot.Confirmation, "matches": snapshot.Preview.Matches, "actions_eligible": snapshot.Preview.ActionsEligible, "send_unavailable": snapshot.Preview.SendUnavailable, "send_unavailable_reason": snapshot.Preview.SendUnavailableReason, "send_will_be_skipped": !snapshot.Run.SequenceSendReserved, "recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name, "reply": snapshot.Preview.Reply})
 }
 
 func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
@@ -161,6 +161,19 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 		}
 		if previous.Integrations == nil {
 			previous.Integrations = map[int]inboxIntegrationApproval{}
+		}
+		if previous.DeferredActions == nil {
+			previous.DeferredActions = map[int]bool{}
+		}
+		// Approve only the presently known remainder. Later dependencies stay
+		// deferred even when their fields currently contain an older value.
+		for index := range previous.DeferredActions {
+			if index >= resumed.NextAction {
+				delete(previous.DeferredActions, index)
+			}
+		}
+		for index := range inboxSequenceDeferredActions(snapshot.Preview) {
+			previous.DeferredActions[resumed.NextAction+index] = true
 		}
 		for index, prepared := range snapshot.Preview.Integrations {
 			previous.Integrations[resumed.NextAction+index] = inboxIntegrationApproval{prepared.DefinitionDigest, prepared.RequestDigest}

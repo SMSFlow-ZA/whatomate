@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ const (
 
 type inboxWorkflowPreview struct {
 	Integrations          map[int]preparedInboxIntegration
+	DeferredActions       map[int][]string
 	ConditionOutcomes     []models.InboxConditionOutcome
 	ActionOutcomes        []models.InboxActionOutcome
 	ActionsEligible       bool
@@ -73,11 +75,41 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 	if err != nil {
 		return out, err
 	}
-	for _, action := range w.Actions {
+	out.DeferredActions = map[int][]string{}
+	plannedVariables := map[string]bool{}
+	for index, action := range w.Actions {
+		if prepared, exists := out.Integrations[index]; exists {
+			pending := map[string]bool{}
+			for _, keys := range prepared.Intent.DeferredInputs {
+				for _, key := range keys {
+					pending[key] = true
+				}
+			}
+			for key := range pending {
+				out.DeferredActions[index] = append(out.DeferredActions[index], key)
+			}
+			sort.Strings(out.DeferredActions[index])
+			if prepared.Intent.Available {
+				for _, output := range prepared.Intent.Outputs {
+					plannedVariables[output.Key] = true
+				}
+			}
+		}
 		if action.Type != "send_text" && action.Type != "send_template" {
 			continue
 		}
-		reply, err := a.previewInboxReplyForActor(tx, c, account, contact, action, now, user)
+		pending, err := inboxDeferredDependencies(inboxActionPersonalisationTexts(action), plannedVariables)
+		if err != nil {
+			return out, err
+		}
+		if len(pending) != 0 {
+			out.DeferredActions[index] = pending
+			if out.ActionOutcomes[index].Status != "blocked" {
+				out.ActionOutcomes[index].Status, out.ActionOutcomes[index].Reason = "deferred", "prior_integration_result_requires_review"
+			}
+		}
+		reply, err := a.previewInboxReplyForActor(tx, c, account, contact, action, now, user, plannedVariables)
+		reply.DeferredVariables = pending
 		if errors.Is(err, errInboxSendIneligible) {
 			out.SendUnavailable = true
 			out.SendUnavailableReason = inboxEligibilityReason(err)
@@ -86,7 +118,9 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 			return out, err
 		} else {
 			out.Reply = &reply
-			out.Digest = inboxReplyFingerprint(c, account, contact, reply)
+			if len(pending) == 0 {
+				out.Digest = inboxReplyFingerprint(c, account, contact, reply)
+			}
 		}
 	}
 
@@ -97,6 +131,9 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 	confirmationParts := []any{stateDigest, w.ID, w.UpdatedAt, c.ID, c.Version, user, out.Digest, out.SendUnavailable, out.ActionOutcomes}
 	if len(out.Integrations) > 0 {
 		confirmationParts = append(confirmationParts, inboxSequenceApprovals(out.Integrations))
+	}
+	if len(out.DeferredActions) != 0 {
+		confirmationParts = append(confirmationParts, out.DeferredActions)
 	}
 	out.Confirmation = inboxPreviewConfirmation(confirmationParts)
 	return out, nil
@@ -306,12 +343,12 @@ func (a *App) ExecuteInboxMacro(r *fastglue.Request) error {
 		if !preview.Matches || !preview.ActionsEligible || !inboxPreviewMatches(preview.Confirmation, input.Confirmation) || preview.SendUnavailable {
 			return errInboxConflict
 		}
-		if preview.Digest != "" && !a.inboxDispatchAllowed() {
+		if preview.Reply != nil && !a.inboxDispatchAllowed() {
 			return errInboxSendIneligible
 		}
 		if inboxWorkflowHasIntegration(workflow) {
 			run = newInboxWorkflowRun(input.RunID, workflow, latest, user)
-			return a.queueInboxSequence(tx, latest, &run, preview, preview.Digest != "", "")
+			return a.queueInboxSequence(tx, latest, &run, preview, preview.Reply != nil, "")
 		}
 		actualOutcomes := append([]models.InboxActionOutcome{}, preview.ActionOutcomes...)
 		if err := a.runInboxWorkflowActions(tx, &latest, &contact, user, workflow, now, &actualOutcomes); err != nil {

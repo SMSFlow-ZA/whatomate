@@ -60,7 +60,7 @@ func validInboxPersonalisation(action models.InboxAction) bool {
 
 // Render all mapped parameters from one authorised snapshot. Component-specific
 // names remain separate: header {{1}} is not the same input as body {{1}}.
-func (a *App) personaliseInboxTemplate(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, action models.InboxAction, t models.Template, intent *inboxReplyPreview) error {
+func (a *App) personaliseInboxTemplate(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, actor uuid.UUID, action models.InboxAction, t models.Template, intent *inboxReplyPreview, deferred ...map[string]bool) error {
 	intent.TemplateRevision = inboxTemplateRevision(t)
 	if !validInboxPersonalisation(action) || templateutil.ValidateNoMixedParams(t.BodyContent) != nil || templateutil.ValidateNoMixedParams(t.HeaderContent) != nil || templateutil.ValidateHeaderParamCount(t.HeaderContent) != nil {
 		return inboxEligibilityError{"template_not_supported"}
@@ -82,7 +82,7 @@ func (a *App) personaliseInboxTemplate(db *gorm.DB, c models.InboxCase, account 
 	values := map[string]inboxtext.Value{}
 	if len(keys) > 0 {
 		var err error
-		values, err = a.inboxMessageValues(db, c, account, contact, actor, keys)
+		values, err = a.inboxMessageValues(db, c, account, contact, actor, keys, deferred...)
 		if err != nil {
 			return err
 		}

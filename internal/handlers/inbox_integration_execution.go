@@ -25,7 +25,7 @@ type integrationRequestSnapshot struct {
 // after commit. The workflow bridge supplies the reviewed, scoped preparation.
 func (a *App) enqueueInboxIntegration(tx *gorm.DB, run models.InboxWorkflowRun, index int, prepared preparedInboxIntegration, mappings map[string]string) (models.InboxIntegrationExecution, error) {
 	var execution models.InboxIntegrationExecution
-	if !prepared.Intent.Available || index < 0 || index >= 10 || run.ID == uuid.Nil || prepared.Definition.OrganizationID != run.OrganizationID || prepared.CaseID != run.CaseID || prepared.AccountID != run.AccountID || prepared.ContactID != run.ContactID || prepared.ActorID != run.ActorID {
+	if !prepared.Intent.Available || len(prepared.Intent.DeferredInputs) != 0 || len(prepared.Body) == 0 || prepared.RequestDigest == "" || index < 0 || index >= 10 || run.ID == uuid.Nil || prepared.Definition.OrganizationID != run.OrganizationID || prepared.CaseID != run.CaseID || prepared.AccountID != run.AccountID || prepared.ContactID != run.ContactID || prepared.ActorID != run.ActorID {
 		return execution, errInboxTransition
 	}
 	key, err := a.integrationEncryptionKey()

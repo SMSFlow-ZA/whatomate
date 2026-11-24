@@ -21,17 +21,19 @@ type inboxIntegrationFieldPreview struct {
 	ID    uuid.UUID `json:"id"`
 	Label string    `json:"label"`
 	Scope string    `json:"scope"`
+	Key   string    `json:"key"`
 }
 
 type inboxIntegrationIntent struct {
-	ID          uuid.UUID                      `json:"id"`
-	Name        string                         `json:"name"`
-	Destination string                         `json:"destination"`
-	Method      string                         `json:"method"`
-	Inputs      map[string]json.RawMessage     `json:"inputs"`
-	Outputs     []inboxIntegrationFieldPreview `json:"outputs"`
-	Available   bool                           `json:"available"`
-	Reason      string                         `json:"reason,omitempty"`
+	ID             uuid.UUID                      `json:"id"`
+	Name           string                         `json:"name"`
+	Destination    string                         `json:"destination"`
+	Method         string                         `json:"method"`
+	Inputs         map[string]json.RawMessage     `json:"inputs"`
+	DeferredInputs map[string][]string            `json:"deferred_inputs,omitempty"`
+	Outputs        []inboxIntegrationFieldPreview `json:"outputs"`
+	Available      bool                           `json:"available"`
+	Reason         string                         `json:"reason,omitempty"`
 }
 
 type preparedInboxIntegration struct {
@@ -71,7 +73,7 @@ func (a *App) integrationOutputFields(db *gorm.DB, d models.InboxIntegration, ac
 
 // Preparing is read-only and uses exactly the same bounded value resolver as
 // message personalisation. No credential or network request enters the preview.
-func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id uuid.UUID, mappings map[string]string) (preparedInboxIntegration, error) {
+func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id uuid.UUID, mappings map[string]string, deferred ...map[string]bool) (preparedInboxIntegration, error) {
 	var prepared preparedInboxIntegration
 	prepared.CaseID, prepared.AccountID, prepared.ContactID, prepared.ActorID = c.ID, c.AccountID, c.ContactID, actor
 	if !a.workflowActorActive(db, c.OrganizationID, actor) || !a.HasPermission(actor, models.ResourceChat, models.ActionWrite, c.OrganizationID) || !a.HasPermission(actor, models.ResourceCustomActions, models.ActionWrite, c.OrganizationID) {
@@ -98,7 +100,7 @@ func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id
 	}
 	for _, output := range d.Outputs {
 		field := fields[output.DefinitionID]
-		prepared.Intent.Outputs = append(prepared.Intent.Outputs, inboxIntegrationFieldPreview{field.ID, field.Label, field.Scope})
+		prepared.Intent.Outputs = append(prepared.Intent.Outputs, inboxIntegrationFieldPreview{field.ID, field.Label, field.Scope, field.Scope + ".field." + field.Key})
 	}
 	if len(mappings) > 32 {
 		return prepared, inboxIntegrationProblem{"inputs_invalid"}
@@ -132,7 +134,7 @@ func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id
 	if err != nil {
 		return prepared, err
 	}
-	values, err := a.inboxMessageValues(db, c, account, contact, actor, variables)
+	values, err := a.inboxMessageValues(db, c, account, contact, actor, variables, deferred...)
 	if err != nil {
 		return prepared, err
 	}
@@ -150,6 +152,19 @@ func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id
 		}
 		if len(rendered.Missing) > 0 {
 			return prepared, inboxIntegrationProblem{"inputs_missing"}
+		}
+		pending, err := inboxDeferredDependencies([]string{source}, deferred...)
+		if err != nil {
+			return prepared, inboxIntegrationProblem{"inputs_invalid"}
+		}
+		if len(pending) != 0 {
+			if prepared.Intent.DeferredInputs == nil {
+				prepared.Intent.DeferredInputs = map[string][]string{}
+			}
+			// Never display or approve a stale field value as the future request.
+			// Known independent inputs still undergo ordinary validation below.
+			prepared.Intent.DeferredInputs[input.Name] = pending
+			continue
 		}
 		if strings.TrimSpace(rendered.Text) == "" {
 			if input.Required {
@@ -179,6 +194,10 @@ func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id
 		return prepared, inboxIntegrationProblem{"inputs_invalid"}
 	}
 	prepared.RequestDigest = workflowDigest([]any{prepared.DefinitionDigest, json.RawMessage(prepared.Body)})
+	if len(prepared.Intent.DeferredInputs) != 0 {
+		// The intent can be reviewed, but no exact request exists to authorise.
+		prepared.Body, prepared.RequestDigest = nil, ""
+	}
 	prepared.Intent.Available = true
 	if !d.Enabled {
 		prepared.Intent.Available = false

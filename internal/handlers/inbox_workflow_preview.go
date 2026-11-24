@@ -16,21 +16,22 @@ import (
 var errInboxSendIneligible = errors.New("message is not eligible for this conversation")
 
 type inboxReplyPreview struct {
-	Type             string              `json:"type"`
-	Text             string              `json:"text"`
-	Header           string              `json:"header,omitempty"`
-	Footer           string              `json:"footer,omitempty"`
-	Template         string              `json:"template,omitempty"`
-	TemplateKey      string              `json:"template_key,omitempty"`
-	Language         string              `json:"language,omitempty"`
-	BodyParameters   map[string]string   `json:"body_parameters,omitempty"`
-	HeaderParameters map[string]string   `json:"header_parameters,omitempty"`
-	Missing          []inboxtext.Missing `json:"missing_variables,omitempty"`
-	TemplateRevision string              `json:"-"`
-	Interactive      *InteractiveContent `json:"interactive,omitempty"`
-	CannedResponseID *uuid.UUID          `json:"canned_response_id,omitempty"`
-	CannedName       string              `json:"canned_name,omitempty"`
-	CannedRevision   string              `json:"-"`
+	Type              string              `json:"type"`
+	Text              string              `json:"text"`
+	Header            string              `json:"header,omitempty"`
+	Footer            string              `json:"footer,omitempty"`
+	Template          string              `json:"template,omitempty"`
+	TemplateKey       string              `json:"template_key,omitempty"`
+	Language          string              `json:"language,omitempty"`
+	BodyParameters    map[string]string   `json:"body_parameters,omitempty"`
+	HeaderParameters  map[string]string   `json:"header_parameters,omitempty"`
+	Missing           []inboxtext.Missing `json:"missing_variables,omitempty"`
+	DeferredVariables []string            `json:"deferred_variables,omitempty"`
+	TemplateRevision  string              `json:"-"`
+	Interactive       *InteractiveContent `json:"interactive,omitempty"`
+	CannedResponseID  *uuid.UUID          `json:"canned_response_id,omitempty"`
+	CannedName        string              `json:"canned_name,omitempty"`
+	CannedRevision    string              `json:"-"`
 }
 
 func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {
@@ -49,7 +50,7 @@ func inboxEligibilityReason(err error) string {
 	return "unavailable"
 }
 
-func (a *App) previewInboxReplyForActor(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time, actor uuid.UUID) (inboxReplyPreview, error) {
+func (a *App) previewInboxReplyForActor(db *gorm.DB, c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time, actor uuid.UUID, deferred ...map[string]bool) (inboxReplyPreview, error) {
 	intent := inboxReplyPreview{Type: "text", Text: action.Value}
 	if account.ID != c.AccountID || account.OrganizationID != c.OrganizationID || contact.ID != c.ContactID || contact.OrganizationID != c.OrganizationID {
 		return intent, inboxEligibilityError{"unavailable"}
@@ -69,7 +70,7 @@ func (a *App) previewInboxReplyForActor(db *gorm.DB, c models.InboxCase, account
 			return intent, err
 		}
 		intent = inboxReplyPreview{Type: "template", Text: template.BodyContent, Header: template.HeaderContent, Footer: template.FooterContent, Template: template.DisplayName, TemplateKey: template.Name, Language: template.Language}
-		if err := a.personaliseInboxTemplate(db, c, account, contact, actor, action, template, &intent); err != nil {
+		if err := a.personaliseInboxTemplate(db, c, account, contact, actor, action, template, &intent, deferred...); err != nil {
 			return intent, err
 		}
 		if template.Status != "APPROVED" || template.Category != "UTILITY" {
@@ -83,7 +84,7 @@ func (a *App) previewInboxReplyForActor(db *gorm.DB, c models.InboxCase, account
 		}
 	}
 	if action.Type == "send_text" && action.Personalise {
-		rendered, err := a.renderInboxMessage(db, c, account, contact, actor, action.Value)
+		rendered, err := a.renderInboxMessage(db, c, account, contact, actor, action.Value, deferred...)
 		if err != nil {
 			if errors.Is(err, inboxtext.ErrInvalid) {
 				return intent, inboxEligibilityError{"variables_invalid"}
@@ -186,8 +187,8 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{
-		"integrations": inboxIntegrationIntents(preview.Integrations),
-		"matches":      preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
+		"integrations": inboxIntegrationIntents(preview.Integrations), "deferred_actions": preview.DeferredActions,
+		"matches": preview.Matches, "case_id": c.ID, "case_version": c.Version, "actions": workflow.Actions,
 		"recipient": map[string]string{"name": name, "phone": phone}, "account": account.Name,
 		"reply": preview.Reply, "send_unavailable": preview.SendUnavailable, "send_unavailable_reason": preview.SendUnavailableReason, "confirmation": preview.Confirmation,
 		"condition_outcomes": preview.ConditionOutcomes, "action_outcomes": preview.ActionOutcomes, "actions_eligible": preview.ActionsEligible, "trigger_text_is_synthetic": input.TriggerText != "",

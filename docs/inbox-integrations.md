@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review and remaining-work cancellation APIs are implemented. The settings/action/history UI, chained-input review and full feature acceptance remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
+This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. The settings/action/history UI and full feature acceptance remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
 
 ## Approval and access
 
@@ -40,6 +40,16 @@ Rule events wait for an integration sequence before evaluating later rules. Late
 
 Sequence states distinguish work in progress (`integrating`), a message being submitted (`sequence_sending`), changed context requiring review (`sequence_review`), blocked work (`sequence_blocked`) and uncertain external outcomes (`sequence_unknown`). A worker restart reconciles accepted message receipts without sending again. Unknown integration outcomes remain held; a new context review is not external-outcome reconciliation.
 
+## Inputs and replies that depend on earlier results
+
+A later integration input or personalised reply can use a contact/case field populated by an earlier integration in the same workflow. Use the existing field variable, such as `{{case.field.external_reference}}`; there is no raw response expression language or access to another run's values. Only outputs of earlier, permitted definitions establish a dependency. A step cannot satisfy its own input, and future steps cannot supply earlier inputs.
+
+Preflight marks dependent actions as deferred, including when the field already has an older value or an authored fallback. Integration intent exposes `deferred_inputs` by input name and omits those inputs from its known values. Workflow previews expose `deferred_actions` by zero-based action index. A reply exposes `deferred_variables` and uses an ellipsis for pending values; this is a partial intent, not the final approved text. Independent missing values, invalid constants, unavailable output fields and ordinary send eligibility still fail their checks.
+
+The first known actions can run after review. Before a dependent request or reserved reply, the durable cursor stops with `prior_integration_result_requires_review`. No dependent request is queued, and no exact request or reply fingerprint is authorised while its values are unknown. After the previous result is validly applied, preview the remaining sequence again to inspect the exact typed inputs or rendered reply, recipient and account. Confirming this new review authorises only those known values; later dependencies remain deferred and need their own review. Current permissions, type/length limits, template approval, service window, consent and context are checked again. Invalid returned data cannot bypass the next input's declared type.
+
+Repeated events, workers or restarts retain the same completed operations. Field or template changes invalidate an open confirmation. A deferred rule reply retains the event's single send reservation; it does not permit a later rule to send a second reply. If automatic replies were held when the rule queued, that reply stays skipped rather than becoming enabled through dependency review.
+
 ## Explicit idempotent retry
 
 Retries are unavailable by default, including for existing endpoints that declare only an idempotency header. An operator may additionally set `idempotency_retention_seconds` after verifying the provider guarantees durable deduplication of the same operation key and payload for that entire interval. Supported explicit intervals are 60 seconds to 30 days; zero retains the no-retry policy. Never infer a guarantee from the existence of a header or a successful HTTP response.
@@ -78,4 +88,4 @@ Cancellation stops remaining workflow steps. It does not retract an in-flight or
 - `GET /api/inbox/integration-executions/{execution_id}/recoveries/{recovery_id}/evidence` returns only the encrypted investigation reference after operator/case authorisation, with phone masking where applicable. It never returns the provider body, credential or encrypted payload.
 - `POST /api/inbox/workflow-runs/{run_id}/cancel-preview` returns whether cancellation is eligible and warns about unresolved or in-flight operations. `POST /api/inbox/workflow-runs/{run_id}/cancel` requires the fresh `confirmation`, safe nonempty `reason` and fresh UUID `operation_id`. `GET /api/inbox/workflow-runs/{run_id}/recoveries` lists scoped recovery metadata using the same bounded cursor paging, including cancellation before any integration execution existed.
 
-Integration editor/history UI, chained-input review and full browser acceptance remain outstanding. Restore/rollback must keep integration dispatch off until pending and unknown work has been reconciled. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.
+Integration editor/history UI and full browser acceptance remain outstanding. Restore/rollback must keep integration dispatch and automatic replies off until pending and unknown work has been reconciled. Older binaries do not understand deferred review markers in encrypted plans; do not resume those plans on an older binary. Keep outbound work held and return to a compatible release for review. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.

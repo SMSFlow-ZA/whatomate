@@ -18,6 +18,7 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 	canAssign := a.HasPermission(user, models.ResourceContacts, models.ActionWrite, c.OrganizationID)
 	canWrite := a.HasPermission(user, models.ResourceChat, models.ActionWrite, c.OrganizationID)
 	plannedFields := map[uuid.UUID]bool{}
+	plannedVariables := map[string]bool{}
 	for i, action := range w.Actions {
 		item := models.InboxActionOutcome{Index: i, Type: action.Type, Status: "ready", Reason: "will_apply"}
 		if !canWrite {
@@ -29,7 +30,7 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 				if err != nil {
 					return nil, false, errInboxTransition
 				}
-				prepared, err := a.prepareInboxIntegration(db, c, user, id, action.IntegrationInputs)
+				prepared, err := a.prepareInboxIntegration(db, c, user, id, action.IntegrationInputs, plannedVariables)
 				if len(integrations) > 0 {
 					integrations[0][i] = prepared
 				}
@@ -40,10 +41,14 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 					item.Status, item.Reason = "blocked", prepared.Intent.Reason
 				} else {
 					item.Reason = "integration_will_execute"
+					if len(prepared.Intent.DeferredInputs) != 0 {
+						item.Status, item.Reason = "deferred", "prior_integration_result_requires_review"
+					}
 				}
 				if item.Status != "blocked" {
 					for _, output := range prepared.Intent.Outputs {
 						plannedFields[output.ID] = true
+						plannedVariables[output.Key] = true
 					}
 				}
 			case "assign":

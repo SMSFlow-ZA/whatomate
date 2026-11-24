@@ -30,9 +30,10 @@ type inboxIntegrationApproval struct {
 	Request    string `json:"request"`
 }
 type inboxSequencePlan struct {
-	Integrations   map[int]inboxIntegrationApproval `json:"integrations"`
-	ReplyDigest    string                           `json:"reply_digest"`
-	SendSkipReason string                           `json:"send_skip_reason,omitempty"`
+	Integrations    map[int]inboxIntegrationApproval `json:"integrations"`
+	ReplyDigest     string                           `json:"reply_digest"`
+	SendSkipReason  string                           `json:"send_skip_reason,omitempty"`
+	DeferredActions map[int]bool                     `json:"deferred_actions,omitempty"`
 }
 
 func inboxWorkflowHasIntegration(w models.InboxWorkflow) bool {
@@ -89,7 +90,7 @@ func (a *App) queueInboxSequence(tx *gorm.DB, c models.InboxCase, run *models.In
 	if !preview.Matches || !preview.ActionsEligible {
 		return errInboxTransition
 	}
-	plan := inboxSequencePlan{inboxSequenceApprovals(preview.Integrations), preview.Digest, skipReason}
+	plan := inboxSequencePlan{Integrations: inboxSequenceApprovals(preview.Integrations), ReplyDigest: preview.Digest, SendSkipReason: skipReason, DeferredActions: inboxSequenceDeferredActions(preview)}
 	encrypted, err := a.encryptInboxSequencePlan(plan)
 	if err != nil {
 		return err
@@ -227,6 +228,9 @@ func (a *App) advanceInboxSequence(ctx context.Context, id, org uuid.UUID) (inbo
 		}
 		if digest != run.CaseDigest {
 			return stopInboxSequence(tx, &run, inboxSequenceReview, "case_changed")
+		}
+		if plan.DeferredActions[run.NextAction] && (action.Type == "integration" || run.SequenceSendReserved) {
+			return stopInboxSequence(tx, &run, inboxSequenceReview, "prior_integration_result_requires_review")
 		}
 		account, contact, err := a.inboxWorkflowContext(tx, c)
 		if err != nil {

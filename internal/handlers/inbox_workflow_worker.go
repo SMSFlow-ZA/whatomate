@@ -193,7 +193,7 @@ func (a *App) applyInboxRules(tx *gorm.DB, event models.InboxCaseActivity, c mod
 			switch {
 			case preview.SendUnavailable:
 				skip = "send_ineligible"
-			case preview.Digest == "":
+			case preview.Reply == nil:
 			case sendSelected:
 				skip = "event_send_already_selected"
 			case !org.InboxAutomationSendsEnabled || !a.inboxDispatchAllowed():
