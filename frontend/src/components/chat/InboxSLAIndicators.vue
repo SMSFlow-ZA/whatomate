@@ -85,6 +85,12 @@ const targets = computed(() =>
 
 <template>
   <div>
+    <p
+      v-if="!compact && sla.policy_name"
+      class="inbox-caption mb-2 break-words"
+    >
+      {{ t('inboxPolicy.assigned', { name: sla.policy_name }) }}
+    </p>
     <p v-if="sla.legacy" class="inbox-caption">
       {{ t('inboxQuality.legacy') }}
     </p>

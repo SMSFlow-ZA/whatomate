@@ -40,6 +40,9 @@ vi.mock('@/services/api', () => ({ accountsService: { list: mocks.accounts } }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ hasPermission: () => true }),
 }))
+vi.mock('@/stores/organizations', () => ({
+  useOrganizationsStore: () => ({ selectedOrgId: 'test-org' }),
+}))
 vi.mock('@/stores/teams', () => ({
   useTeamsStore: () => ({ fetchTeams: mocks.teams }),
 }))
@@ -211,23 +214,31 @@ it('does not restore discarded policy edits after a save and account switch', as
           {
             account_id: 'a',
             first_reply_minutes: 30,
+            next_reply_minutes: 60,
+            resolution_minutes: 480,
+            timezone: 'UTC',
+            business_hours: false,
             shifts: [{ Day: 1, StartMinute: 480, EndMinute: 1020 }],
           },
         ],
       },
     },
   }))
-  mocks.savePolicy.mockResolvedValue({})
+  mocks.savePolicy.mockImplementation(async (_account, policy) => ({
+    data: { data: { policy: JSON.parse(JSON.stringify(policy)) } },
+  }))
   const state = mount(InboxSLASettings)
   await settle()
-  state.selected = 'a'
+  state.selectAccount({ target: { value: 'a' } })
   await nextTick()
   await state.save()
   state.policy.first_reply_minutes = 999
   state.policy.shifts[0].StartMinute = 900
-  state.selected = 'b'
+  state.selectAccount({ target: { value: 'b' } })
+  expect(state.discardOpen).toBe(true)
+  state.confirmDiscard()
   await nextTick()
-  state.selected = 'a'
+  state.selectAccount({ target: { value: 'a' } })
   await nextTick()
   expect(state.policy.first_reply_minutes).toBe(30)
   expect(state.policy.shifts[0].StartMinute).toBe(480)

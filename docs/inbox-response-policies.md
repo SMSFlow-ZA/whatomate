@@ -1,4 +1,4 @@
-# Conditional response policy API
+# Conditional response policies
 
 Conditional policies select response targets when a case first enters the human
 queue. They do not route or reassign work, enable workflow rules, send customer
@@ -27,6 +27,48 @@ configuration does not expand an ordinary agent's case or field access. Every
 operation scopes account, policy, version, team and field identifiers to the
 authenticated organisation. Sample-case previews additionally use normal case
 read scope and the selected account.
+
+## Configure in the application
+
+Open **Settings → Inbox workflows → Response targets** and choose a WhatsApp
+account. **Account default** keeps the existing target behaviour; **Conditional
+policies** contains the ordered exceptions. Read-only users can inspect saved
+definitions without receiving write controls.
+
+1. Select **New conditional policy**, name it and describe its purpose. It
+   inherits a copy of the account default's targets and calendar, when available.
+2. Optionally restrict it to a team and add priority or custom-field conditions.
+   A team restriction must match independently of the all/any condition group.
+   An empty group without a team matches every new case; place such a policy
+   after more specific policies.
+3. Set durations in minutes. For business hours, choose an explicit timezone,
+   weekly hours and any date exceptions. An exception replaces that local date's
+   entire weekly schedule; leave its hours empty for a closed holiday. Exceptions
+   do not repeat each year. Explicitly remove them before switching to elapsed
+   time. Separate overnight hours at midnight using the existing weekly controls.
+4. Save the disabled draft. Use **Preview policy selection**, choose an accessible
+   case from this account, then **Preview this case**. The result shows every
+   candidate's outcome, the prospective winner and the sample's unchanged assigned
+   version. Preview evaluates saved definitions, not unsaved editor changes.
+5. Edit the reviewed draft and choose **Enabled for new cases**, then save. Move
+   policies with the up/down controls to set precedence. A clone starts disabled;
+   archiving removes a candidate from future selection while retaining its history.
+
+New cases use current settings. Existing cases retain the version assigned when
+they entered the human queue, even when their priority, team or fields later change.
+The expanded case response-target details display that version's policy name.
+
+Leaving an edited form asks whether to keep or discard the draft. Stale revisions
+retain the draft and require refreshing the saved list before another edit. If a
+save's result cannot be confirmed, it may already have succeeded: submission is
+held until the list is refreshed and reviewed. A confirmed save followed by a
+failed list refresh is reported separately. Account, organisation or permission
+changes invalidate results from the previous context.
+
+If custom-field details cannot be loaded, the editor displays the recorded field
+identifier and retains its comparison and value. Retry the lookup before changing
+the value or saving the policy. Choosing another field or removing the condition
+is an explicit edit; a failed lookup never silently substitutes a different field.
 
 ## Routes
 
@@ -136,6 +178,5 @@ selection metadata together. Existing calendar rollback restrictions still
 apply. Reconcile and hold outbound work during the release's tested restore and
 rollback procedure.
 
-This branch currently provides the API/selection backend. Its configuration
-editor, calendar editor and optional internal escalation are separate work in
-progress; this document does not claim those screens or notifications exist.
+Optional internal escalation remains separate work in progress. Configuring a
+response policy does not notify staff or activate customer replies.

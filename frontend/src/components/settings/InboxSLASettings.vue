@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
-import { cloneInboxPolicy } from '@/lib/inboxInteraction'
-import { computed, onMounted, ref, watch } from 'vue'
-import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
-import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -16,115 +14,212 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
+import InboxTabs from '@/components/shared/InboxTabs.vue'
+import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
+import InboxResponseTargetsForm from './InboxResponseTargetsForm.vue'
+import InboxResponsePolicies from './InboxResponsePolicies.vue'
+import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
+import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
+import { useAuthStore } from '@/stores/auth'
 import { accountsService } from '@/services/api'
 import { inboxService, type InboxSLAPolicy } from '@/services/inbox'
+import {
+  defaultInboxTargets,
+  copyInboxTargets,
+  inboxCalendarIssues,
+} from '@/lib/inboxCalendar'
 
 const { t } = useI18n()
-const accounts = ref<{ id: string; name: string }[]>([])
-const policies = ref<InboxSLAPolicy[]>([])
-const selected = ref('')
-const busy = ref(false)
-const removeOpen = ref(false)
-const failed = ref(false)
-const weekdays = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-]
-const defaults = (id: string): InboxSLAPolicy => ({
-  account_id: id,
-  first_reply_minutes: 30,
-  next_reply_minutes: 60,
-  resolution_minutes: 480,
-  business_hours: false,
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  shifts: [],
-})
-const policy = ref(defaults(''))
+const auth = useAuthStore(),
+  viewer = useInboxViewerContext()
+const canRead = computed(() => auth.hasPermission('settings.general', 'read'))
+const canWrite = computed(() => auth.hasPermission('settings.general', 'write'))
+const accounts = ref<{ id: string; name: string }[]>([]),
+  policies = ref<InboxSLAPolicy[]>([])
+const selected = ref(''),
+  mode = ref('default'),
+  policy = ref(defaultInboxTargets(''))
 const baseline = ref(''),
-  saveError = ref('')
-const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
-  useInboxDraftGuard(
-    () => !!selected.value && JSON.stringify(policy.value) !== baseline.value,
-  )
-const timezones = (
-  Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
-).supportedValuesOf?.('timeZone') ?? ['Africa/Johannesburg', 'UTC']
+  loading = ref(false),
+  failed = ref(false),
+  busy = ref(false),
+  childBusy = ref(false),
+  removeOpen = ref(false)
+const unconfirmed = ref(false),
+  accessLost = ref(false),
+  error = ref('')
+const child = ref<InstanceType<typeof InboxResponsePolicies>>()
+let loadGeneration = 0,
+  mutationGeneration = 0
 const existing = computed(() =>
   policies.value.some((item) => item.account_id === selected.value),
 )
-watch(selected, (id) => {
-  const saved = policies.value.find((item) => item.account_id === id)
-  policy.value = saved
-    ? { ...saved, shifts: saved.shifts?.map((shift) => ({ ...shift })) ?? [] }
-    : defaults(id)
+const locked = computed(() => busy.value || childBusy.value)
+const dirty = () =>
+  mode.value === 'default' &&
+  !!selected.value &&
+  JSON.stringify(policy.value) !== baseline.value
+const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
+  useInboxDraftGuard(dirty)
+function resetDraft() {
+  policy.value = copyInboxTargets(
+    policies.value.find((item) => item.account_id === selected.value) ??
+      defaultInboxTargets(selected.value),
+  )
   baseline.value = JSON.stringify(policy.value)
-})
+  error.value = unconfirmed.value ? t('inboxPolicy.unconfirmed') : ''
+}
+function confirmLeave(action: () => void) {
+  if (locked.value) return
+  if (mode.value === 'conditional' && child.value)
+    child.value.confirmLeave(action)
+  else
+    requestDiscard(() => {
+      baseline.value = JSON.stringify(policy.value)
+      action()
+    })
+}
+defineExpose({ confirmLeave })
 function selectAccount(event: Event) {
-  const control = event.target as HTMLSelectElement
-  const value = control.value
+  const control = event.target as HTMLSelectElement,
+    next = control.value
   control.value = selected.value
-  requestDiscard(() => {
-    selected.value = value
+  confirmLeave(() => {
+    selected.value = next
+    if (unconfirmed.value) void load()
+    else resetDraft()
   })
 }
-defineExpose({ confirmLeave: requestDiscard })
+function selectMode(next: string) {
+  if (mode.value === next) return
+  confirmLeave(() => {
+    resetDraft()
+    mode.value = next
+  })
+}
 async function load() {
+  const generation = ++loadGeneration,
+    context = viewer.value
+  loading.value = true
+  failed.value = false
   try {
-    const [wa, rules] = await Promise.all([
+    const [wa, response] = await Promise.all([
       accountsService.list(),
       inboxService.slaPolicies(),
     ])
+    if (generation !== loadGeneration || context !== viewer.value) return
     accounts.value = wa.data.data?.accounts ?? []
-    policies.value = rules.data.data.policies
-    failed.value = false
+    policies.value = response.data.data.policies
+    if (!accounts.value.some((item) => item.id === selected.value))
+      selected.value = ''
+    unconfirmed.value = false
+    resetDraft()
   } catch {
-    failed.value = true
+    if (generation === loadGeneration && context === viewer.value) {
+      failed.value = true
+      accounts.value = []
+      policies.value = []
+      selected.value = ''
+    }
+  } finally {
+    if (generation === loadGeneration && context === viewer.value)
+      loading.value = false
   }
 }
 async function save(remove = false) {
-  const id = selected.value
+  if (
+    !canWrite.value ||
+    !selected.value ||
+    locked.value ||
+    unconfirmed.value ||
+    accessLost.value ||
+    (!remove && inboxCalendarIssues(policy.value).length)
+  )
+    return
+  const account = selected.value,
+    context = viewer.value,
+    generation = ++mutationGeneration
+  const current = () =>
+    generation === mutationGeneration &&
+    context === viewer.value &&
+    account === selected.value
   busy.value = true
+  error.value = ''
   try {
-    if (remove) await inboxService.deleteSlaPolicy(id)
-    else await inboxService.setSlaPolicy(id, policy.value)
-    await load()
-    if (selected.value === id) {
-      policy.value = cloneInboxPolicy(
-        policies.value.find((item) => item.account_id === id) ?? defaults(id),
+    if (remove) {
+      await inboxService.deleteSlaPolicy(account)
+      if (!current()) return
+      policies.value = policies.value.filter(
+        (item) => item.account_id !== account,
       )
-      baseline.value = JSON.stringify(policy.value)
+    } else {
+      const response = await inboxService.setSlaPolicy(
+        account,
+        copyInboxTargets(policy.value),
+      )
+      if (!current()) return
+      const saved = response.data.data?.policy as InboxSLAPolicy | undefined
+      if (!saved || saved.account_id !== account)
+        throw new Error('Unconfirmed policy response')
+      policies.value = [
+        ...policies.value.filter((item) => item.account_id !== account),
+        saved,
+      ]
     }
-    saveError.value = ''
+    resetDraft()
     removeOpen.value = false
     toast.success(t('settings.saved'))
-  } catch {
-    saveError.value = t('inboxSla.saveError')
-    toast.error(saveError.value)
+  } catch (cause) {
+    if (!current()) return
+    const status = (cause as { response?: { status?: number } })?.response
+      ?.status
+    if (status === 403 || status === 401) {
+      accessLost.value = true
+      selected.value = ''
+      policies.value = []
+      accounts.value = []
+      error.value = t('inboxPolicy.accessChanged')
+    } else {
+      unconfirmed.value = !status || status >= 500
+      error.value = t(
+        unconfirmed.value ? 'inboxPolicy.unconfirmed' : 'inboxSla.saveError',
+      )
+    }
   } finally {
-    busy.value = false
+    if (generation === mutationGeneration && context === viewer.value)
+      busy.value = false
   }
 }
-const localTime = (value: number) =>
-  [Math.floor(value / 60), value % 60]
-    .map((n) => String(n).padStart(2, '0'))
-    .join(':')
-function minute(event: Event) {
-  const [hour, min] = (event.target as HTMLInputElement).value
-    .split(':')
-    .map(Number)
-  return hour * 60 + min
-}
-onMounted(load)
+watch(
+  [viewer, canRead],
+  () => {
+    loadGeneration++
+    mutationGeneration++
+    cancelDiscard()
+    accounts.value = []
+    policies.value = []
+    selected.value = ''
+    mode.value = 'default'
+    busy.value = false
+    childBusy.value = false
+    accessLost.value = false
+    unconfirmed.value = false
+    removeOpen.value = false
+    policy.value = defaultInboxTargets('')
+    baseline.value = JSON.stringify(policy.value)
+    error.value = ''
+    if (canRead.value) void load()
+  },
+  { immediate: true, flush: 'sync' },
+)
+onUnmounted(() => {
+  loadGeneration++
+  mutationGeneration++
+})
 </script>
 
 <template>
-  <section class="inbox-ui">
+  <section class="inbox-ui" :aria-busy="loading || locked">
     <UnsavedChangesDialog
       :open="discardOpen"
       @leave="confirmDiscard"
@@ -134,17 +229,19 @@ onMounted(load)
       <h2 class="inbox-section-heading">{{ t('inboxSla.title') }}</h2>
       <p class="inbox-caption mt-1">{{ t('inboxUX.slaSetupHelp') }}</p>
     </div>
-    <div v-if="failed" role="alert" class="inbox-notice">
+    <p v-if="!canRead || accessLost" class="inbox-notice" role="alert">
+      {{ t('inboxPolicy.accessChanged') }}
+    </p>
+    <p v-else-if="loading" role="status">{{ t('common.loading') }}</p>
+    <div v-else-if="failed" role="alert" class="inbox-notice">
       {{ t('inboxSla.loadError')
-      }}<Button size="sm" variant="outline" @click="load">{{
-        t('common.retry')
-      }}</Button>
+      }}<Button variant="outline" @click="load">{{ t('common.retry') }}</Button>
     </div>
-    <form v-else class="inbox-form" @submit.prevent="save()">
-      <section class="inbox-form-section">
+    <template v-else>
+      <fieldset class="min-w-0 border-0 p-0" :disabled="locked">
         <label class="inbox-label max-w-md"
           >{{ t('inboxQueue.account')
-          }}<select :value="selected" :disabled="busy" @change="selectAccount">
+          }}<select :value="selected" @change="selectAccount">
             <option value="">{{ t('inboxUX.selectInbox') }}</option>
             <option
               v-for="account in accounts"
@@ -156,202 +253,88 @@ onMounted(load)
           </select></label
         >
         <p class="inbox-caption mt-3">{{ t('inboxUX.slaPolicyHelp') }}</p>
-        <p class="inbox-notice mt-3">
+        <p v-if="selected" class="inbox-notice mt-3">
           {{ t('inboxQuality.policyFutureOnly') }}
         </p>
-        <p v-if="saveError" class="inbox-notice text-destructive" role="alert">
-          {{ saveError }}
-        </p>
-      </section>
+        <InboxTabs
+          v-if="selected"
+          class="mt-4"
+          :model-value="mode"
+          :items="[
+            { value: 'default', label: t('inboxPolicy.default') },
+            { value: 'conditional', label: t('inboxPolicy.title') },
+          ]"
+          :label="t('inboxPolicy.navigation')"
+          @update:model-value="selectMode"
+        />
+      </fieldset>
       <template v-if="selected">
-        <section class="inbox-form-section">
-          <h3 class="inbox-section-heading">
-            {{ t('inboxUX.responseTargets') }}
-          </h3>
-          <p>{{ t('inboxUX.targetMinutesHelp') }}</p>
-          <div class="inbox-sla-targets">
-            <label class="inbox-label"
-              >{{ t('inboxSla.target.first_reply')
-              }}<input
-                v-model.number="policy.first_reply_minutes"
-                type="number"
-                min="1"
-                max="43200"
-                required
-                :aria-label="
-                  t('inboxSla.target.first_reply') +
-                  ' (' +
-                  t('inboxSla.minutes') +
-                  ')'
-                " /></label
-            ><label class="inbox-label"
-              >{{ t('inboxSla.target.next_reply')
-              }}<input
-                v-model.number="policy.next_reply_minutes"
-                type="number"
-                min="1"
-                max="43200"
-                required
-                :aria-label="
-                  t('inboxSla.target.next_reply') +
-                  ' (' +
-                  t('inboxSla.minutes') +
-                  ')'
-                " /></label
-            ><label class="inbox-label"
-              >{{ t('inboxSla.target.resolution')
-              }}<input
-                v-model.number="policy.resolution_minutes"
-                type="number"
-                min="1"
-                max="43200"
-                required
-                :aria-label="
-                  t('inboxSla.target.resolution') +
-                  ' (' +
-                  t('inboxSla.minutes') +
-                  ')'
-                "
-            /></label>
-          </div>
-        </section>
-        <section class="inbox-form-section">
-          <h3 class="inbox-section-heading">{{ t('inboxUX.workingClock') }}</h3>
-          <p>{{ t('inboxUX.slaClockHelp') }}</p>
-          <label class="inbox-check"
-            ><input v-model="policy.business_hours" type="checkbox" /><span
-              >{{ t('inboxSla.businessHours')
-              }}<span class="inbox-caption block">{{
-                t('inboxUX.elapsedHelp')
-              }}</span></span
-            ></label
+        <form
+          v-if="mode === 'default'"
+          class="inbox-form"
+          @submit.prevent="save()"
+        >
+          <p class="inbox-caption mt-4">{{ t('inboxPolicy.defaultHelp') }}</p>
+          <p v-if="!canWrite" class="inbox-notice">
+            {{ t('inboxPolicy.readOnly') }}
+          </p>
+          <InboxResponseTargetsForm
+            v-model="policy"
+            :disabled="locked || !canWrite || unconfirmed"
+          />
+          <p v-if="error" class="inbox-notice text-destructive" role="alert">
+            {{ error }}
+          </p>
+          <Button
+            v-if="unconfirmed"
+            type="button"
+            variant="outline"
+            @click="requestDiscard(() => load())"
+            >{{ t('inboxPolicy.refreshSaved') }}</Button
           >
-          <template v-if="policy.business_hours"
-            ><label class="inbox-label mt-4 max-w-md"
-              >{{ t('inboxSla.timezone')
-              }}<input
-                v-model.trim="policy.timezone"
-                placeholder="Africa/Johannesburg"
-                list="inbox-valid-timezones"
-                required /></label
-            ><datalist id="inbox-valid-timezones">
-              <option v-for="zone in timezones" :key="zone" :value="zone" />
-            </datalist>
-            <div class="mt-4 grid gap-3">
-              <fieldset
-                v-for="(shift, i) in policy.shifts"
-                :key="i"
-                class="inbox-shift-row"
-              >
-                <legend class="sr-only">
-                  {{ weekdays[shift.Day] }}
-                  {{ localTime(shift.StartMinute) }}–{{
-                    localTime(shift.EndMinute)
-                  }}
-                </legend>
-                <label class="inbox-label"
-                  >{{ t('inboxSla.day')
-                  }}<select v-model.number="shift.Day">
-                    <option v-for="(day, n) in weekdays" :key="day" :value="n">
-                      {{ day }}
-                    </option>
-                  </select></label
-                ><label class="inbox-label"
-                  >{{ t('inboxSla.from')
-                  }}<input
-                    type="time"
-                    :value="localTime(shift.StartMinute)"
-                    required
-                    @input="shift.StartMinute = minute($event)" /></label
-                ><label class="inbox-label"
-                  >{{ t('inboxSla.to')
-                  }}<input
-                    v-if="shift.EndMinute !== 1440"
-                    type="time"
-                    :value="localTime(shift.EndMinute)"
-                    required
-                    @input="shift.EndMinute = minute($event)"
-                  /><span v-else class="inbox-control">24:00</span></label
-                ><label class="inbox-check self-end pb-3"
-                  ><input
-                    type="checkbox"
-                    :checked="shift.EndMinute === 1440"
-                    @change="
-                      shift.EndMinute = shift.EndMinute === 1440 ? 1020 : 1440
-                    "
-                  />{{ t('inboxSla.midnight') }}</label
-                ><Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  :aria-label="
-                    t('inboxReview.removeShift', {
-                      day: weekdays[shift.Day],
-                      from: localTime(shift.StartMinute),
-                      to: localTime(shift.EndMinute),
-                    })
-                  "
-                  @click="policy.shifts.splice(i, 1)"
-                  >{{ t('common.remove') }}</Button
-                >
-              </fieldset>
-            </div>
+          <footer v-if="canWrite" class="inbox-form-footer">
             <Button
-              class="mt-3"
               type="button"
               variant="outline"
-              size="sm"
-              :disabled="policy.shifts.length >= 28"
-              @click="
-                policy.shifts.push({
-                  Day: 1,
-                  StartMinute: 480,
-                  EndMinute: 1020,
-                })
+              :disabled="locked"
+              @click="requestDiscard(resetDraft)"
+              >{{ t('common.cancel') }}</Button
+            >
+            <Button
+              type="submit"
+              :disabled="
+                locked || unconfirmed || !!inboxCalendarIssues(policy).length
               "
-              >{{ t('inboxSla.addShift') }}</Button
-            ></template
-          >
-        </section>
-        <footer class="inbox-form-footer">
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="busy"
-            @click="
-              requestDiscard(() => {
-                const saved = policies.find(
-                  (item) => item.account_id === selected,
-                )
-                policy = saved
-                  ? {
-                      ...saved,
-                      shifts: saved.shifts.map((shift) => ({ ...shift })),
-                    }
-                  : defaults(selected)
-                baseline = JSON.stringify(policy)
-              })
-            "
-            >{{ t('common.cancel') }}</Button
-          >
-          <Button type="submit" :disabled="busy">{{ t('common.save') }}</Button
-          ><Button
-            v-if="existing"
-            type="button"
-            variant="outline"
-            :disabled="busy"
-            @click="removeOpen = true"
-            >{{ t('inboxUX.removeTargets') }}</Button
-          >
-        </footer>
+              >{{ busy ? t('inboxPolicy.saving') : t('common.save') }}</Button
+            >
+            <Button
+              v-if="existing"
+              type="button"
+              variant="outline"
+              :disabled="locked || unconfirmed"
+              @click="removeOpen = true"
+              >{{ t('inboxUX.removeTargets') }}</Button
+            >
+          </footer>
+        </form>
+        <InboxResponsePolicies
+          v-else
+          :key="selected + viewer"
+          ref="child"
+          :account="selected"
+          :default-targets="
+            policies.find((item) => item.account_id === selected)
+          "
+          @busy="childBusy = $event"
+        />
       </template>
-    </form>
+    </template>
     <AlertDialog v-model:open="removeOpen"
       ><AlertDialogContent
         ><AlertDialogHeader
           ><AlertDialogTitle>{{ t('inboxUX.removeTargets') }}</AlertDialogTitle
           ><AlertDialogDescription>{{
-            t('inboxUX.removeTargetsHelp')
+            t('inboxPolicy.removeDefaultHelp')
           }}</AlertDialogDescription></AlertDialogHeader
         ><AlertDialogFooter
           ><AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel

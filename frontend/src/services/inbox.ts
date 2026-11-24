@@ -160,6 +160,12 @@ export interface InboxSLAPolicy {
   timezone: string
   business_hours: boolean
   shifts: { Day: number; StartMinute: number; EndMinute: number }[]
+  date_exceptions?:
+    | {
+        date: string
+        intervals: { start_minute: number; end_minute: number }[] | null
+      }[]
+    | null
 }
 
 export interface InboxSLATarget {
@@ -169,6 +175,7 @@ export interface InboxSLATarget {
   timezone?: string
 }
 export interface InboxSLA {
+  policy_name?: string
   snooze_options?: { key: string; until: string; timezone: string }[]
   first_reply?: InboxSLATarget
   next_reply?: InboxSLATarget

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Plus, Trash2 } from 'lucide-vue-next'
@@ -11,12 +11,47 @@ import {
 } from '@/services/inbox'
 import InboxFieldInput from './InboxFieldInput.vue'
 const model = defineModel<InboxFilters>({ required: true })
+const props = defineProps<{
+  allowedFields?: InboxPredicate['field'][]
+  help?: string
+}>()
+const emit = defineEmits<{ validity: [value: boolean] }>()
+const allowed = (field: InboxPredicate['field']) =>
+  !props.allowedFields || props.allowedFields.includes(field)
 const { t } = useI18n(),
   definitions = ref<FieldDefinition[]>([]),
-  failed = ref(false)
+  failed = ref(false),
+  loading = ref(false)
 let generation = 0
+const defaultField = computed(() => {
+  const standard = (['status', 'priority', 'tag'] as const).find(allowed)
+  if (standard)
+    return {
+      field: standard,
+      operator: 'eq',
+      value:
+        standard === 'status'
+          ? 'open'
+          : standard === 'priority'
+            ? 'normal'
+            : '',
+    }
+  const definition =
+    allowed('custom_field') && !loading.value && !failed.value
+      ? definitions.value.find((field) => !field.archived_at)
+      : undefined
+  return definition
+    ? {
+        field: 'custom_field' as const,
+        definition_id: definition.id,
+        operator: 'eq',
+        value: definition.kind === 'boolean' ? false : '',
+      }
+    : null
+})
 async function load() {
   const request = ++generation
+  loading.value = true
   try {
     const { data } = await inboxService.fieldDefinitions()
     if (request !== generation) return
@@ -24,12 +59,22 @@ async function load() {
     failed.value = false
   } catch {
     if (request === generation) failed.value = true
+  } finally {
+    if (request === generation) loading.value = false
   }
 }
 onMounted(load)
 onUnmounted(() => generation++)
 const definition = (condition: InboxPredicate) =>
   definitions.value.find((field) => field.id === condition.definition_id)
+const fieldUnavailable = (condition: InboxPredicate) =>
+  condition.field === 'custom_field' &&
+  (loading.value || failed.value || !definition(condition))
+watch(
+  () => !(model.value.predicates ?? []).some(fieldUnavailable),
+  (value) => emit('validity', value),
+  { immediate: true, flush: 'sync' },
+)
 function field(condition: InboxPredicate) {
   return condition.field === 'custom_field'
     ? 'custom:' + condition.definition_id
@@ -37,6 +82,7 @@ function field(condition: InboxPredicate) {
 }
 function selectField(condition: InboxPredicate, event: Event) {
   const value = (event.target as HTMLSelectElement).value
+  if (value === field(condition)) return
   if (value.startsWith('custom:')) {
     condition.field = 'custom_field'
     condition.definition_id = value.slice(7)
@@ -48,6 +94,7 @@ function selectField(condition: InboxPredicate, event: Event) {
   condition.value = definition(condition)?.kind === 'boolean' ? false : ''
 }
 function operators(condition: InboxPredicate) {
+  if (fieldUnavailable(condition)) return [condition.operator]
   const kind = definition(condition)?.kind
   return condition.field === 'custom_field'
     ? [
@@ -63,9 +110,10 @@ function operators(condition: InboxPredicate) {
     : ['eq', 'not_eq']
 }
 function add() {
+  if (!defaultField.value) return
   model.value.predicates = [
     ...(model.value.predicates ?? []),
-    { field: 'status', operator: 'eq', value: 'open' },
+    { ...defaultField.value },
   ]
 }
 </script>
@@ -74,7 +122,7 @@ function add() {
     <legend class="text-sm font-medium">
       {{ t('inboxQuality.conditionsTitle') }}
     </legend>
-    <p class="inbox-caption">{{ t('inboxQuality.conditionsHelp') }}</p>
+    <p class="inbox-caption">{{ help || t('inboxQuality.conditionsHelp') }}</p>
     <p v-if="failed" role="alert" class="inbox-notice">
       {{ t('inboxFields.loadError') }}
       <Button type="button" size="sm" variant="outline" @click="load">{{
@@ -99,13 +147,25 @@ function add() {
           :value="field(condition)"
           @change="selectField(condition, $event)"
         >
-          <option value="status">{{ t('inboxWorkflow.caseStatus') }}</option>
-          <option value="priority">
+          <option
+            v-if="condition.field === 'custom_field' && !definition(condition)"
+            :value="field(condition)"
+          >
+            {{
+              t('inboxQuality.recordedField', { id: condition.definition_id })
+            }}
+          </option>
+          <option v-if="allowed('status')" value="status">
+            {{ t('inboxWorkflow.caseStatus') }}
+          </option>
+          <option v-if="allowed('priority')" value="priority">
             {{ t('inboxWorkflow.casePriority') }}
           </option>
-          <option value="tag">{{ t('contacts.tags') }}</option>
+          <option v-if="allowed('tag')" value="tag">
+            {{ t('contacts.tags') }}
+          </option>
           <option
-            v-for="d in definitions"
+            v-for="d in allowed('custom_field') ? definitions : []"
             :key="d.id"
             :value="'custom:' + d.id"
           >
@@ -116,42 +176,68 @@ function add() {
       >
       <label class="inbox-label"
         >{{ t('inboxQuality.comparison')
-        }}<select v-model="condition.operator">
+        }}<select
+          v-model="condition.operator"
+          :disabled="fieldUnavailable(condition)"
+        >
           <option v-for="op in operators(condition)" :key="op" :value="op">
             {{ t('inboxQuality.operator.' + op) }}
           </option>
         </select></label
       >
-      <template v-if="!['is_empty', 'not_empty'].includes(condition.operator)">
+      <p
+        v-if="fieldUnavailable(condition)"
+        class="inbox-notice"
+        :role="loading ? 'status' : 'alert'"
+      >
+        {{
+          t(
+            loading
+              ? 'inboxQuality.fieldLoading'
+              : 'inboxQuality.fieldUnavailable',
+            { id: condition.definition_id },
+          )
+        }}
+        <Button
+          v-if="!loading && !failed"
+          type="button"
+          variant="outline"
+          @click="load"
+          >{{ t('common.retry') }}</Button
+        >
+      </p>
+      <template
+        v-else-if="!['is_empty', 'not_empty'].includes(condition.operator)"
+      >
         <InboxFieldInput
           v-if="definition(condition)"
           :definition="definition(condition)!"
           :model-value="condition.value ?? null"
           @update:model-value="condition.value = $event"
         />
-        <select
+        <label
           v-else-if="
             condition.field === 'status' || condition.field === 'priority'
           "
-          v-model="condition.value"
-          :aria-label="t('inboxRules.actionValue')"
+          class="inbox-label"
         >
-          <option
-            v-for="value in condition.field === 'status'
-              ? ['open', 'pending', 'waiting_customer', 'snoozed', 'resolved']
-              : ['low', 'normal', 'high', 'urgent']"
-            :key="value"
-            :value="value"
-          >
-            {{ t('inboxWorkflow.' + condition.field + '.' + value) }}
-          </option>
-        </select>
-        <input
-          v-else
-          v-model="condition.value"
-          :aria-label="t('inboxRules.actionValue')"
-          maxlength="100"
-        />
+          {{ t('inboxQuality.conditionValue') }}
+          <select v-model="condition.value">
+            <option
+              v-for="value in condition.field === 'status'
+                ? ['open', 'pending', 'waiting_customer', 'snoozed', 'resolved']
+                : ['low', 'normal', 'high', 'urgent']"
+              :key="value"
+              :value="value"
+            >
+              {{ t('inboxWorkflow.' + condition.field + '.' + value) }}
+            </option>
+          </select>
+        </label>
+        <label v-else class="inbox-label">
+          {{ t('inboxQuality.conditionValue') }}
+          <input v-model="condition.value" maxlength="100" />
+        </label>
       </template>
       <p v-if="definition(condition)?.kind === 'text'" class="inbox-caption">
         {{ t('inboxQuality.textMatching') }}
@@ -173,6 +259,7 @@ function add() {
       variant="outline"
       size="sm"
       :disabled="
+        !defaultField ||
         (model.predicates?.length ?? 0) + (model.fields?.length ?? 0) >= 20
       "
       @click="add"

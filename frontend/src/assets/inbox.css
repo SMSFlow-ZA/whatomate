@@ -3,6 +3,12 @@
   font-size: 0.875rem;
   line-height: 1.5;
 }
+.inbox-response-targets {
+  color-scheme: light;
+}
+.dark .inbox-response-targets {
+  color-scheme: dark;
+}
 .inbox-page {
   display: flex;
   flex-direction: column;
