@@ -125,10 +125,16 @@ func (a *App) UpdateInboxWorkflowSettings(r *fastglue.Request) error {
 // A legacy transfer to a restricted agent grants access only to the matching
 // account here. A contact's explicit assignment keeps its existing scope.
 func (a *App) scopeInboxCases(q *gorm.DB, user, org uuid.UUID) *gorm.DB {
+	return scopeInboxCasesWithContactRead(q, user, org, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org))
+}
+
+// The same query boundary can be used with freshly loaded permissions by
+// background internal notifications, without trusting a Redis role cache.
+func scopeInboxCasesWithContactRead(q *gorm.DB, user, org uuid.UUID, fullContactRead bool) *gorm.DB {
 	q = q.Where("inbox_cases.organization_id = ?", org).
 		Joins("JOIN contacts c ON c.id = inbox_cases.contact_id AND c.organization_id = inbox_cases.organization_id AND c.deleted_at IS NULL").
 		Joins("JOIN whatsapp_accounts wa ON wa.id = inbox_cases.account_id AND wa.organization_id = inbox_cases.organization_id AND wa.deleted_at IS NULL")
-	if a.HasPermission(user, models.ResourceContacts, models.ActionRead, org) {
+	if fullContactRead {
 		return q
 	}
 	return q.Where("inbox_cases.assignee_id = ? OR (inbox_cases.assignee_id IS NULL AND (c.assigned_user_id = ? OR EXISTS ("+

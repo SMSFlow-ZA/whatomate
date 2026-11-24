@@ -30,7 +30,8 @@ const (
 	TypeCampaignStatsUpdate = "campaign_stats_update"
 
 	// Permission types
-	TypePermissionsUpdated = "permissions_updated"
+	TypePermissionsUpdated   = "permissions_updated"
+	TypeInboxNoticeAvailable = "inbox_notice_available"
 
 	// Conversation note types
 	TypeConversationNoteCreated = "conversation_note_created"

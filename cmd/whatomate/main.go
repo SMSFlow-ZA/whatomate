@@ -298,6 +298,7 @@ func runServer(args []string) {
 	go app.RunInboxSnoozes(slaCtx, time.Minute)
 	go app.RunInboxOverflow(slaCtx, 15*time.Second)
 	go app.RunInboxWorkflows(slaCtx, 3*time.Second)
+	go app.RunInboxEscalations(slaCtx, 30*time.Second)
 	lo.Info("SLA processor started")
 
 	// Start embedded workers
@@ -734,6 +735,12 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/inbox/sla/history", app.GetInboxSLAHistory)
 	g.GET("/api/inbox/workload", app.GetInboxWorkload)
 	g.GET("/api/inbox/sla/policies", app.ListInboxSLAPolicies)
+	g.GET("/api/inbox/sla/escalations/{account_id}", app.GetInboxEscalationSettings)
+	g.PUT("/api/inbox/sla/escalations/{account_id}", app.SetInboxEscalationSettings)
+	g.GET("/api/inbox/sla/escalations/{account_id}/recipients", app.ListInboxEscalationRecipients)
+	g.GET("/api/inbox/sla/escalations/{account_id}/history", app.ListInboxEscalationHistory)
+	g.GET("/api/inbox/sla/notices", app.ListInboxSLANotices)
+	g.PUT("/api/inbox/sla/notices/{id}/read", app.ReadInboxSLANotice)
 	g.PUT("/api/inbox/sla/policies/{account_id}", app.SetInboxSLAPolicy)
 	g.DELETE("/api/inbox/sla/policies/{account_id}", app.DeleteInboxSLAPolicy)
 	g.GET("/api/inbox/response-policies/{account_id}", app.ListInboxResponsePolicies)

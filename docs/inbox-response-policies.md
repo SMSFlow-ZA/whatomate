@@ -178,5 +178,7 @@ selection metadata together. Existing calendar rollback restrictions still
 apply. Reconcile and hold outbound work during the release's tested restore and
 rollback procedure.
 
-Optional internal escalation remains separate work in progress. Configuring a
-response policy does not notify staff or activate customer replies.
+Optional [internal notifications](inbox-internal-notifications.md) use separate,
+disabled-by-default routing. Their API and worker are implemented; staff-facing
+controls remain under development. Configuring a response policy alone does not
+notify staff or activate customer replies.

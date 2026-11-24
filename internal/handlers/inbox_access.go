@@ -12,11 +12,15 @@ import (
 // Historical reports must not turn a former case assignment into current
 // conversation access. Supervisors retain their ordinary contact-read scope.
 func (a *App) scopeInboxCaseHistory(q *gorm.DB, user, org uuid.UUID) *gorm.DB {
-	base := a.scopeInboxCases(q, user, org)
-	if a.HasPermission(user, models.ResourceContacts, models.ActionRead, org) {
+	return scopeInboxCaseHistoryWithContactRead(q, user, org, a.HasPermission(user, models.ResourceContacts, models.ActionRead, org))
+}
+
+func scopeInboxCaseHistoryWithContactRead(q *gorm.DB, user, org uuid.UUID, fullContactRead bool) *gorm.DB {
+	base := scopeInboxCasesWithContactRead(q, user, org, fullContactRead)
+	if fullContactRead {
 		return base
 	}
-	current := a.scopeInboxCases(q.Session(&gorm.Session{NewDB: true}).Model(&models.InboxCase{}), user, org).
+	current := scopeInboxCasesWithContactRead(q.Session(&gorm.Session{NewDB: true}).Model(&models.InboxCase{}), user, org, fullContactRead).
 		Where("NOT EXISTS (SELECT 1 FROM inbox_cases newer WHERE newer.organization_id=inbox_cases.organization_id AND newer.account_id=inbox_cases.account_id AND newer.contact_id=inbox_cases.contact_id AND newer.deleted_at IS NULL AND (newer.opened_at,newer.id)>(inbox_cases.opened_at,inbox_cases.id))").
 		Select("inbox_cases.account_id,inbox_cases.contact_id")
 	return base.Where("(inbox_cases.account_id,inbox_cases.contact_id) IN (?)", current)
