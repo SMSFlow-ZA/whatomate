@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
@@ -11,6 +19,8 @@ import InboxTabs from '@/components/shared/InboxTabs.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
 import InboxIntegrations from '@/components/settings/InboxIntegrations.vue'
 import InboxIntegrationRun from '@/components/settings/InboxIntegrationRun.vue'
+import InboxIntegrationReview from '@/components/settings/InboxIntegrationReview.vue'
+import type { IntegrationControlReview } from '@/services/inboxIntegrations'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useRoute } from 'vue-router'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
@@ -170,6 +180,9 @@ const deleting = ref(false)
 const editing = ref(false)
 const showHistory = ref(false)
 const expandedRun = ref('')
+const recoveryRequest = shallowRef<IntegrationControlReview>()
+const recoveryReviewer = ref<InstanceType<typeof InboxIntegrationReview>>()
+const historyRevision = ref(0)
 const confirmSends = ref(false)
 const query = ref('')
 const filtered = computed(() =>
@@ -271,6 +284,13 @@ function select(w?: InboxWorkflow, open = true, force = false) {
   baseline.value = JSON.stringify(form.value)
 }
 function changeTab(value: string, force = false) {
+  if (!force && recoveryRequest.value && recoveryReviewer.value) {
+    recoveryReviewer.value.confirmLeave(() => {
+      recoveryRequest.value = undefined
+      changeTab(value, true)
+    })
+    return
+  }
   if (showIntegrations.value && !force && integrationEditor.value) {
     integrationEditor.value.confirmLeave(() => changeTab(value, true))
     return
@@ -463,6 +483,7 @@ watch(
     showHistory.value = false
     form.value = fresh()
     expandedRun.value = ''
+    recoveryRequest.value = undefined
     id.value = ''
     caseId.value = ''
     cases.value = []
@@ -515,10 +536,31 @@ function pageHistory(delta: number) {
   historyOffset.value = Math.max(0, historyOffset.value + delta)
   void load()
 }
+async function recoveryChanged(runId: string) {
+  const context = viewerContext.value
+  await load()
+  if (context !== viewerContext.value) return
+  historyRevision.value++
+  await nextTick()
+  if (showHistory.value && expandedRun.value === runId) {
+    Array.from(
+      document.querySelectorAll<HTMLElement>('[data-inbox-integration-run]'),
+    )
+      .find((element) => element.dataset.inboxIntegrationRun === runId)
+      ?.querySelector<HTMLElement>('h3')
+      ?.focus()
+  }
+}
 </script>
 
 <template>
   <main class="inbox-ui inbox-page">
+    <InboxIntegrationReview
+      ref="recoveryReviewer"
+      :request="recoveryRequest"
+      @close="recoveryRequest = undefined"
+      @changed="recoveryChanged"
+    />
     <UnsavedChangesDialog
       :open="discardOpen"
       @leave="confirmDiscard"
@@ -1038,6 +1080,8 @@ function pageHistory(delta: number) {
                         :key="run.id"
                         :run="run"
                         :users="users"
+                        :revision="historyRevision"
+                        @review="recoveryRequest = $event"
                       />
                     </details>
                   </div>

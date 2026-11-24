@@ -8,6 +8,7 @@ import { useInboxCursorPage } from '@/composables/useInboxCursorPage'
 import {
   inboxIntegrations,
   type IntegrationExecution,
+  type IntegrationControlReview,
 } from '@/services/inboxIntegrations'
 import type { InboxWorkflowRun } from '@/services/inbox'
 import InboxIntegrationRecords from './InboxIntegrationRecords.vue'
@@ -15,7 +16,9 @@ import InboxIntegrationRecords from './InboxIntegrationRecords.vue'
 const props = defineProps<{
   run: InboxWorkflowRun
   users?: { id: string; full_name: string }[]
+  revision?: number
 }>()
+const emit = defineEmits<{ review: [request: IntegrationControlReview] }>()
 const { t, te } = useI18n()
 const auth = useAuthStore()
 const viewer = useInboxViewerContext()
@@ -46,7 +49,7 @@ const {
   older,
   newer,
 } = useInboxCursorPage(
-  () => JSON.stringify([viewer.value, props.run.id]),
+  () => JSON.stringify([viewer.value, props.run.id, props.revision]),
   async (cursor) => {
     const { data } = await inboxIntegrations.executions({
       run_id: props.run.id,
@@ -97,6 +100,7 @@ function actor(id: string) {
   <section
     class="integration-run mt-4 grid min-w-0 gap-4 border-t border-border pt-4"
     :aria-label="t('inboxIntegrationHistory.title')"
+    :data-inbox-integration-run="run.id"
   >
     <div class="flex flex-wrap items-start gap-2">
       <div class="mr-auto min-w-0">
@@ -277,6 +281,20 @@ function actor(id: string) {
             </div>
           </dl>
         </details>
+        <Button
+          v-if="
+            operator &&
+            ['unknown', 'failed'].includes(item.state) &&
+            item.attempt_count > 0
+          "
+          type="button"
+          variant="outline"
+          size="sm"
+          class="justify-self-start"
+          :disabled="busy || failed"
+          @click="emit('review', { kind: 'retry', run, execution: item })"
+          >{{ t('inboxRecovery.reviewRetry') }}</Button
+        >
         <template v-if="!operator">
           <Button
             type="button"
@@ -320,6 +338,15 @@ function actor(id: string) {
       >
     </div>
     <template v-if="operator">
+      <Button
+        v-if="!['sequence_cancelled', 'sent', 'applied'].includes(run.state)"
+        type="button"
+        variant="outline"
+        size="sm"
+        class="justify-self-start"
+        @click="emit('review', { kind: 'cancel', run })"
+        >{{ t('inboxRecovery.reviewCancel') }}</Button
+      >
       <Button
         type="button"
         variant="outline"

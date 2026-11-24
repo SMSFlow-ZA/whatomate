@@ -1,5 +1,9 @@
 import { api } from '@/services/api'
-import type { FieldValue, InboxWorkflowPreview } from '@/services/inbox'
+import type {
+  FieldValue,
+  InboxWorkflowPreview,
+  InboxWorkflowRun,
+} from '@/services/inbox'
 
 export interface IntegrationInput {
   name: string
@@ -84,6 +88,9 @@ export interface IntegrationRecovery {
   has_evidence: boolean
   created_at: string
 }
+export type IntegrationControlReview =
+  | { kind: 'retry'; run: InboxWorkflowRun; execution: IntegrationExecution }
+  | { kind: 'cancel'; run: InboxWorkflowRun }
 export type IntegrationRecoveryAction =
   | 'confirm_succeeded'
   | 'confirm_not_applied'

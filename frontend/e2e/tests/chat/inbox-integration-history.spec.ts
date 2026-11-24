@@ -1,9 +1,23 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator } from '@playwright/test'
 import { Client } from 'pg'
 import { randomUUID } from 'node:crypto'
 import { ApiHelper } from '../../helpers/api'
 import { createTestScope } from '../../framework'
 import { inboxContrast } from '../../helpers/inbox-contrast'
+
+async function settledDialog(dialog: Locator) {
+  await dialog.evaluate(async (element) => {
+    const finite = element
+      .getAnimations({ subtree: true })
+      .filter((animation) =>
+        Number.isFinite(Number(animation.effect?.getComputedTiming().endTime)),
+      )
+    await Promise.all(
+      finite.map((animation) => animation.finished.catch(() => undefined)),
+    )
+  })
+  await expect(dialog).toHaveCSS('opacity', '1')
+}
 
 test('reviews recorded integration truth and cursor history without dispatching', async ({
   page,
@@ -79,7 +93,10 @@ test('reviews recorded integration truth and cursor history without dispatching'
   const macro = (await macroResponse.json()).data.workflow
   const runId = randomUUID(),
     operationId = randomUUID(),
-    secondOperationId = randomUUID()
+    secondOperationId = randomUUID(),
+    cancellationRunId = randomUUID(),
+    cancellationOperationId = randomUUID(),
+    cancellationName = scope.name('Cancellation review')
   const client = new Client({ connectionString: database })
   await client.connect()
   let completed = false
@@ -229,6 +246,52 @@ test('reviews recorded integration truth and cursor history without dispatching'
             ),
             fullPage: true,
           })
+        await operations
+          .getByRole('button', {
+            name: 'Review retry eligibility',
+            exact: true,
+          })
+          .click()
+        const retryDialog = page.getByRole('dialog')
+        await expect(
+          retryDialog.getByRole('heading', {
+            name: 'Review original-operation retry',
+            exact: true,
+          }),
+        ).toBeFocused()
+        await expect(retryDialog).toContainText(
+          'This workflow no longer permits the original retry',
+        )
+        await settledDialog(retryDialog)
+        await expect(
+          retryDialog.getByRole('button', {
+            name: 'Authorise original-operation retry',
+            exact: true,
+          }),
+        ).toBeDisabled()
+        await expect
+          .poll(async () =>
+            (await inboxContrast(page)).filter(
+              (item) => item.ratio < item.minimum,
+            ),
+          )
+          .toEqual([])
+        if (process.env.INBOX_CAPTURE)
+          await page.screenshot({
+            path: testInfo.outputPath(
+              'integration-retry-blocked-' +
+                theme +
+                '-' +
+                viewport.width +
+                '.png',
+            ),
+            fullPage: true,
+            animations: 'disabled',
+          })
+        await retryDialog
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click()
+        await expect(retryDialog).toHaveCount(0)
         const decisionButton = operations.getByRole('button', {
           name: 'Recovery decisions',
           exact: true,
@@ -347,18 +410,182 @@ test('reviews recorded integration truth and cursor history without dispatching'
     expect(
       (await (await api.get('/api/inbox/integration-settings')).json()).data,
     ).toEqual(integrationSettings)
+    await client.query(
+      `INSERT INTO inbox_workflow_runs(id,created_at,updated_at,organization_id,workflow_id,case_id,account_id,contact_id,actor_id,kind,workflow_name,workflow_updated_at,state,sequenced,next_action,action_outcomes)
+      SELECT $1,NOW()+interval '1 second',NOW(),organization_id,workflow_id,case_id,account_id,contact_id,actor_id,kind,$2,workflow_updated_at,'sequence_blocked',true,0,action_outcomes FROM inbox_workflow_runs WHERE id=$3`,
+      [cancellationRunId, cancellationName, runId],
+    )
+    await client.query(
+      `INSERT INTO inbox_integration_executions(id,created_at,updated_at,organization_id,run_id,action_index,integration_id,case_id,account_id,contact_id,actor_id,definition_digest,request_digest,case_digest,encrypted_request,encrypted_result,state,outcome,attempt_count,result_origin,provider_status,duration_millis,started_at)
+      SELECT $1,NOW(),NOW(),organization_id,$2,0,integration_id,case_id,account_id,contact_id,actor_id,definition_digest,request_digest,case_digest,encrypted_request,'','unknown','needs_reconciliation',1,'',0,0,NOW() FROM inbox_integration_executions WHERE id=$3`,
+      [cancellationOperationId, cancellationRunId, operationId],
+    )
+    for (const viewport of [
+      { width: 1366, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      for (const theme of ['light', 'dark']) {
+        await page.setViewportSize(viewport)
+        await page.evaluate(
+          (value) => localStorage.setItem('color-mode', value),
+          theme,
+        )
+        await page.goto('/settings/inbox-workflows?tab=history')
+        await page.reload()
+        const row = page
+          .locator('.inbox-list-row')
+          .filter({ hasText: cancellationName })
+        await row
+          .locator('summary')
+          .filter({ hasText: /^Integration operations$/ })
+          .click()
+        await row
+          .getByRole('button', {
+            name: 'Review stopping remaining actions',
+            exact: true,
+          })
+          .click()
+        const review = page.getByRole('dialog')
+        await expect(
+          review.getByRole('heading', {
+            name: 'Review stopping remaining actions',
+            exact: true,
+          }),
+        ).toBeFocused()
+        await expect(review).toContainText(
+          'An earlier provider outcome is unresolved',
+        )
+        await settledDialog(review)
+        await expect(
+          review.getByRole('button', {
+            name: 'Stop remaining actions',
+            exact: true,
+          }),
+        ).toBeDisabled()
+        await expect
+          .poll(async () =>
+            (await inboxContrast(page)).filter(
+              (item) => item.ratio < item.minimum,
+            ),
+          )
+          .toEqual([])
+        if (process.env.INBOX_CAPTURE)
+          await page.screenshot({
+            path: testInfo.outputPath(
+              'integration-cancel-review-' +
+                theme +
+                '-' +
+                viewport.width +
+                '.png',
+            ),
+            fullPage: true,
+            animations: 'disabled',
+          })
+        if (theme !== 'dark' || viewport.width !== 390)
+          await review
+            .getByRole('button', { name: 'Cancel', exact: true })
+            .click()
+      }
+    }
+    let lostDecision: Record<string, unknown> | undefined
+    const cancelRoute =
+      '**/api/inbox/workflow-runs/' + cancellationRunId + '/cancel'
+    await page.route(cancelRoute, async (route) => {
+      lostDecision = route.request().postDataJSON()
+      const accepted = await route.fetch()
+      expect(accepted.ok()).toBe(true)
+      expect((await accepted.json()).data.cancelled).toBe(true)
+      await route.abort('failed')
+    })
+    const review = page.getByRole('dialog')
+    await review
+      .getByRole('textbox', {
+        name: 'Investigation or operational reason',
+        exact: true,
+      })
+      .fill('Synthetic cancellation acceptance; no external call made')
+    await review
+      .getByRole('button', { name: 'Stop remaining actions', exact: true })
+      .click()
+    await expect(
+      review.getByRole('heading', {
+        name: 'Decision acknowledgement unconfirmed',
+        exact: true,
+      }),
+    ).toBeVisible()
+    expect(lostDecision?.operation_id).toBeTruthy()
+    await expect(
+      review.getByRole('textbox', {
+        name: 'Investigation or operational reason',
+        exact: true,
+      }),
+    ).toBeDisabled()
+    if (process.env.INBOX_CAPTURE)
+      await page.screenshot({
+        path: testInfo.outputPath(
+          'integration-unconfirmed-cancel-dark-390.png',
+        ),
+        fullPage: true,
+        animations: 'disabled',
+      })
+    await page.unroute(cancelRoute)
+    await review
+      .getByRole('button', { name: 'Check recorded decision', exact: true })
+      .click()
+    await expect(review).toHaveCount(0)
+    const stopRow = page
+      .locator('.inbox-list-row')
+      .filter({ hasText: cancellationName })
+    await expect(
+      stopRow.getByText('Remaining actions stopped', { exact: true }),
+    ).toBeVisible()
+    const repeated = await api.post(
+      '/api/inbox/workflow-runs/' + cancellationRunId + '/cancel',
+      lostDecision!,
+    )
+    expect(repeated.ok()).toBe(true)
+    expect((await repeated.json()).data.recovery.id).toBe(
+      lostDecision!.operation_id,
+    )
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS n FROM inbox_integration_recoveries WHERE run_id=$1 AND kind='cancel_remaining'",
+          [cancellationRunId],
+        )
+      ).rows[0].n,
+    ).toBe(1)
+    expect(
+      (
+        await client.query(
+          'SELECT state,attempt_count::int AS attempts FROM inbox_integration_executions WHERE id=$1',
+          [cancellationOperationId],
+        )
+      ).rows[0],
+    ).toEqual({ state: 'unknown', attempts: 1 })
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS n FROM messages WHERE organization_id=$1 AND whats_app_account=$2 AND direction='outgoing'",
+          [profile.organization_id, account.name],
+        )
+      ).rows[0].n,
+    ).toBe(0)
     completed = true
   } finally {
     // Own synthetic fixture records only; the runner also removes its database.
     await client.query(
-      'DELETE FROM inbox_integration_recoveries WHERE run_id=$1',
-      [runId],
+      'DELETE FROM inbox_integration_recoveries WHERE run_id=ANY($1::uuid[])',
+      [[runId, cancellationRunId]],
     )
     await client.query(
-      'DELETE FROM inbox_integration_executions WHERE run_id=$1',
-      [runId],
+      'DELETE FROM inbox_integration_executions WHERE run_id=ANY($1::uuid[])',
+      [[runId, cancellationRunId]],
     )
-    await client.query('DELETE FROM inbox_workflow_runs WHERE id=$1', [runId])
+    await client.query(
+      'DELETE FROM inbox_workflow_runs WHERE id=ANY($1::uuid[])',
+      [[runId, cancellationRunId]],
+    )
     await client.end()
     if (completed) {
       await api.del('/api/inbox/workflow-definitions/' + macro.id)
