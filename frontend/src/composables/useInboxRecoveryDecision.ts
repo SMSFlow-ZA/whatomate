@@ -9,6 +9,7 @@ type Confirmation = { confirmation: string; reason: string }
 export type InboxRecoveryCommand =
   | { kind: 'retry'; target: string; input: Confirmation }
   | { kind: 'cancel'; target: string; input: Confirmation }
+  | { kind: 'resume'; target: string; input: Confirmation }
   | {
       kind: 'recover'
       target: string
@@ -33,11 +34,13 @@ function matches(record: IntegrationRecovery, decision: InboxPendingRecovery) {
       ? 'cancel_remaining'
       : decision.kind === 'retry'
         ? 'retry'
-        : decision.input.action
+        : decision.kind === 'resume'
+          ? 'resume_sequence'
+          : decision.input.action
   return (
     record.id === decision.operation_id &&
     record.kind === kind &&
-    (decision.kind === 'cancel'
+    (decision.kind === 'cancel' || decision.kind === 'resume'
       ? record.run_id === decision.target
       : record.execution_id === decision.target)
   )
@@ -85,10 +88,17 @@ export function useInboxRecoveryDecision(context: () => string) {
           ? await inboxIntegrations.retry(decision.target, input)
           : decision.kind === 'cancel'
             ? await inboxIntegrations.cancel(decision.target, input)
-            : await inboxIntegrations.recover(decision.target, {
-                ...decision.input,
-                operation_id: decision.operation_id,
-              })
+            : decision.kind === 'resume'
+              ? await inboxIntegrations.resume(
+                  decision.target,
+                  decision.input.confirmation,
+                  decision.input.reason,
+                  decision.operation_id,
+                )
+              : await inboxIntegrations.recover(decision.target, {
+                  ...decision.input,
+                  operation_id: decision.operation_id,
+                })
       if (request !== generation || scope !== context()) return
       const record = response.data?.data?.recovery as
         | IntegrationRecovery
@@ -149,7 +159,7 @@ export function useInboxRecoveryDecision(context: () => string) {
     checkFailed.value = false
     try {
       const { data } =
-        decision.kind === 'cancel'
+        decision.kind === 'cancel' || decision.kind === 'resume'
           ? await inboxIntegrations.runRecoveries(decision.target, cursor)
           : await inboxIntegrations.recoveries(decision.target, cursor)
       if (request !== generation || scope !== context()) return

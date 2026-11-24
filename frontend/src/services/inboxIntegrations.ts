@@ -230,8 +230,19 @@ export const inboxIntegrations = {
         }
       >
     >(runPath(id) + '/preview'),
-  resume: (id: string, confirmation: string, reason: string) =>
-    api.post(runPath(id) + '/resume', { confirmation, reason }),
+  resume: (
+    id: string,
+    confirmation: string,
+    reason: string,
+    operationId?: string,
+  ) =>
+    api.post<
+      Envelope<{ run: InboxWorkflowRun; recovery?: IntegrationRecovery }>
+    >(runPath(id) + '/resume', {
+      confirmation,
+      reason,
+      ...(operationId === undefined ? {} : { operation_id: operationId }),
+    }),
   cancelPreview: (id: string) =>
     api.post<
       Envelope<{

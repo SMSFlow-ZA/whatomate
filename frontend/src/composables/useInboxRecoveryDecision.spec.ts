@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   retry: vi.fn(),
   cancel: vi.fn(),
   recover: vi.fn(),
+  resume: vi.fn(),
   recoveries: vi.fn(),
   runRecoveries: vi.fn(),
 }))
@@ -251,6 +252,102 @@ it('uses run-scoped cancellation history and retains access-error acknowledgemen
   expect(api.runRecoveries).toHaveBeenCalledWith(target, undefined)
   expect(api.recoveries).not.toHaveBeenCalled()
   expect(controller.phase.value).toBe('confirmed')
+})
+
+it('does not infer resume acceptance from a completed run and explicitly replays the original frozen decision', async () => {
+  api.resume
+    .mockResolvedValueOnce(
+      envelope({ run: { id: target, state: 'completed' } }),
+    )
+    .mockResolvedValueOnce(
+      envelope({ recovery: record('resume_sequence'), run: { id: target } }),
+    )
+  const { controller } = mount()
+  const input: InboxRecoveryCommand = { ...command(), kind: 'resume' }
+  await controller.begin(input)
+  expect(controller.phase.value).toBe('unconfirmed')
+  expect(controller.pending.value?.operation_id).toBe(operation)
+  expect(controller.reset()).toBe(false)
+  input.input.reason = 'Later form edit is not approved'
+  await controller.begin({ ...input, target: nextOperation })
+  expect(api.resume).toHaveBeenCalledTimes(1)
+  await controller.submitSame()
+  expect(api.resume.mock.calls[1]).toEqual([
+    target,
+    confirmation,
+    'Synthetic investigation completed',
+    operation,
+  ])
+  expect(api.resume.mock.calls[1]).toEqual(api.resume.mock.calls[0])
+  expect(crypto.randomUUID).toHaveBeenCalledTimes(1)
+  expect(api.retry).not.toHaveBeenCalled()
+  expect(api.recover).not.toHaveBeenCalled()
+  expect(controller.phase.value).toBe('confirmed')
+})
+
+it('finds a resume receipt only by matching UUID, resume kind and run, even when mutations become unavailable', async () => {
+  api.resume.mockRejectedValue({ response: { status: 403 } })
+  api.runRecoveries
+    .mockResolvedValueOnce(
+      envelope({
+        recoveries: [
+          record('cancel_remaining'),
+          { ...record('resume_sequence'), run_id: nextOperation },
+          record('resume_sequence', nextOperation),
+        ],
+        has_more: true,
+        next_cursor: 'older-resume-decisions',
+      }),
+    )
+    .mockResolvedValueOnce(
+      envelope({
+        recoveries: [
+          {
+            ...record('resume_sequence'),
+            execution_id: '00000000-0000-0000-0000-000000000000',
+          },
+        ],
+        has_more: false,
+        next_cursor: '',
+      }),
+    )
+  const { controller } = mount()
+  await controller.begin({ ...command(), kind: 'resume' })
+  expect(controller.problem.value).toBe('access')
+  await controller.checkRecorded()
+  expect(controller.phase.value).toBe('unconfirmed')
+  expect(controller.nextCursor.value).toBe('older-resume-decisions')
+  await controller.checkRecorded(controller.nextCursor.value)
+  expect(api.runRecoveries).toHaveBeenLastCalledWith(
+    target,
+    'older-resume-decisions',
+  )
+  expect(api.recoveries).not.toHaveBeenCalled()
+  expect(api.resume).toHaveBeenCalledTimes(1)
+  expect(controller.confirmedId.value).toBe(operation)
+  expect(controller.problem.value).toBe('')
+})
+
+it('clears a pending resume on a viewer change and drops a late run-history receipt', async () => {
+  const old = deferred()
+  api.resume.mockRejectedValue(new Error('acknowledgement lost'))
+  api.runRecoveries.mockReturnValueOnce(old.promise)
+  const { controller, viewer } = mount()
+  await controller.begin({ ...command(), kind: 'resume' })
+  const checking = controller.checkRecorded()
+  viewer.context = 'viewer-a/org-a/revoked-permissions'
+  old.resolve(
+    envelope({
+      recoveries: [record('resume_sequence')],
+      has_more: false,
+      next_cursor: '',
+    }),
+  )
+  await checking
+  expect(controller.pending.value).toBeNull()
+  expect(controller.confirmedId.value).toBe('')
+  expect(controller.phase.value).toBe('idle')
+  expect(api.resume).toHaveBeenCalledTimes(1)
 })
 
 it('never replaces a conflicted decision automatically and requires its exact ID for an explicit reviewed discard', async () => {
