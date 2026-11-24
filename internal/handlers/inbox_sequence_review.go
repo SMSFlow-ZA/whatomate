@@ -139,6 +139,12 @@ func (a *App) ResumeInboxSequence(r *fastglue.Request) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resumed, "id=? AND organization_id=? AND sequenced", id, org).Error; err != nil {
 			return err
 		}
+		// A caller can race the worker even with a stale review open. Reject a
+		// submitting/completed run before touching the contact lock: human reply
+		// recording takes that lock before updating this run's expected digest.
+		if resumed.State != inboxSequenceReview && resumed.State != inboxSequenceBlocked {
+			return errInboxConflict
+		}
 		if err := (inboxThread{org, resumed.AccountID, resumed.ContactID}).lock(tx); err != nil {
 			return err
 		}

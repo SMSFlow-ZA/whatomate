@@ -506,3 +506,30 @@ func TestInboxSequenceReviewConflictsInsteadOfWaitingOnExecutorLock(t *testing.T
 	require.Equal(t, inboxSequenceReview, run.State)
 	require.Zero(t, execution.AttemptCount)
 }
+
+func TestInboxSequenceStaleResumeDoesNotLockSubmittingConversation(t *testing.T) {
+	f := sequenceFixture(t, func(f integrationFixture) []models.InboxAction {
+		return []models.InboxAction{{Type: "integration", Value: f.d.ID.String(), IntegrationInputs: f.mappings}}
+	})
+	run := queueSequenceMacro(t, f)
+	require.NoError(t, f.a.DB.Model(&run).Update("state", inboxSequenceSending).Error)
+	locked := f.a.DB.Begin()
+	require.NoError(t, locked.Error)
+	defer locked.Rollback()
+	var contact models.Contact
+	require.NoError(t, locked.Clauses(clause.Locking{Strength: "UPDATE"}).First(&contact, "id=?", f.c.ContactID).Error)
+	r := testutil.NewJSONRequest(t, map[string]any{"confirmation": strings.Repeat("f", 64), "reason": "Stale synthetic review"})
+	testutil.SetAuthContext(r, f.c.OrganizationID, f.actor.ID)
+	r.RequestCtx.SetUserValue("run_id", run.ID.String())
+	done := make(chan error, 1)
+	go func() { done <- f.a.ResumeInboxSequence(r) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		require.NoError(t, locked.Rollback().Error)
+		require.NoError(t, <-done)
+		t.Fatal("stale review waited for the submitting conversation lock")
+	}
+	require.Equal(t, 409, testutil.GetResponseStatusCode(r))
+}
