@@ -108,6 +108,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxSavedView{},
 		&models.InboxSLAPolicy{},
 		&models.InboxSLAVersion{},
+		&models.InboxResponsePolicy{},
 		&models.InboxSLAObligation{},
 		&models.InboxFieldDefinition{},
 		&models.InboxFieldValue{},

@@ -22,10 +22,11 @@ type InboxSLAPolicy struct {
 // InboxSLAVersion is an immutable policy assigned on entry to the human queue.
 type InboxSLAVersion struct {
 	BaseModel
-	OrganizationID uuid.UUID      `gorm:"type:uuid;not null;index" json:"-"`
-	AccountID      uuid.UUID      `gorm:"type:uuid;not null;index" json:"account_id"`
-	Policy         InboxSLAPolicy `gorm:"serializer:json;type:jsonb;not null" json:"policy"`
-	Legacy         bool           `gorm:"not null" json:"legacy"`
+	OrganizationID uuid.UUID                `gorm:"type:uuid;not null;index" json:"-"`
+	AccountID      uuid.UUID                `gorm:"type:uuid;not null;index" json:"account_id"`
+	Policy         InboxSLAPolicy           `gorm:"serializer:json;type:jsonb;not null" json:"policy"`
+	Legacy         bool                     `gorm:"not null" json:"legacy"`
+	Selection      *InboxResponseDefinition `gorm:"serializer:json;type:jsonb" json:"selection,omitempty"`
 }
 
 // Completed reply cycles remain available after the next cycle starts.

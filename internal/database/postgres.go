@@ -83,6 +83,7 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxSavedView", &models.InboxSavedView{}},
 		{"InboxSLAPolicy", &models.InboxSLAPolicy{}},
 		{"InboxSLAVersion", &models.InboxSLAVersion{}},
+		{"InboxResponsePolicy", &models.InboxResponsePolicy{}},
 		{"InboxSLAObligation", &models.InboxSLAObligation{}},
 		{"InboxFieldDefinition", &models.InboxFieldDefinition{}},
 		{"InboxFieldValue", &models.InboxFieldValue{}},

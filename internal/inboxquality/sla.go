@@ -58,11 +58,52 @@ func AssignPolicy(tx *gorm.DB, c *models.InboxCase, legacy bool) error {
 	if c.SLAPolicyAssigned {
 		return nil
 	}
+	// A second caller may hold a stale unassigned struct. Lock/reload before
+	// the account policy lock, preserving the row-then-account lock order used
+	// by Sync and preventing a later edit from replacing the first selection.
+	var current models.InboxCase
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id=? AND organization_id=? AND account_id=?", c.ID, c.OrganizationID, c.AccountID).Error; err != nil {
+		return err
+	}
+	*c = current
+	if c.SLAPolicyAssigned {
+		return nil
+	}
 	if err := PolicyLock(tx, c.OrganizationID, c.AccountID); err != nil {
 		return err
 	}
+	decision := models.InboxPolicyDecision{Kind: "none"}
+	if c.SLAPolicyID != nil {
+		var retained models.InboxSLAVersion
+		if err := tx.First(&retained, "id=? AND organization_id=? AND account_id=?", c.SLAPolicyID, c.OrganizationID, c.AccountID).Error; err != nil {
+			return err
+		}
+		decision.Kind = "retained"
+	}
+	if !legacy && c.SLAPolicyID == nil {
+		candidates, err := loadResponsePolicies(tx, c.OrganizationID, c.AccountID, false, false)
+		if err != nil {
+			return err
+		}
+		evaluations, err := EvaluateResponsePolicies(tx, *c, candidates)
+		if err != nil {
+			return err
+		}
+		for _, evaluation := range evaluations {
+			if evaluation.Selected {
+				version := evaluation.VersionID
+				c.SLAPolicyID = &version
+				id, position := evaluation.PolicyID, evaluation.Position
+				decision = models.InboxPolicyDecision{Kind: "conditional", PolicyID: &id, Position: &position}
+				break
+			}
+		}
+	}
 	var p models.InboxSLAPolicy
-	err := tx.First(&p, "organization_id = ? AND account_id = ?", c.OrganizationID, c.AccountID).Error
+	err := gorm.ErrRecordNotFound
+	if c.SLAPolicyID == nil {
+		err = tx.First(&p, "organization_id = ? AND account_id = ?", c.OrganizationID, c.AccountID).Error
+	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
@@ -71,10 +112,15 @@ func AssignPolicy(tx *gorm.DB, c *models.InboxCase, legacy bool) error {
 			return err
 		}
 		c.SLAPolicyID = p.VersionID
+		decision.Kind = "default"
+	}
+	if legacy {
+		decision.Kind = "legacy_" + decision.Kind
 	}
 	c.SLAPolicyAssigned = true
 	c.SLALegacy = legacy
-	return tx.Model(c).Updates(map[string]any{"sla_policy_id": c.SLAPolicyID, "sla_policy_assigned": true, "sla_legacy": legacy}).Error
+	c.SLASelection = &decision
+	return tx.Model(c).Select("sla_policy_id", "sla_policy_assigned", "sla_legacy", "sla_selection").Updates(c).Error
 }
 
 func Pauses(events []models.InboxCaseActivity, opened time.Time) []inboxsla.Pause {
@@ -152,7 +198,7 @@ func syncCase(tx *gorm.DB, c *models.InboxCase, now time.Time, recovering bool) 
 		return finish()
 	}
 	var v models.InboxSLAVersion
-	if err := tx.First(&v, "id = ? AND organization_id = ?", c.SLAPolicyID, c.OrganizationID).Error; err != nil {
+	if err := tx.First(&v, "id = ? AND organization_id = ? AND account_id = ?", c.SLAPolicyID, c.OrganizationID, c.AccountID).Error; err != nil {
 		return err
 	}
 	clock, err := PolicyClock(v.Policy)

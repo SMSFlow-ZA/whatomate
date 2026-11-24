@@ -24,6 +24,7 @@ type inboxSLATarget struct {
 
 type inboxSLASnapshot struct {
 	PolicyVersion *uuid.UUID          `json:"policy_version,omitempty"`
+	PolicyName    string              `json:"policy_name,omitempty"`
 	Legacy        bool                `json:"legacy"`
 	SnoozeOptions []inboxSnoozeOption `json:"snooze_options,omitempty"`
 	FirstReply    *inboxSLATarget     `json:"first_reply,omitempty"`
@@ -118,6 +119,7 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 	type configured struct {
 		policy models.InboxSLAPolicy
 		clock  inboxsla.Clock
+		name   string
 	}
 	byCasePolicy := make(map[uuid.UUID]configured)
 	var ids []uuid.UUID
@@ -138,12 +140,16 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 	}
 	for _, c := range cases {
 		var p models.InboxSLAPolicy
+		var name string
 		if c.SLAPolicyID != nil {
 			v, ok := versionsByID[*c.SLAPolicyID]
-			if !ok {
+			if !ok || v.AccountID != c.AccountID {
 				return nil, errors.New("case response policy version is missing")
 			}
 			p = v.Policy
+			if v.Selection != nil {
+				name = v.Selection.Name
+			}
 		} else if !c.SLAPolicyAssigned {
 			// Read-only compatibility for fixture/legacy records awaiting migration.
 			err := a.DB.First(&p, "organization_id = ? AND account_id = ?", org, c.AccountID).Error
@@ -160,7 +166,7 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 		if err != nil {
 			return nil, err
 		}
-		byCasePolicy[c.ID] = configured{p, clock}
+		byCasePolicy[c.ID] = configured{p, clock, name}
 	}
 	var caseIDs []uuid.UUID
 	for _, c := range cases {
@@ -181,6 +187,7 @@ func (a *App) inboxSLASnapshots(org uuid.UUID, cases []models.InboxCase, now tim
 	for _, c := range cases {
 		if entry, ok := byCasePolicy[c.ID]; ok {
 			results[c.ID] = inboxSnapshot(entry.clock, entry.policy, c, byCase[c.ID], now)
+			results[c.ID].PolicyName = entry.name
 			results[c.ID].SnoozeOptions = inboxSnoozeOptions(entry.policy, now)
 		}
 	}

@@ -457,9 +457,10 @@ export class ApiHelper {
     })
   }
 
-  async del(path: string, extraHeaders?: Record<string, string>) {
+  async del(path: string, extraHeaders?: Record<string, string>, data?: unknown) {
     return this.request.delete(`${BASE_URL}${path}`, {
-      headers: { ...this.csrfHeaders, ...extraHeaders }
+      headers: { ...this.csrfHeaders, ...extraHeaders },
+      data
     })
   }
 
