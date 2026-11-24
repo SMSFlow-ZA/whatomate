@@ -29,7 +29,8 @@ function mount() {
   const text = ref('Hi {{contact_name}}'),
     sending = ref(false),
     contact = ref('contact-a'),
-    viewer = ref('org-a/user-a')
+    viewer = ref('org-a/user-a'),
+    canned = ref<string>()
   const confirm = vi.fn()
   const root = document.createElement('div')
   document.body.append(root)
@@ -41,6 +42,7 @@ function mount() {
         contact: contact.value,
         account: 'account-a',
         viewer: viewer.value,
+        cannedResponseId: canned.value,
         onConfirm: confirm,
       }),
   })
@@ -59,7 +61,7 @@ function mount() {
       }
     }
   ).setupState
-  return { state, text, sending, contact, viewer, confirm }
+  return { state, text, sending, contact, viewer, canned, confirm }
 }
 const result = {
   data: {
@@ -148,4 +150,78 @@ it('clears an in-flight preview when the signed-in viewer changes', async () => 
   expect(state.preview).toBeUndefined()
   state.confirm()
   expect(confirm).not.toHaveBeenCalled()
+})
+
+it('loads saved replies by ID and preserves the exact reviewed interactive payload', async () => {
+  mocks.conversation.mockResolvedValue({
+    data: { data: { case: { id: 'case-a', status: 'open' } } },
+  })
+  const interactive = {
+    type: 'cta_url',
+    body: 'Hi Example',
+    button_text: 'Open',
+    url: 'https://example.invalid/case',
+  }
+  mocks.preview.mockResolvedValue({
+    data: {
+      data: {
+        ...result.data.data,
+        reply: {
+          text: 'Hi Example',
+          canned_response_id: 'saved-a',
+          interactive,
+        },
+      },
+    },
+  })
+  const { state, canned, confirm, text } = mount()
+  canned.value = 'saved-a'
+  await settle()
+  await state.review()
+  state.confirm()
+  expect(mocks.preview).toHaveBeenCalledWith('case-a', '', 'saved-a')
+  expect(confirm).toHaveBeenCalledWith(
+    expect.objectContaining({
+      interactive,
+      personalisation: expect.objectContaining({
+        authored_text: '',
+        canned_response_id: 'saved-a',
+      }),
+    }),
+  )
+  expect(text.value).toBe('Hi {{contact_name}}')
+})
+
+it('rejects a mismatched saved-reply source and discards old source lookups', async () => {
+  mocks.conversation.mockResolvedValue({
+    data: { data: { case: { id: 'case-a', status: 'open' } } },
+  })
+  mocks.preview.mockResolvedValue(result)
+  const { state, canned, confirm } = mount()
+  canned.value = 'saved-a'
+  await settle()
+  await state.review()
+  state.confirm()
+  expect(confirm).not.toHaveBeenCalled()
+  let finish!: (value: unknown) => void
+  mocks.preview.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve
+    }),
+  )
+  const pending = state.review()
+  await settle()
+  canned.value = 'saved-b'
+  await settle()
+  finish({
+    data: {
+      data: {
+        ...result.data.data,
+        reply: { text: 'Old reply', canned_response_id: 'saved-a' },
+      },
+    },
+  })
+  await pending
+  expect(state.open).toBe(false)
+  expect(state.preview).toBeUndefined()
 })

@@ -2958,7 +2958,10 @@
       "template_not_supported": "This template requires content that this workflow cannot safely preview.",
       "template_parameters_missing": "Map every required header and body parameter, then preview this template again.",
       "variables_invalid": "A message variable or its rendered value is invalid. Review the syntax and message length, then preview again.",
-      "variables_missing": "Some message values are unavailable. Complete the details or author fallback text, then preview again."
+      "variables_missing": "Some message values are unavailable. Complete the details or author fallback text, then preview again.",
+      "canned_content_invalid": "Check the saved reply: rendered button labels must fit 20 characters, links must be valid and interactive messages must fit 1,024 characters. Edit the saved reply and preview again.",
+      "calling_unavailable": "Business Calling is unavailable for this WhatsApp account. Choose another saved reply or ask an administrator to check the account.",
+      "flow_unavailable": "This WhatsApp Flow is not published for the selected account. Choose another saved reply or ask an administrator to check the Flow."
     },
     "workingTime": "Remaining working time",
     "completeDetails": "Complete required details",
@@ -3180,6 +3183,14 @@
     "alreadyResolved": "This case is already resolved. Close this dialog to view its latest status."
   },
   "inboxPersonalisation": {
+    "savedRepliesError": "Saved replies could not be loaded. Check your connection and retry.",
+    "cannedUnavailable": "Personalised saved replies need an active inbox case and a WhatsApp account. Open the current case and try again.",
+    "cannedMode": "Personalise from case details",
+    "cannedModeHelp": "Use permitted contact and case values. Agents review the exact message and buttons before sending. Turn this off to keep manually entered placeholders.",
+    "buttonPreview": "Customer options (preview only)",
+    "flowPreview": "Opens the published WhatsApp Flow for this account.",
+    "callPreview": "Offers a WhatsApp call for {minutes} minutes.",
+    "renderedLimits": "Variables resolve when an agent previews a reply. Final button labels must fit 20 characters; interactive messages must fit 1,024 characters.",
     "review": "Review personalised reply",
     "reviewHelp": "Check the recipient and exact message. Sending checks the case, permissions and WhatsApp reply window again.",
     "sendReviewed": "Send reviewed reply",

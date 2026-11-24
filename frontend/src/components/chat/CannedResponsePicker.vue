@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -25,6 +27,20 @@ const internalOpen = ref(false)
 const isLoading = ref(false)
 const searchQuery = ref('')
 const responses = ref<CannedResponse[]>([])
+const auth = useAuthStore()
+const { t } = useI18n()
+const failed = ref(false)
+let generation = 0
+const viewer = computed(() => `${auth.organizationId}/${auth.user?.id}`)
+watch(viewer, () => {
+  generation++
+  responses.value = []
+  internalOpen.value = false
+  isLoading.value = false
+  failed.value = false
+  emit('close')
+})
+onUnmounted(() => { generation++ })
 
 // Sync external open state - use external if true, otherwise use internal
 const isOpen = computed({
@@ -46,21 +62,25 @@ watch(() => props.externalSearch, (val) => {
 
 // Fetch responses when popover opens
 watch(isOpen, async (open) => {
-  if (open && responses.value.length === 0) {
+  if (open) {
     await fetchResponses()
   }
 })
 
 async function fetchResponses() {
+  const current = ++generation, captured = viewer.value
   isLoading.value = true
+  failed.value = false
+  responses.value = []
   try {
     const response = await cannedResponsesService.list({ active_only: 'true' })
+    if (current !== generation || captured !== viewer.value) return
     const data = (response.data as any).data || response.data
     responses.value = data.canned_responses || []
-  } catch (error) {
-    console.error('Failed to fetch canned responses:', error)
+  } catch {
+    if (current === generation) failed.value = true
   } finally {
-    isLoading.value = false
+    if (current === generation) isLoading.value = false
   }
 }
 
@@ -112,7 +132,7 @@ function selectResponse(response: CannedResponse) {
 <template>
   <Popover v-model:open="isOpen">
     <PopoverTrigger as-child>
-      <Button id="canned-response-picker-button" type="button" variant="ghost" size="icon">
+      <Button id="canned-response-picker-button" type="button" variant="ghost" size="icon" :aria-label="t('cannedResponses.title')">
         <MessageSquareText class="h-5 w-5" />
       </Button>
     </PopoverTrigger>
@@ -134,6 +154,10 @@ function selectResponse(response: CannedResponse) {
           <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
 
+        <div v-else-if="failed" class="grid gap-2 p-3 text-sm">
+          <p role="alert">{{ t('inboxPersonalisation.savedRepliesError') }}</p>
+          <Button type="button" variant="outline" class="min-h-[44px]" @click="fetchResponses">{{ t('common.retry') }}</Button>
+        </div>
         <div v-else-if="filteredResponses.length === 0" class="py-8 text-center text-muted-foreground text-sm">
           No canned responses found
         </div>

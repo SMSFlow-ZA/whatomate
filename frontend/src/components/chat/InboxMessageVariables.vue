@@ -116,7 +116,7 @@ function restoreFocus(event: Event) {
         variant="outline"
         size="sm"
         :disabled="disabled"
-        class="min-h-[44px]"
+        class="min-h-[44px] w-fit justify-self-start"
       >
         <Braces class="mr-2 h-4 w-4" aria-hidden="true" />{{
           t('inboxPersonalisation.insert')

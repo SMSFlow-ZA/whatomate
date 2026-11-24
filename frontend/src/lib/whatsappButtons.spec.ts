@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { nextButtonId, validateWhatsAppButtons } from './whatsappButtons'
+import { nextButtonId, validateWhatsAppButtons, validatePersonalisedCannedButtons } from './whatsappButtons'
 import type { ButtonConfig } from '@/types/flow-preview'
 
 // The real callers pass vue-i18n's `t`, which falls back to the second
 // argument when the key is missing. Returning the fallback keeps the
 // assertions readable and independent of the locale files.
 const t = (_key: string, fallback: string) => fallback
+
+it('defers rendered label and URL validation without weakening button combinations', () => {
+  const buttons: ButtonConfig[] = [{ id: 'view', type: 'url', title: '{{contact_name | "Open"}}', url: '{{case.field.url}}' }]
+  expect(validateWhatsAppButtons(buttons, t)).not.toBeNull()
+  expect(validatePersonalisedCannedButtons(buttons, t)).toBeNull()
+  expect(validatePersonalisedCannedButtons([...buttons, { id: 'yes', type: 'reply', title: 'Yes' }], t)).not.toBeNull()
+  expect(buttons[0]?.title).toBe('{{contact_name | "Open"}}')
+})
 
 const reply = (id: string, title = 'Option'): ButtonConfig => ({ id, title, type: 'reply' })
 const url = (id: string, u = 'https://example.com'): ButtonConfig => ({

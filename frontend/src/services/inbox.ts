@@ -1,4 +1,4 @@
-import { api } from '@/services/api'
+import { api, type messagesService } from '@/services/api'
 
 export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'select'
 export type FieldValue = string | number | boolean | null
@@ -120,6 +120,9 @@ export interface InboxWorkflowPreview {
   recipient: { name: string; phone: string }
   account: string
   reply?: {
+    canned_response_id?: string
+    canned_name?: string
+    interactive?: Parameters<typeof messagesService.send>[1]['interactive']
     missing_variables?: { key: string; reason: string }[]
     text: string
     header?: string
@@ -251,10 +254,15 @@ const workflowPath = (id: string) =>
   '/inbox/workflow-definitions/' + encodeURIComponent(id)
 
 export const inboxService = {
-  previewMessage: (case_id: string, text: string) =>
+  previewMessage: (
+    case_id: string,
+    text: string,
+    canned_response_id?: string,
+  ) =>
     api.post<Envelope<InboxWorkflowPreview>>('/inbox/message-preview', {
       case_id,
       text,
+      ...(canned_response_id ? { canned_response_id } : {}),
     }),
   messageVariables: () =>
     api.get<Envelope<{ variables: InboxMessageVariable[] }>>(

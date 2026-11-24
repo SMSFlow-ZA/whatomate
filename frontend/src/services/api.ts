@@ -273,7 +273,7 @@ export const messagesService = {
       content: any
       reply_to_message_id?: string
       whatsapp_account?: string
-      personalisation?: { case_id: string; version: number; authored_text: string; confirmation: string }
+      personalisation?: { case_id: string; version: number; authored_text: string; confirmation: string; canned_response_id?: string }
       // Interactive payload. Mirrors backend InteractiveContent.
       interactive?: {
         type: 'button' | 'cta_url' | 'list' | 'voice_call' | 'flow'
@@ -439,6 +439,7 @@ export interface CannedResponseButton {
 }
 
 export interface CannedResponse {
+  personalise?: boolean
   id: string
   name: string
   shortcut: string
@@ -452,6 +453,7 @@ export interface CannedResponse {
 }
 
 interface CannedResponseUpsertPayload {
+  personalise?: boolean
   name?: string
   shortcut?: string
   content?: string

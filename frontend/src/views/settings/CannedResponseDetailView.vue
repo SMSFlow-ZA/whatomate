@@ -6,7 +6,8 @@ import { useAuthStore } from '@/stores/auth'
 import { cannedResponsesService, type CannedResponse } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
-import { validateWhatsAppButtons } from '@/lib/whatsappButtons'
+import { validateWhatsAppButtons, validatePersonalisedCannedButtons } from '@/lib/whatsappButtons'
+import InboxMessageText from '@/components/settings/InboxMessageText.vue'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
@@ -67,6 +68,7 @@ const form = ref({
   content: '',
   category: '',
   is_active: true,
+  personalise: false,
   buttons: [] as ButtonConfig[],
 })
 
@@ -109,6 +111,7 @@ function syncForm() {
     content: response.value.content,
     category: response.value.category || '',
     is_active: response.value.is_active,
+    personalise: !!response.value.personalise,
     buttons: (response.value.buttons || []).map(b => ({ ...b })),
   }
 }
@@ -119,7 +122,7 @@ watch(form, () => {
 
 // The button combination rules live in @/lib/whatsappButtons so the chatbot
 // greeting/fallback editor enforces exactly the same set.
-const buttonsValidationError = computed(() => validateWhatsAppButtons(form.value.buttons, t))
+const buttonsValidationError = computed(() => (form.value.personalise ? validatePersonalisedCannedButtons : validateWhatsAppButtons)(form.value.buttons, t))
 
 const canSave = computed(() => !buttonsValidationError.value)
 
@@ -139,6 +142,7 @@ async function save() {
         name: form.value.name,
         shortcut: form.value.shortcut || undefined,
         content: form.value.content,
+        personalise: form.value.personalise,
         category: form.value.category || undefined,
         buttons: form.value.buttons,
       })
@@ -156,6 +160,7 @@ async function save() {
         name: form.value.name,
         shortcut: form.value.shortcut,
         content: form.value.content,
+        personalise: form.value.personalise,
         category: form.value.category,
         is_active: form.value.is_active,
         buttons: form.value.buttons,
@@ -197,7 +202,7 @@ onMounted(() => { loadResponse() })
 </script>
 
 <template>
-  <div class="h-full">
+  <div class="inbox-ui h-full">
     <DetailPageLayout
       :title="pageTitle"
       :icon="MessageSquareText"
@@ -216,11 +221,11 @@ onMounted(() => { loadResponse() })
           </Button>
           <Button
             v-if="!isNew && canDelete"
-            variant="destructive"
+            variant="outline"
             size="sm"
             @click="deleteDialogOpen = true"
           >
-            <Trash2 class="h-4 w-4 mr-1" />
+            <Trash2 class="h-4 w-4 mr-1 text-destructive" />
             {{ $t('common.delete') }}
           </Button>
         </div>
@@ -265,9 +270,14 @@ onMounted(() => { loadResponse() })
             </div>
           </div>
           <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('cannedResponses.content') }} <span class="text-destructive">*</span></Label>
-            <Textarea v-model="form.content" :placeholder="$t('cannedResponses.contentPlaceholder')" :rows="6" :disabled="!canWrite" />
-            <p class="text-[11px] text-muted-foreground">{{ $t('cannedResponses.placeholderHint') }}</p>
+            <Label v-if="!form.personalise" class="text-xs">{{ $t('cannedResponses.content') }} <span class="text-destructive">*</span></Label>
+            <InboxMessageText v-if="form.personalise" v-model="form.content" :label="$t('cannedResponses.content')" :rows="6" variables :disabled="!canWrite || isSaving" />
+            <Textarea v-else v-model="form.content" :placeholder="$t('cannedResponses.contentPlaceholder')" :rows="6" :disabled="!canWrite || isSaving" />
+            <p class="text-sm text-muted-foreground">{{ form.personalise ? $t('inboxPersonalisation.renderedLimits') : $t('cannedResponses.placeholderHint') }}</p>
+          </div>
+          <div class="space-y-2">
+            <label class="flex min-h-[44px] items-center gap-2 text-sm"><input v-model="form.personalise" type="checkbox" :disabled="!canWrite || isSaving" aria-describedby="canned-personalisation-help" />{{ $t('inboxPersonalisation.cannedMode') }}</label>
+            <p id="canned-personalisation-help" class="text-sm text-muted-foreground">{{ $t('inboxPersonalisation.cannedModeHelp') }}</p>
           </div>
           <div v-if="!isNew" class="flex items-center justify-between border-t pt-4">
             <Label class="text-xs font-normal cursor-pointer">{{ $t('common.active') }}</Label>
@@ -289,7 +299,8 @@ onMounted(() => { loadResponse() })
           <MessageButtonsEditor
             :buttons="form.buttons"
             :allowed-types="['reply', 'url', 'voice_call', 'flow']"
-            :disabled="!canWrite"
+            :disabled="!canWrite || isSaving"
+            :personalisation="form.personalise"
             @update:buttons="form.buttons = $event"
           />
 

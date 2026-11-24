@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import InboxMessageVariables from '@/components/chat/InboxMessageVariables.vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +21,7 @@ const props = withDefaults(
     maxButtons?: number
     disabled?: boolean
     showIdField?: boolean
+    personalisation?: boolean
   }>(),
   {
     allowedTypes: () => ['reply', 'url', 'phone'],
@@ -106,6 +108,27 @@ function updateButton(index: number, patch: Partial<ButtonConfig>) {
   emitButtons(next)
 }
 
+const variableInputs = new Map<string, HTMLInputElement>()
+const editor = ref<HTMLElement>()
+function rememberInput(index: number, field: 'title' | 'url', event: FocusEvent) {
+  variableInputs.set(`${index}/${field}`, event.target as HTMLInputElement)
+}
+async function insertVariable(index: number, field: 'title' | 'url', token: string) {
+  if (props.disabled || !props.personalisation) return
+  const button = props.buttons[index]
+  if (!button) return
+  const remembered = variableInputs.get(`${index}/${field}`)
+  const input = editor.value?.querySelector<HTMLInputElement>(`[data-inbox-variable-input="${index}/${field}"]`)
+  const value = button[field] || ''
+  const start = remembered === input ? input?.selectionStart ?? value.length : value.length, end = remembered === input ? input?.selectionEnd ?? start : start
+  const next = value.slice(0, start) + token + value.slice(end)
+  if (Array.from(next).length > 4096) return
+  updateButton(index, { [field]: next })
+  await nextTick()
+  input?.focus()
+  input?.setSelectionRange(start + token.length, start + token.length)
+}
+
 function canAdd(type: ButtonType): boolean {
   if (props.disabled) return false
   if (isExclusive.value) return false
@@ -135,7 +158,7 @@ function typeIcon(type?: string) {
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div ref="editor" class="space-y-3">
     <div class="flex items-center justify-between flex-wrap gap-2">
       <Label class="text-xs">
         {{ $t('flowBuilder.buttonOptions', 'Buttons') }} ({{ buttons.length }}/{{ effectiveMax }})
@@ -213,9 +236,12 @@ function typeIcon(type?: string) {
           <Input
             :model-value="btn.title"
             :placeholder="$t('flowBuilder.buttonTitle', 'Button title')"
-            :maxlength="MAX_BUTTON_TITLE_LENGTH"
+            :maxlength="personalisation ? 4096 : MAX_BUTTON_TITLE_LENGTH"
+            :aria-label="`${$t('flowBuilder.buttonTitle', 'Button title')} ${idx + 1}`"
+            :data-inbox-variable-input="`${idx}/title`"
             class="h-7 flex-1 text-xs"
             :disabled="disabled"
+            @focus="rememberInput(idx, 'title', $event)"
             @update:model-value="updateButton(idx, { title: String($event) })"
           />
           <Button
@@ -224,19 +250,27 @@ function typeIcon(type?: string) {
             class="h-7 w-7"
             :disabled="disabled"
             @click="removeButton(idx)"
+            :aria-label="`${$t('common.remove', 'Remove')} ${idx + 1}`"
           >
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
         </div>
 
+        <InboxMessageVariables v-if="personalisation" :disabled="disabled" @insert="insertVariable(idx, 'title', $event)" />
+
         <div v-if="btn.type === 'url'">
           <Input
             :model-value="btn.url"
+            :aria-label="`URL ${idx + 1}`"
+            :data-inbox-variable-input="`${idx}/url`"
+            :maxlength="personalisation ? 4096 : undefined"
             :placeholder="$t('flowBuilder.exampleUrlPlaceholder', 'https://example.com')"
             class="h-7 text-xs"
             :disabled="disabled"
+            @focus="rememberInput(idx, 'url', $event)"
             @update:model-value="updateButton(idx, { url: String($event) })"
           />
+          <InboxMessageVariables v-if="personalisation" :disabled="disabled" class="mt-2" @insert="insertVariable(idx, 'url', $event)" />
         </div>
         <div v-else-if="btn.type === 'phone'">
           <Input

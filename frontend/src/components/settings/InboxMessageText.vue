@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
+import '@/assets/inbox.css'
 import InboxMessageVariables from '@/components/chat/InboxMessageVariables.vue'
 const model = defineModel<string>({ required: true })
-defineProps<{ label: string; variables?: boolean }>()
+defineProps<{
+  label: string
+  variables?: boolean
+  disabled?: boolean
+  rows?: number
+}>()
 const emit = defineEmits<{ personalised: [] }>()
 const input = ref<HTMLTextAreaElement>()
 async function insert(token: string) {
@@ -24,8 +30,19 @@ async function insert(token: string) {
   <div class="grid min-w-0 gap-2">
     <label class="inbox-label"
       >{{ label }}
-      <textarea ref="input" v-model="model" rows="3" maxlength="4096" />
+      <textarea
+        ref="input"
+        v-model="model"
+        :rows="rows ?? 3"
+        maxlength="4096"
+        :disabled="disabled"
+      />
     </label>
-    <InboxMessageVariables v-if="variables" @insert="insert" />
+    <InboxMessageVariables
+      v-if="variables"
+      class="justify-self-start"
+      :disabled="disabled"
+      @insert="insert"
+    />
   </div>
 </template>

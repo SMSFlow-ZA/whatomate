@@ -163,6 +163,7 @@ const inboxEnabled = ref(false)
 const personaliseReply = ref(false)
 const personalisationError = ref('')
 const personalisationReview = ref<InstanceType<typeof InboxPersonalisedReply>>()
+const personalisedCanned = ref<CannedResponse>()
 async function insertReplyVariable(token: string) {
   const start = messageInputRef.value?.selectionStart ?? messageInput.value.length
   const end = messageInputRef.value?.selectionEnd ?? start
@@ -177,15 +178,19 @@ async function sendPersonalisedReply(reply: PersonalisedReply) {
   if (inboxReadOnly.value || isSending.value || !contactsStore.currentContact || deliveryOptions.value.channel !== 'whatsapp') return
   isSending.value = true
   personalisationError.value = ''
-  const contact = contactsStore.currentContact.id, account = selectedAccount.value, organization = inboxOrg.value, authored = messageInput.value
-  const sameContext = () => contact === contactsStore.currentContact?.id && account === selectedAccount.value && organization === inboxOrg.value && authored === messageInput.value
+  const contact = contactsStore.currentContact.id, account = selectedAccount.value, organization = inboxOrg.value, authored = messageInput.value, cannedId = personalisedCanned.value?.id
+  const sameContext = () => contact === contactsStore.currentContact?.id && account === selectedAccount.value && organization === inboxOrg.value && authored === messageInput.value && cannedId === personalisedCanned.value?.id
   try {
-    await contactsStore.sendMessage(contact, 'text', { body: reply.body }, contactsStore.replyingTo?.id, account || undefined,
-      { ...channelPayload(deliveryOptions.value, false), client_message_id: reply.client_message_id, personalisation: reply.personalisation })
+    await contactsStore.sendMessage(contact, reply.interactive ? 'interactive' : 'text', { body: reply.body }, contactsStore.replyingTo?.id, account || undefined,
+      { ...channelPayload(deliveryOptions.value, !!reply.interactive), ...(reply.interactive ? { interactive: reply.interactive } : {}), client_message_id: reply.client_message_id, personalisation: reply.personalisation })
+    if (cannedId) cannedResponsesService.use(cannedId).catch(() => {})
     if (!sameContext()) return
     personalisationReview.value?.close()
-    messageInput.value = ''
-    personaliseReply.value = false
+    personalisedCanned.value = undefined
+    if (!cannedId) {
+      messageInput.value = ''
+      personaliseReply.value = false
+    }
     contactsStore.clearReplyingTo()
     resetTextareaHeight()
     await nextTick()
@@ -363,6 +368,7 @@ const isTagFilterOpen = ref(false)
 // Service window state
 const deliveryOptions = ref(initialChannelOptions())
 watch(() => [contactsStore.currentContact?.id, selectedAccount.value, inboxOrg.value, authStore.user?.id, deliveryOptions.value.channel], () => {
+  personalisedCanned.value = undefined
   personaliseReply.value = false
   personalisationError.value = ''
 })
@@ -881,7 +887,9 @@ async function sendMessage() {
   if (inboxReadOnly.value) return
   if (!messageInput.value.trim() || !contactsStore.currentContact) return
   if (personaliseReply.value && deliveryOptions.value.channel === 'whatsapp') {
+    personalisedCanned.value = undefined
     personalisationError.value = ''
+    await nextTick()
     await personalisationReview.value?.review()
     return
   }
@@ -1056,7 +1064,20 @@ const cannedPreviewButtons = computed(() => {
   }))
 })
 
-function handleCannedSelect(response: CannedResponse) {
+async function handleCannedSelect(response: CannedResponse) {
+  if (response.personalise) {
+    cannedPickerOpen.value = false
+    if (!inboxEnabled.value || !inboxAccountId.value || inboxReadOnly.value || deliveryOptions.value.channel !== 'whatsapp') {
+      toast.error(t('inboxPersonalisation.cannedUnavailable'))
+      return
+    }
+    personalisedCanned.value = response
+    personalisationError.value = ''
+    await nextTick()
+    await personalisationReview.value?.review()
+    return
+  }
+  personalisedCanned.value = undefined
   selectedCannedResponse.value = response
   const tokens = extractCannedTokensFromResponse(response).filter(
     t => !AUTO_RESOLVED_CONTEXT_TOKENS.has(t)
@@ -3094,7 +3115,7 @@ async function sendMediaMessage() {
 
     <InboxPersonalisedReply v-if="inboxEnabled && inboxAccountId && contactsStore.currentContact && !inboxReadOnly" ref="personalisationReview"
       :viewer="inboxOrg + '/' + authStore.user?.id"
-      :account="inboxAccountId" :contact="contactsStore.currentContact.id" :text="messageInput" :sending="isSending" :send-error="personalisationError" @confirm="sendPersonalisedReply" />
+      :account="inboxAccountId" :contact="contactsStore.currentContact.id" :text="personalisedCanned ? '' : messageInput" :canned-response-id="personalisedCanned?.id" :sending="isSending" :send-error="personalisationError" @confirm="sendPersonalisedReply" />
 
     <!-- Add Contact Dialog -->
     <CreateContactDialog v-model:open="isAddContactOpen" @created="onContactCreated" />

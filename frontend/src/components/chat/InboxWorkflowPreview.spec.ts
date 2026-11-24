@@ -29,3 +29,40 @@ it('shows the selected agent name instead of an internal identifier in a review'
     app.unmount()
   }
 })
+
+it('shows rich saved-reply intent even when blocked, without following links', () => {
+  const root = document.createElement('div')
+  const app = createApp({
+    render: () =>
+      h(InboxWorkflowPreview, {
+        purpose: 'reply',
+        preview: {
+          matches: true,
+          confirmation: '',
+          actions: [],
+          send_unavailable: true,
+          recipient: { name: 'Example customer', phone: '+12025550190' },
+          account: 'Support',
+          reply: {
+            text: 'Hi Example',
+            canned_name: 'Saved greeting',
+            interactive: {
+              type: 'cta_url',
+              body: 'Hi Example',
+              button_text: 'Open case',
+              url: 'https://example.invalid/case',
+            },
+          },
+        },
+      }),
+  })
+  app.mount(root)
+  try {
+    expect(root.textContent).toContain('Saved greeting')
+    expect(root.textContent).toContain('Open case')
+    expect(root.textContent).toContain('https://example.invalid/case')
+    expect(root.querySelector('a')).toBeNull()
+  } finally {
+    app.unmount()
+  }
+})

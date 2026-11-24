@@ -21,9 +21,11 @@ const props = defineProps<{
   sending: boolean
   sendError?: string
   viewer?: string
+  cannedResponseId?: string
 }>()
 export type PersonalisedReply = {
   body: string
+  interactive?: Parameters<typeof messagesService.send>[1]['interactive']
   client_message_id: string
   personalisation: NonNullable<
     Parameters<typeof messagesService.send>[1]['personalisation']
@@ -39,7 +41,13 @@ const preview = ref<InboxWorkflowPreview>()
 let generation = 0,
   operationId = ''
 const context = computed(() =>
-  [props.viewer, props.account, props.contact, props.text].join('\u0000'),
+  [
+    props.viewer,
+    props.account,
+    props.contact,
+    props.text,
+    props.cannedResponseId,
+  ].join('\u0000'),
 )
 watch(context, () => {
   generation++
@@ -80,9 +88,15 @@ async function review() {
       error.value = t('inboxPersonalisation.startCase')
       return
     }
-    const { data } = await inboxService.previewMessage(c.id, props.text)
+    const { data } = props.cannedResponseId
+      ? await inboxService.previewMessage(c.id, '', props.cannedResponseId)
+      : await inboxService.previewMessage(c.id, props.text)
     if (current !== generation || captured !== context.value || !open.value)
       return
+    if (data.data.reply?.canned_response_id !== props.cannedResponseId) {
+      error.value = t('inboxPersonalisation.previewError')
+      return
+    }
     preview.value = data.data
     if (!operationId) operationId = crypto.randomUUID()
   } catch {
@@ -108,11 +122,17 @@ function confirm() {
   confirming.value = true
   emit('confirm', {
     body: result.reply.text,
+    ...(result.reply.interactive
+      ? { interactive: result.reply.interactive }
+      : {}),
     client_message_id: operationId,
     personalisation: {
       case_id: result.case_id,
       version: result.case_version,
-      authored_text: props.text,
+      authored_text: props.cannedResponseId ? '' : props.text,
+      ...(props.cannedResponseId
+        ? { canned_response_id: props.cannedResponseId }
+        : {}),
       confirmation: result.confirmation,
     },
   })

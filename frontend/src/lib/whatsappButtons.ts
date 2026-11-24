@@ -32,6 +32,16 @@ export function nextButtonId(buttons: ButtonConfig[]): string {
   return `btn_${highest + 1}`
 }
 
+// Authored variables can be longer than the eventual label or URL. Validate
+// the combination here; the server validates every fully rendered value again.
+export function validatePersonalisedCannedButtons(buttons: ButtonConfig[], t: Translate): string | null {
+  return validateWhatsAppButtons(buttons.map(button => ({
+    ...button,
+    title: button.title.includes('{{') ? 'Value' : button.title,
+    url: button.url?.includes('{{') ? 'https://example.invalid/' : button.url,
+  })), t)
+}
+
 /**
  * Validate a button combination against WhatsApp Cloud API's free-form
  * interactive-message rules. Returns a user-facing message, or null when the

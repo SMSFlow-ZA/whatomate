@@ -145,6 +145,9 @@ function actionValue(action: InboxAction, index: number) {
           preview.reply.language
         }})
       </p>
+      <p v-if="preview.reply?.canned_name" class="mt-2 font-medium">
+        {{ preview.reply.canned_name }}
+      </p>
       <div
         v-if="preview.reply"
         class="mt-3 grid gap-1 rounded-lg bg-muted/60 p-3"
@@ -161,6 +164,51 @@ function actionValue(action: InboxAction, index: number) {
           class="inbox-caption whitespace-pre-wrap"
         >
           {{ preview.reply.footer }}
+        </p>
+      </div>
+      <div v-if="preview.reply?.interactive" class="mt-2 grid gap-2 text-sm">
+        <p class="inbox-caption">
+          {{ t('inboxPersonalisation.buttonPreview') }}
+        </p>
+        <ul v-if="preview.reply.interactive.buttons?.length" class="grid gap-1">
+          <li
+            v-for="button in preview.reply.interactive.buttons"
+            :key="button.id"
+            class="rounded-md border border-border px-3 py-2 break-words"
+          >
+            {{ button.title }}
+          </li>
+        </ul>
+        <p
+          v-if="
+            preview.reply.interactive.button_text ||
+            preview.reply.interactive.display_text
+          "
+          class="rounded-md border border-border px-3 py-2 break-words"
+        >
+          {{
+            preview.reply.interactive.button_text ||
+            preview.reply.interactive.display_text
+          }}
+        </p>
+        <p v-if="preview.reply.interactive.url" class="inbox-caption break-all">
+          {{ preview.reply.interactive.url }}
+        </p>
+        <p
+          v-if="preview.reply.interactive.type === 'flow'"
+          class="inbox-caption"
+        >
+          {{ t('inboxPersonalisation.flowPreview') }}
+        </p>
+        <p
+          v-if="preview.reply.interactive.type === 'voice_call'"
+          class="inbox-caption"
+        >
+          {{
+            t('inboxPersonalisation.callPreview', {
+              minutes: preview.reply.interactive.ttl_minutes || 15,
+            })
+          }}
         </p>
       </div>
     </div>
