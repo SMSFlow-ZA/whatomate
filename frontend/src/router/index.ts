@@ -53,6 +53,12 @@ const router = createRouter({
           meta: { permission: 'chat', stableKey: true }
         },
         {
+          path: 'inbox/notices',
+          name: 'inbox-notices',
+          component: () => import('@/views/chat/InboxNoticesView.vue'),
+          meta: { permission: 'chat' }
+        },
+        {
           path: 'inbox/cases/:caseId/workflows',
           name: 'inbox-case-workflows',
           component: () => import('@/views/chat/InboxWorkflowHistoryView.vue'),

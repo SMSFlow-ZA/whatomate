@@ -18,6 +18,7 @@ import InboxTabs from '@/components/shared/InboxTabs.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import InboxResponseTargetsForm from './InboxResponseTargetsForm.vue'
 import InboxResponsePolicies from './InboxResponsePolicies.vue'
+import InboxInternalNotifications from './InboxInternalNotifications.vue'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useAuthStore } from '@/stores/auth'
@@ -48,7 +49,7 @@ const baseline = ref(''),
 const unconfirmed = ref(false),
   accessLost = ref(false),
   error = ref('')
-const child = ref<InstanceType<typeof InboxResponsePolicies>>()
+const child = ref<{ confirmLeave: (action: () => void) => void }>()
 let loadGeneration = 0,
   mutationGeneration = 0
 const existing = computed(() =>
@@ -71,8 +72,7 @@ function resetDraft() {
 }
 function confirmLeave(action: () => void) {
   if (locked.value) return
-  if (mode.value === 'conditional' && child.value)
-    child.value.confirmLeave(action)
+  if (mode.value !== 'default' && child.value) child.value.confirmLeave(action)
   else
     requestDiscard(() => {
       baseline.value = JSON.stringify(policy.value)
@@ -252,8 +252,13 @@ onUnmounted(() => {
             </option>
           </select></label
         >
-        <p class="inbox-caption mt-3">{{ t('inboxUX.slaPolicyHelp') }}</p>
-        <p v-if="selected" class="inbox-notice mt-3">
+        <p v-if="mode !== 'notifications'" class="inbox-caption mt-3">
+          {{ t('inboxUX.slaPolicyHelp') }}
+        </p>
+        <p
+          v-if="selected && mode !== 'notifications'"
+          class="inbox-notice mt-3"
+        >
           {{ t('inboxQuality.policyFutureOnly') }}
         </p>
         <InboxTabs
@@ -263,6 +268,7 @@ onUnmounted(() => {
           :items="[
             { value: 'default', label: t('inboxPolicy.default') },
             { value: 'conditional', label: t('inboxPolicy.title') },
+            { value: 'notifications', label: t('inboxNotice.settingsTitle') },
           ]"
           :label="t('inboxPolicy.navigation')"
           @update:model-value="selectMode"
@@ -318,13 +324,20 @@ onUnmounted(() => {
           </footer>
         </form>
         <InboxResponsePolicies
-          v-else
+          v-else-if="mode === 'conditional'"
           :key="selected + viewer"
           ref="child"
           :account="selected"
           :default-targets="
             policies.find((item) => item.account_id === selected)
           "
+          @busy="childBusy = $event"
+        />
+        <InboxInternalNotifications
+          v-else-if="mode === 'notifications'"
+          :key="selected + viewer"
+          ref="child"
+          :account="selected"
           @busy="childBusy = $event"
         />
       </template>

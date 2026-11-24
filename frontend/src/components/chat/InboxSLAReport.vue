@@ -129,6 +129,11 @@ onUnmounted(() => {
         </p>
       </div>
       <RouterLink
+        :to="{ name: 'inbox-notices' }"
+        class="inline-flex min-h-[44px] items-center text-sm font-medium underline-offset-4 hover:underline"
+        >{{ t('inboxNotice.title') }}</RouterLink
+      >
+      <RouterLink
         v-if="
           auth.hasPermission('settings.general', 'write') &&
           auth.hasPermission('accounts', 'write')
@@ -238,7 +243,7 @@ onUnmounted(() => {
           <li v-for="row in visible" :key="row.id" class="inbox-list-row">
             <div class="inbox-list-copy">
               <RouterLink
-                class="inbox-list-title underline-offset-4 hover:underline"
+                class="inbox-list-title inline-flex min-h-[44px] items-center underline-offset-4 hover:underline sm:min-h-0"
                 :to="{
                   name: 'chat-conversation',
                   params: { contactId: row.contact_id },

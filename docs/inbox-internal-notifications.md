@@ -5,9 +5,49 @@ They are optional, disabled by default and delivered **inside the application**.
 They do not send a customer reply, email, SMS or WhatsApp message, change an
 assignment, or change the case's response policy, calendar or deadlines.
 
-The API and worker described here are implemented. Configuration controls and
-the staff notification-list interface remain under development; this document
-does not claim those screens are available yet.
+## Configure notifications
+
+Open **Settings → Inbox workflows → Response targets**, choose a WhatsApp account,
+then open **Internal notifications**. Select at-risk and/or breach, find the
+intended staff members, explicitly enable notifications and Save. Selecting a
+person never grants access to cases. Staff search follows directory permissions;
+an unavailable saved name appears as a staff reference rather than an invented
+identity. Remove or review an unavailable recipient before enabling.
+
+Unsaved changes are protected when switching accounts or sections. Cancel restores
+the saved settings. A failed staff lookup preserves the selection and offers Retry.
+A stale revision or uncertain save stops further changes until **Refresh saved
+settings** succeeds and the operator reviews the current configuration; the app
+does not replay that save automatically.
+
+**Observation history** below the editor shows the recorded threshold, target,
+time and per-recipient outcome. Expand an observation for case/policy references,
+the routing revision and suppression reasons. This is scoped operational history,
+not proof that a human saw the notice.
+
+## Review your notices
+
+Open **Response alerts** from the Chat inbox toolbar or Live inbox. Ordinary agents
+use their existing chat permission and case access; supervisor reporting permission
+is not required. The list starts with unacknowledged notices. Clear that choice to
+include acknowledged history, and use Older/Newer for additional pages.
+
+Each notice identifies the account and case, the observed threshold and target,
+local timestamps with timezone, the assigned immutable policy and current target
+state. **Threshold due** is the observed crossing time (the risk threshold for an
+at-risk notice), not a new reply deadline. Open the case to inspect its response
+deadline and current work. Completed or resolved work is labelled separately from
+the originally observed warning or breach.
+
+**Acknowledge** changes only your internal notice. It does not send a reply, mark a
+customer message read or resolve the case. A failed acknowledgement retains the
+notice; refresh before retrying. Repeated acknowledgements are idempotent.
+
+Visible lists refresh after focus/reconnection, on scoped live hints and periodically.
+Older pages stay in place and show that new activity is available. Last updated and
+Refresh make freshness explicit; failed refreshes do not masquerade as current
+data. Current access is rechecked on every request. Missing access hides retained
+rows; a disabled inbox feature is confirmed separately from an unavailable route.
 
 ## Activation and thresholds
 
@@ -116,7 +156,8 @@ prevent a pending hint from being presented as new actionable work.
 
 Back up settings, events and notices together with cases, immutable policy
 versions, obligations and identities. Do not delete deduplication records to force
-replay. Pause observation before restoring an older recovery point, review current
-work, then deliberately rearm thresholds if appropriate. Older application images
+replay. Restore with the application stopped, disable notification routing in the
+restored database before starting workers, review current work, then deliberately
+rearm thresholds if appropriate. Older application images
 ignore these additive tables; preserve them when rolling back. Combined managed
 upgrade, restore and rollback acceptance remains a separate release gate.

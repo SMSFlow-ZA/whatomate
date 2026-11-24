@@ -179,6 +179,6 @@ apply. Reconcile and hold outbound work during the release's tested restore and
 rollback procedure.
 
 Optional [internal notifications](inbox-internal-notifications.md) use separate,
-disabled-by-default routing. Their API and worker are implemented; staff-facing
-controls remain under development. Configuring a response policy alone does not
-notify staff or activate customer replies.
+disabled-by-default routing under the Internal notifications tab. Staff can review
+their scoped Response alerts from the inbox. Configuring a response policy alone
+does not notify staff or activate customer replies.

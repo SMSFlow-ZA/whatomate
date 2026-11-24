@@ -3374,10 +3374,26 @@
       "schema": "This declared field type is not supported. Review the finding without selected values."
     },
     "actions": {
-      "confirm_succeeded": { "title": "Review confirmed success", "help": "Record a separately verified successful external outcome. Keep it distinct from provider-reported evidence.", "confirm": "Record investigated success" },
-      "confirm_not_applied": { "title": "Review confirmed no effect", "help": "Record a separately verified finding that the original request had no effect. This does not issue a replacement request.", "confirm": "Record no-effect finding" },
-      "apply_outputs": { "title": "Review selected field updates", "help": "Check the authorised current and proposed field values from this successful operation before applying them.", "confirm": "Apply reviewed field values" },
-      "discard_outputs": { "title": "Review discarding selected values", "help": "Discard unhandled selected values without altering the successful external outcome or repeating its request.", "confirm": "Discard selected values" }
+      "confirm_succeeded": {
+        "title": "Review confirmed success",
+        "help": "Record a separately verified successful external outcome. Keep it distinct from provider-reported evidence.",
+        "confirm": "Record investigated success"
+      },
+      "confirm_not_applied": {
+        "title": "Review confirmed no effect",
+        "help": "Record a separately verified finding that the original request had no effect. This does not issue a replacement request.",
+        "confirm": "Record no-effect finding"
+      },
+      "apply_outputs": {
+        "title": "Review selected field updates",
+        "help": "Check the authorised current and proposed field values from this successful operation before applying them.",
+        "confirm": "Apply reviewed field values"
+      },
+      "discard_outputs": {
+        "title": "Review discarding selected values",
+        "help": "Discard unhandled selected values without altering the successful external outcome or repeating its request.",
+        "confirm": "Discard selected values"
+      }
     }
   },
   "inboxRecovery": {
@@ -3661,5 +3677,86 @@
       "integration_unavailable": "This integration could not be prepared. Refresh the case and review its configuration.",
       "required_details_from_integration": "An earlier integration is expected to provide required details. Resolution checks the applied values again."
     }
+  },
+  "inboxNotice": {
+    "title": "Response alerts",
+    "settingsTitle": "Internal notifications",
+    "settingsHelp": "Notify selected staff inside Whatomate when a response target is at risk or breached. This does not send email or customer messages, change assignments or alter deadlines.",
+    "enable": "Enable internal notifications",
+    "activationHelp": "Only new threshold crossings are observed after activation. Re-enabling does not backfill older work. Changing recipients does not replay a recorded crossing.",
+    "thresholds": "When to notify",
+    "at_risk": "At risk",
+    "breach": "Breached",
+    "recipients": "Staff recipients",
+    "recipientsHelp": "Choose up to 20 active staff. Each person must still have access to the exact case. Assigned agents receive only work they can read.",
+    "selected": "{count} of 20 selected",
+    "staffReference": "Selected staff reference",
+    "removePerson": "Remove {name} from recipients",
+    "directoryRequired": "User-directory read access is required to browse staff names. Existing recipient references remain visible; ask an authorised administrator to review them.",
+    "searchStaff": "Find staff by name",
+    "searchResults": "Eligible staff",
+    "loadingPeople": "Loading eligible staff…",
+    "peopleFailed": "Staff lookup failed. Your selected recipients are unchanged.",
+    "assignedOnly": "Only cases this person can access",
+    "noPeople": "No eligible staff on this page. Try another name or continue to the next page.",
+    "morePeople": "Next staff page",
+    "invalidRecipients": "Before enabling, choose at least one threshold and 1–20 eligible staff. Remove unavailable selections or ask an administrator to review them. You can always save notifications as disabled.",
+    "conflict": "Another administrator changed these settings. Refresh saved settings and review before saving again.",
+    "unknownSave": "The save outcome is unknown. Refresh saved settings before making another change. Do not repeat this save.",
+    "saved": "Notification routing saved. Response deadlines and customer replies are unchanged.",
+    "loadingSettings": "Loading notification settings…",
+    "loadFailed": "Notification settings could not be loaded.",
+    "accessRequired": "Current full inbox and general-settings access is required. Ask an administrator to review your permissions.",
+    "history": "Observation history",
+    "historyHelp": "Available means retained in the app, not delivered to a person. Suppression and current access checks are recorded separately. This list contains only cases you can currently access.",
+    "historyFailed": "Observation history could not be refreshed.",
+    "loadingHistory": "Loading observation history…",
+    "historyEmpty": "No crossings have been observed. Notifications start disabled and do not backfill earlier thresholds.",
+    "observed": "Observed {at}",
+    "availableSummary": "Available in app: {available} · Suppressed: {suppressed}",
+    "observationDetails": "Observation details",
+    "caseReference": "Case reference",
+    "policyVersion": "Assigned policy version",
+    "routingRevision": "Notification routing revision",
+    "due": "Threshold due",
+    "recorded": "Recorded",
+    "updated": "Last updated {at}",
+    "historyPages": "Observation history pages",
+    "noticePages": "Response alert pages",
+    "newer": "Newer",
+    "older": "Older",
+    "backToInbox": "Back to inbox",
+    "listHelp": "Your internal response-target notices. Current work may since have been completed, paused or resolved. Acknowledging a notice does not reply to the customer or change the case.",
+    "chatRequired": "Your current workspace chat access does not permit this list. Ask an administrator to review your access, then reopen it.",
+    "unreadOnly": "Unacknowledged only",
+    "newActivity": "New activity is available. Return to the first page to see the latest notices.",
+    "listFailed": "The list could not be refreshed. Displayed notices may be out of date.",
+    "loadingList": "Loading response alerts…",
+    "acknowledgeFailed": "Acknowledgement could not be confirmed. Refresh the list before retrying; current case access may have changed.",
+    "unreadEmpty": "No unacknowledged notices on this page. Show all notices to review acknowledged work.",
+    "listEmpty": "No notices are available to you. An administrator must enable internal notifications and select you, and each case must remain within your access.",
+    "acknowledge": "Acknowledge",
+    "acknowledging": "Acknowledging…",
+    "acknowledged": "Acknowledged",
+    "acknowledgeSuccess": "Notice acknowledged. Customer messages and case status are unchanged.",
+    "kind": {
+      "first_reply": "First reply",
+      "next_reply": "Next reply",
+      "resolution": "Resolution"
+    },
+    "state": {
+      "active": "Target active",
+      "breached": "Currently breached",
+      "paused": "Target paused",
+      "completed": "Target completed",
+      "case_resolved": "Case resolved"
+    },
+    "outcome": {
+      "available": "Available in app",
+      "recipient_unavailable": "Recipient unavailable or no longer eligible",
+      "case_access_denied": "Recipient could not access this case",
+      "legacy_transfer_covered": "Covered by the existing transfer escalation"
+    },
+    "featureDisabled": "Inbox workflows are disabled for this workspace. Ask an administrator to review the setting. Existing notice history is preserved."
   }
 }

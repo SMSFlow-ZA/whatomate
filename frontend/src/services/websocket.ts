@@ -6,6 +6,7 @@ import { useNotesStore } from '@/stores/notes'
 import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
+import { inboxNoticesChanged } from '@/services/inboxNotices'
 
 // Notification sound
 let notificationSound: HTMLAudioElement | null = null
@@ -169,6 +170,7 @@ class WebSocketService {
         this.hasConnectedBefore = true
         this.reconnectAttempts = 0
         this.startPing()
+        window.dispatchEvent(new Event(inboxNoticesChanged))
 
         // Force refresh data after reconnection to sync any missed updates
         if (isReconnection) {
@@ -220,6 +222,11 @@ class WebSocketService {
       const store = useContactsStore()
 
       switch (message.type) {
+        case 'inbox_notice_available':
+          // No payload content is displayed or used to grant access. The
+          // visible notice list coalesces this hint into a scoped HTTP reload.
+          window.dispatchEvent(new Event(inboxNoticesChanged))
+          break
         case WS_TYPE_NEW_MESSAGE:
           this.handleNewMessage(store, message.payload)
           break

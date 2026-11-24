@@ -6,6 +6,19 @@ vi.mock('@/services/api', () => ({ contactsService: { markRead: vi.fn().mockReso
 import { wsService } from './websocket'
 import { useContactsStore } from '@/stores/contacts'
 import { contactsService } from '@/services/api'
+import { inboxNoticesChanged } from './inboxNotices'
+
+it('treats internal notice hints as content-free reloads without a toast or navigation', () => {
+  setActivePinia(createPinia())
+  const listener = vi.fn()
+  window.addEventListener(inboxNoticesChanged, listener)
+  try {
+    ;(wsService as any).handleMessage(JSON.stringify({ type: 'inbox_notice_available', payload: { id: 'synthetic-notice', body: 'Must never be displayed', url: 'https://example.invalid' } }))
+    expect(listener).toHaveBeenCalledOnce()
+    expect(listener.mock.calls[0]![0].detail).toBeUndefined()
+    expect(document.body.textContent).not.toContain('Must never be displayed')
+  } finally { window.removeEventListener(inboxNoticesChanged, listener) }
+})
 
 describe('SMS websocket wire mapping', () => {
   it('preserves SMS identity and attempts before updating the open inbox', () => {

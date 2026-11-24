@@ -712,6 +712,11 @@ async function applyBulk() {
             </form></PopoverContent
           ></Popover
         >
+        <RouterLink
+          :to="{ name: 'inbox-notices' }"
+          class="inline-flex min-h-[44px] items-center px-2 text-sm font-medium underline-offset-4 hover:underline"
+          >{{ t('inboxNotice.title') }}</RouterLink
+        >
         <Button
           variant="ghost"
           size="icon"
