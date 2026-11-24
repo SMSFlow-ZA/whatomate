@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircle2, AlertCircle } from 'lucide-vue-next'
 import type { InboxAction, InboxWorkflowPreview } from '@/services/inbox'
 const props = defineProps<{
+  purpose?: 'workflow' | 'reply'
   preview: InboxWorkflowPreview
   teams?: { id: string; name: string }[]
   users?: { id: string; full_name: string }[]
@@ -35,76 +36,82 @@ function actionValue(action: InboxAction, index: number) {
 </script>
 <template>
   <div class="inbox-ui grid gap-4">
-    <p class="flex items-center gap-2 text-sm font-medium">
-      <CheckCircle2
-        v-if="preview.matches"
-        class="h-4 w-4"
-        aria-hidden="true"
-      /><AlertCircle v-else class="h-4 w-4" aria-hidden="true" />{{
-        t(preview.matches ? 'inboxRules.matches' : 'inboxRules.noMatch')
-      }}
-    </p>
-    <p class="inbox-caption">{{ t('inboxQuality.preflightHelp') }}</p>
-    <ul v-if="preview.condition_outcomes?.length" class="grid gap-2 text-sm">
-      <li v-for="(condition, index) in preview.condition_outcomes" :key="index">
-        <span class="font-medium">{{
-          condition.label || t('inboxQuality.conditionName.' + condition.field)
-        }}</span>
-        ·
-        {{
-          t(
-            condition.matched
-              ? 'inboxQuality.conditionMet'
-              : 'inboxQuality.conditionNotMet',
-          )
+    <template v-if="purpose !== 'reply'">
+      <p class="flex items-center gap-2 text-sm font-medium">
+        <CheckCircle2
+          v-if="preview.matches"
+          class="h-4 w-4"
+          aria-hidden="true"
+        /><AlertCircle v-else class="h-4 w-4" aria-hidden="true" />{{
+          t(preview.matches ? 'inboxRules.matches' : 'inboxRules.noMatch')
         }}
-        <span class="inbox-caption"
-          >({{
-            t(
-              'inboxQuality.match' +
-                (condition.group === 'any' ? 'Any' : 'All'),
-            )
-          }})</span
+      </p>
+      <p class="inbox-caption">{{ t('inboxQuality.preflightHelp') }}</p>
+      <ul v-if="preview.condition_outcomes?.length" class="grid gap-2 text-sm">
+        <li
+          v-for="(condition, index) in preview.condition_outcomes"
+          :key="index"
         >
-      </li>
-    </ul>
-    <ol class="inbox-list">
-      <li
-        v-for="(action, index) in preview.actions"
-        :key="index"
-        class="flex gap-3 py-2"
-      >
-        <span class="inbox-action-number" aria-hidden="true">{{
-          index + 1
-        }}</span>
-        <div class="min-w-0">
-          <p class="text-sm font-medium">
-            {{ t('inboxRules.action.' + action.type) }}
-          </p>
-          <p
-            v-if="!['send_text', 'send_template'].includes(action.type)"
-            class="inbox-caption mt-1 whitespace-pre-wrap break-words"
-          >
-            {{ actionValue(action, index) }}
-          </p>
-          <p
-            v-if="preview.action_outcomes?.[index]"
-            class="inbox-caption mt-1"
-            :class="{
-              'text-destructive':
-                preview.action_outcomes[index]!.status === 'blocked',
-            }"
-          >
-            {{
+          <span class="font-medium">{{
+            condition.label ||
+            t('inboxQuality.conditionName.' + condition.field)
+          }}</span>
+          ·
+          {{
+            t(
+              condition.matched
+                ? 'inboxQuality.conditionMet'
+                : 'inboxQuality.conditionNotMet',
+            )
+          }}
+          <span class="inbox-caption"
+            >({{
               t(
-                'inboxQuality.preflight.' +
-                  preview.action_outcomes[index]!.reason,
+                'inboxQuality.match' +
+                  (condition.group === 'any' ? 'Any' : 'All'),
               )
-            }}
-          </p>
-        </div>
-      </li>
-    </ol>
+            }})</span
+          >
+        </li>
+      </ul>
+      <ol class="inbox-list">
+        <li
+          v-for="(action, index) in preview.actions"
+          :key="index"
+          class="flex gap-3 py-2"
+        >
+          <span class="inbox-action-number" aria-hidden="true">{{
+            index + 1
+          }}</span>
+          <div class="min-w-0">
+            <p class="text-sm font-medium">
+              {{ t('inboxRules.action.' + action.type) }}
+            </p>
+            <p
+              v-if="!['send_text', 'send_template'].includes(action.type)"
+              class="inbox-caption mt-1 whitespace-pre-wrap break-words"
+            >
+              {{ actionValue(action, index) }}
+            </p>
+            <p
+              v-if="preview.action_outcomes?.[index]"
+              class="inbox-caption mt-1"
+              :class="{
+                'text-destructive':
+                  preview.action_outcomes[index]!.status === 'blocked',
+              }"
+            >
+              {{
+                t(
+                  'inboxQuality.preflight.' +
+                    preview.action_outcomes[index]!.reason,
+                )
+              }}
+            </p>
+          </div>
+        </li>
+      </ol>
+    </template>
     <p v-if="preview.send_unavailable" role="alert" class="inbox-notice">
       {{
         t(
@@ -113,10 +120,24 @@ function actionValue(action: InboxAction, index: number) {
         )
       }}
     </p>
+    <ul
+      v-if="preview.reply?.missing_variables?.length"
+      class="grid gap-1 text-sm"
+      aria-live="polite"
+    >
+      <li
+        v-for="variable in preview.reply.missing_variables"
+        :key="variable.key"
+        class="break-words"
+      >
+        {{ t('inboxPersonalisation.missing', { key: variable.key }) }}
+        {{ t('inboxPersonalisation.reason.' + variable.reason) }}
+      </li>
+    </ul>
     <div class="border-t border-border pt-4 text-sm">
       <p class="inbox-caption">{{ t('inboxRules.recipient') }}</p>
       <p class="mt-1 font-medium">{{ preview.recipient.name }}</p>
-      <p class="inbox-caption">
+      <p class="inbox-caption break-words">
         {{ preview.recipient.phone }} / {{ preview.account }}
       </p>
       <p v-if="preview.reply?.template_key" class="inbox-caption mt-2">

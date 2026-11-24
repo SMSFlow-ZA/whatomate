@@ -55,6 +55,9 @@ export interface CapacityChange {
 }
 
 export interface InboxAction {
+  personalise?: boolean
+  body_parameters?: Record<string, string>
+  header_parameters?: Record<string, string>
   type:
     | 'assign'
     | 'assign_team'
@@ -117,6 +120,7 @@ export interface InboxWorkflowPreview {
   recipient: { name: string; phone: string }
   account: string
   reply?: {
+    missing_variables?: { key: string; reason: string }[]
     text: string
     header?: string
     footer?: string
@@ -247,6 +251,15 @@ const workflowPath = (id: string) =>
   '/inbox/workflow-definitions/' + encodeURIComponent(id)
 
 export const inboxService = {
+  previewMessage: (case_id: string, text: string) =>
+    api.post<Envelope<InboxWorkflowPreview>>('/inbox/message-preview', {
+      case_id,
+      text,
+    }),
+  messageVariables: () =>
+    api.get<Envelope<{ variables: InboxMessageVariable[] }>>(
+      '/inbox/message-variables',
+    ),
   workflowDefinitions: (kind: 'macro' | 'rule') =>
     api.get<Envelope<{ workflows: InboxWorkflow[] }>>(
       '/inbox/workflow-definitions',
@@ -572,6 +585,14 @@ export const inboxService = {
       conversationPath(accountId, contactId),
       input,
     ),
+}
+
+export interface InboxMessageVariable {
+  key: string
+  label: string
+  scope: string
+  kind: string
+  archived?: boolean
 }
 
 export type InboxQueue =

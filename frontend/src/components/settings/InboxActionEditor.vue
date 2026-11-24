@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
+import InboxMessageText from './InboxMessageText.vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { InboxAction } from '@/services/inbox'
 const model = defineModel<InboxAction>({ required: true })
-defineProps<{
+const props = defineProps<{
   teams?: { id: string; name: string }[]
   users: { id: string; full_name: string }[]
   tags: { name: string }[]
-  templates: { id: string; name: string; language: string }[]
+  templates: {
+    id: string
+    name: string
+    language: string
+    body_content?: string
+    header_content?: string
+  }[]
 }>()
 const { t } = useI18n()
 const types: InboxAction['type'][] = [
@@ -25,6 +33,46 @@ function changeType() {
   model.value.value = ''
   model.value.consent_confirmed = false
   model.value.duration_minutes = undefined
+  model.value.personalise = false
+  model.value.body_parameters = undefined
+  model.value.header_parameters = undefined
+}
+const selectedTemplate = computed(() =>
+  props.templates.find((template) => template.id === model.value.value),
+)
+function parameterNames(content?: string) {
+  return [
+    ...new Set(
+      Array.from(
+        (content ?? '').matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/g),
+        (match) => match[1]!,
+      ),
+    ),
+  ]
+}
+const bodyNames = computed(() =>
+  parameterNames(selectedTemplate.value?.body_content),
+)
+const headerNames = computed(() =>
+  parameterNames(selectedTemplate.value?.header_content),
+)
+type ParameterComponent = 'header_parameters' | 'body_parameters'
+function parameterValue(component: ParameterComponent, name: string) {
+  const values = model.value[component]
+  return values && Object.prototype.hasOwnProperty.call(values, name)
+    ? values[name]!
+    : ''
+}
+function setParameter(
+  component: ParameterComponent,
+  name: string,
+  value: string,
+) {
+  model.value[component] = { ...model.value[component], [name]: value }
+}
+function changeTemplate() {
+  model.value.header_parameters = undefined
+  model.value.body_parameters = undefined
 }
 </script>
 <template>
@@ -95,7 +143,7 @@ function changeType() {
     <template v-else-if="model.type === 'send_template'">
       <label class="inbox-label"
         >{{ t('inboxRules.action.send_template') }}
-        <select v-model="model.value">
+        <select v-model="model.value" @change="changeTemplate">
           <option value="">{{ t('inboxUX.chooseTemplate') }}</option>
           <option v-for="item in templates" :key="item.id" :value="item.id">
             {{ item.name }} ({{ item.language }})
@@ -103,22 +151,53 @@ function changeType() {
         </select>
       </label>
       <p class="inbox-caption">{{ t('inboxUX.templateHelp') }}</p>
+      <InboxMessageText
+        v-for="name in headerNames"
+        :key="'header-' + name"
+        :model-value="parameterValue('header_parameters', name)"
+        @update:model-value="setParameter('header_parameters', name, $event)"
+        :label="t('inboxPersonalisation.headerParameter', { name })"
+        variables
+        @personalised="model.personalise = true"
+      />
+      <InboxMessageText
+        v-for="name in bodyNames"
+        :key="'body-' + name"
+        :model-value="parameterValue('body_parameters', name)"
+        @update:model-value="setParameter('body_parameters', name, $event)"
+        :label="t('inboxPersonalisation.bodyParameter', { name })"
+        variables
+        @personalised="model.personalise = true"
+      />
       <label class="inbox-check"
         ><input v-model="model.consent_confirmed" type="checkbox" />
         {{ t('inboxRules.consent') }}</label
       >
     </template>
-    <label v-else class="inbox-label"
-      >{{ t(model.type === 'note' ? 'inboxUX.noteText' : 'inboxUX.replyText') }}
-      <textarea
+    <div v-else class="grid gap-2">
+      <InboxMessageText
         v-model="model.value"
-        rows="3"
-        maxlength="4096"
-        :aria-label="t('inboxRules.actionValue')"
+        :label="
+          t(model.type === 'note' ? 'inboxUX.noteText' : 'inboxUX.replyText')
+        "
+        :variables="model.type === 'send_text'"
+        @personalised="model.personalise = true"
       />
-      <span class="inbox-caption">{{
-        t(model.type === 'note' ? 'inboxUX.noteHelp' : 'inboxUX.replyHelp')
-      }}</span>
-    </label>
+      <p class="inbox-caption">
+        {{
+          t(model.type === 'note' ? 'inboxUX.noteHelp' : 'inboxUX.replyHelp')
+        }}
+      </p>
+    </div>
+    <template
+      v-if="model.type === 'send_text' || model.type === 'send_template'"
+    >
+      <label class="inbox-check"
+        ><input v-model="model.personalise" type="checkbox" />{{
+          t('inboxPersonalisation.enabled')
+        }}</label
+      >
+      <p class="inbox-caption">{{ t('inboxPersonalisation.help') }}</p>
+    </template>
   </div>
 </template>

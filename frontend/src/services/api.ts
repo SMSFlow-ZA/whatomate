@@ -273,6 +273,7 @@ export const messagesService = {
       content: any
       reply_to_message_id?: string
       whatsapp_account?: string
+      personalisation?: { case_id: string; version: number; authored_text: string; confirmation: string }
       // Interactive payload. Mirrors backend InteractiveContent.
       interactive?: {
         type: 'button' | 'cta_url' | 'list' | 'voice_call' | 'flow'

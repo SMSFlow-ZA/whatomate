@@ -244,7 +244,7 @@ export const useContactsStore = defineStore('contacts', () => {
     content: any,
     replyToMessageId?: string,
     whatsappAccount?: string,
-    extra?: ChannelSendFields & { interactive?: Parameters<typeof messagesService.send>[1]['interactive'] },
+    extra?: ChannelSendFields & Pick<Parameters<typeof messagesService.send>[1], 'interactive' | 'personalisation'>,
   ) {
     let smsOperation: { fingerprint: string; id: string } | undefined
     if (extra?.channel === 'sms' && !extra.client_message_id) {

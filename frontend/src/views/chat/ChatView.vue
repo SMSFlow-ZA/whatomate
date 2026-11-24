@@ -9,6 +9,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { inboxService, type InboxCase } from '@/services/inbox'
 import InboxMacroPicker from '@/components/chat/InboxMacroPicker.vue'
+import InboxMessageVariables from '@/components/chat/InboxMessageVariables.vue'
+import InboxPersonalisedReply, { type PersonalisedReply } from '@/components/chat/InboxPersonalisedReply.vue'
 import InboxCaseActions from '@/components/chat/InboxCaseActions.vue'
 import InboxAssignmentDialog from '@/components/chat/InboxAssignmentDialog.vue'
 import InboxQueues from '@/components/chat/InboxQueues.vue'
@@ -158,6 +160,40 @@ const isBusinessCallingEnabled = computed(() =>
 
 const organizationsStore = useOrganizationsStore()
 const inboxEnabled = ref(false)
+const personaliseReply = ref(false)
+const personalisationError = ref('')
+const personalisationReview = ref<InstanceType<typeof InboxPersonalisedReply>>()
+async function insertReplyVariable(token: string) {
+  const start = messageInputRef.value?.selectionStart ?? messageInput.value.length
+  const end = messageInputRef.value?.selectionEnd ?? start
+  messageInput.value = messageInput.value.slice(0, start) + token + messageInput.value.slice(end)
+  personaliseReply.value = true
+  await nextTick()
+  messageInputRef.value?.focus()
+  messageInputRef.value?.setSelectionRange(start + token.length, start + token.length)
+  autoResizeTextarea()
+}
+async function sendPersonalisedReply(reply: PersonalisedReply) {
+  if (inboxReadOnly.value || isSending.value || !contactsStore.currentContact || deliveryOptions.value.channel !== 'whatsapp') return
+  isSending.value = true
+  personalisationError.value = ''
+  const contact = contactsStore.currentContact.id, account = selectedAccount.value, organization = inboxOrg.value, authored = messageInput.value
+  const sameContext = () => contact === contactsStore.currentContact?.id && account === selectedAccount.value && organization === inboxOrg.value && authored === messageInput.value
+  try {
+    await contactsStore.sendMessage(contact, 'text', { body: reply.body }, contactsStore.replyingTo?.id, account || undefined,
+      { ...channelPayload(deliveryOptions.value, false), client_message_id: reply.client_message_id, personalisation: reply.personalisation })
+    if (!sameContext()) return
+    personalisationReview.value?.close()
+    messageInput.value = ''
+    personaliseReply.value = false
+    contactsStore.clearReplyingTo()
+    resetTextareaHeight()
+    await nextTick()
+    scrollToBottom()
+  } catch (error) {
+    if (sameContext()) personalisationError.value = getErrorMessage(error, t('chat.sendMessageFailed'))
+  } finally { isSending.value = false }
+}
 const inboxReadOnly=ref(false)
 const caseDetails=ref<InstanceType<typeof InboxCaseActions>>()
 function closeInfoPanel(){if(caseDetails.value)caseDetails.value.requestLeave(()=>{isInfoPanelOpen.value=false});else isInfoPanelOpen.value=false}
@@ -326,6 +362,10 @@ const isTagFilterOpen = ref(false)
 
 // Service window state
 const deliveryOptions = ref(initialChannelOptions())
+watch(() => [contactsStore.currentContact?.id, selectedAccount.value, inboxOrg.value, authStore.user?.id, deliveryOptions.value.channel], () => {
+  personaliseReply.value = false
+  personalisationError.value = ''
+})
 watch(() => contactsStore.currentContact?.id, () => { deliveryOptions.value = initialChannelOptions() })
 const isServiceWindowExpired = computed(() => {
   const contact = contactsStore.currentContact
@@ -840,6 +880,11 @@ function handleContactClick(contact: Contact) {
 async function sendMessage() {
   if (inboxReadOnly.value) return
   if (!messageInput.value.trim() || !contactsStore.currentContact) return
+  if (personaliseReply.value && deliveryOptions.value.channel === 'whatsapp') {
+    personalisationError.value = ''
+    await personalisationReview.value?.review()
+    return
+  }
 
   isSending.value = true
   try {
@@ -2669,6 +2714,11 @@ async function sendMediaMessage() {
         <div v-if="!inboxReadOnly" class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
           <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
           <ChannelOptions v-model="deliveryOptions" :text="messageInput" :show-setup-hint="false" />
+          <div v-if="inboxEnabled && inboxAccountId && deliveryOptions.channel === 'whatsapp'" class="inbox-ui mb-2 flex flex-wrap items-center gap-3">
+            <InboxMessageVariables :disabled="isSending" @insert="insertReplyVariable" />
+            <label class="inbox-check"><input v-model="personaliseReply" type="checkbox" :disabled="isSending" />{{ t('inboxPersonalisation.enabled') }}</label>
+            <p v-if="personaliseReply" class="inbox-caption">{{ t('inboxPersonalisation.composerHelp') }}</p>
+          </div>
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>
@@ -3041,6 +3091,10 @@ async function sendMediaMessage() {
         </div>
       </DialogContent>
     </Dialog>
+
+    <InboxPersonalisedReply v-if="inboxEnabled && inboxAccountId && contactsStore.currentContact && !inboxReadOnly" ref="personalisationReview"
+      :viewer="inboxOrg + '/' + authStore.user?.id"
+      :account="inboxAccountId" :contact="contactsStore.currentContact.id" :text="messageInput" :sending="isSending" :send-error="personalisationError" @confirm="sendPersonalisedReply" />
 
     <!-- Add Contact Dialog -->
     <CreateContactDialog v-model:open="isAddContactOpen" @created="onContactCreated" />

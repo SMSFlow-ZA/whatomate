@@ -561,9 +561,6 @@
   flex: 1;
 }
 @media (max-width: 640px) {
-  .inbox-ui button:not([role='tab']) {
-    min-height: 2.75rem;
-  }
   .inbox-action-controls button {
     min-width: 2.75rem;
   }

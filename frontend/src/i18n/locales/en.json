@@ -2955,7 +2955,10 @@
       "template_unavailable": "The selected template is unavailable for this WhatsApp inbox.",
       "template_not_approved": "This template is not currently an approved utility template.",
       "consent_missing": "Required recipient consent is missing or the recipient has opted out.",
-      "template_not_supported": "This template requires content that this workflow cannot safely preview."
+      "template_not_supported": "This template requires content that this workflow cannot safely preview.",
+      "template_parameters_missing": "Map every required header and body parameter, then preview this template again.",
+      "variables_invalid": "A message variable or its rendered value is invalid. Review the syntax and message length, then preview again.",
+      "variables_missing": "Some message values are unavailable. Complete the details or author fallback text, then preview again."
     },
     "workingTime": "Remaining working time",
     "completeDetails": "Complete required details",
@@ -3175,5 +3178,31 @@
     "caseUnavailable": "This case is no longer available. Refresh or return to the inbox.",
     "networkError": "We could not confirm the result. Retry safely, or refresh to check the current case before continuing.",
     "alreadyResolved": "This case is already resolved. Close this dialog to view its latest status."
+  },
+  "inboxPersonalisation": {
+    "review": "Review personalised reply",
+    "reviewHelp": "Check the recipient and exact message. Sending checks the case, permissions and WhatsApp reply window again.",
+    "sendReviewed": "Send reviewed reply",
+    "startCase": "Start or reopen a case in this conversation before personalising a reply.",
+    "previewError": "The reply could not be previewed. Check your connection and retry; no message was sent by this preview.",
+    "composerHelp": "Send opens a preview so you can check the exact reply before confirming.",
+    "uncertain": "Check conversation history before retrying. The same operation identifier is kept to prevent a second submission.",
+    "insert": "Insert variable",
+    "choose": "Message variables",
+    "search": "Search variables",
+    "available": "Available variables",
+    "loadError": "Variables could not be loaded. Retry before inserting a value.",
+    "noResults": "No matching variables. Try a different search.",
+    "enabled": "Personalise this reply",
+    "help": "Personalised replies use the current case's permitted values. Review the rendered message in Preview. Missing values block sending. Turn this off to keep braces as literal text.",
+    "headerParameter": "Header parameter {name}",
+    "bodyParameter": "Body parameter {name}",
+    "missing": "Review {key}:",
+    "reason": {
+      "empty": "This value is empty. Complete it or author fallback text.",
+      "archived": "This field is archived. Replace it or author fallback text.",
+      "unavailable": "This variable is unavailable in this case or with your current access.",
+      "invalid": "The stored value is invalid. Ask an authorised editor to correct it."
+    }
   }
 }
