@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application and ordered macro/rule processing are implemented. The settings/action editor, complete execution history and external-outcome reconciliation controls remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
+This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history and explicit idempotent retry APIs are implemented. The settings/action/history UI, manual outcome reconciliation and output-conflict review remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
 
 ## Approval and access
 
@@ -40,6 +40,16 @@ Rule events wait for an integration sequence before evaluating later rules. Late
 
 Sequence states distinguish work in progress (`integrating`), a message being submitted (`sequence_sending`), changed context requiring review (`sequence_review`), blocked work (`sequence_blocked`) and uncertain external outcomes (`sequence_unknown`). A worker restart reconciles accepted message receipts without sending again. Unknown integration outcomes remain held; a new context review is not external-outcome reconciliation.
 
+## Explicit idempotent retry
+
+Retries are unavailable by default, including for existing endpoints that declare only an idempotency header. An operator may additionally set `idempotency_retention_seconds` after verifying the provider guarantees durable deduplication of the same operation key and payload for that entire interval. Supported explicit intervals are 60 seconds to 30 days; zero retains the no-retry policy. Never infer a guarantee from the existence of a header or a successful HTTP response.
+
+New executions retain a fixed retry expiry starting conservatively at enqueue, before provider acceptance. The expiry never extends on retry. Work needs at least 35 seconds remaining for the bounded provider call and persistence; it is checked both during review and again before dispatch. Historical executions without this recorded guarantee cannot gain it retrospectively.
+
+Only an administrator with chat write, custom-action write and current case access can request a retry. A fresh signed preview verifies the current workflow, definition, original actor permissions, case digest and exact encrypted request. Recovery never changes the operation ID, request body, execution actor or approved destination. The requester must also be permitted to inspect the inputs and mapped fields. A changed definition, revoked access, expired guarantee or emergency hold blocks the request.
+
+The request records a client-generated recovery operation UUID and a safe reason, retaining prior state, outcome, attempt count, status and timing. Repeating that same decision returns its recorded result; changing its payload conflicts. Do not paste credentials, provider error bodies or secret endpoint paths into reasons. Recovery queues work only and does not enable a dispatch switch. An accepted operation returned by the provider advances the existing sequence, not a new external object. Without a verified retry guarantee, unknown work remains held for outcome reconciliation.
+
 ## Administrative and workflow APIs
 
 - `GET/POST /api/inbox/integrations` and `PUT/DELETE /api/inbox/integrations/{integration_id}` manage definitions. Requests specify `endpoint_key`, not a URL. Updating without a credential preserves the existing encrypted value. Responses expose `has_credential`, never the credential or ciphertext.
@@ -50,5 +60,7 @@ Sequence states distinguish work in progress (`integrating`), a message being su
 - Existing workflow preview/execute interfaces accept the integration action and return safe integration intent in `integrations`, indexed by action position. General run history includes sequence state, action cursor and original initiator; encrypted plans, requests and results stay private.
 - `POST /api/inbox/workflow-runs/{run_id}/preview` previews the remaining actions of a blocked/context-review sequence. `POST /api/inbox/workflow-runs/{run_id}/resume` requires that fresh `confirmation` and a nonempty `reason`. Both require current case access. A general-settings administrator may adopt remaining work using their own permissions while preserving the original initiator. Preview does not grant additional execution rights.
 - Resume rejects submitted/unknown external work. It may replace only a never-submitted pending/blocked request after a signed review, preserving its operation ID. A request locked by a dispatcher produces a conflict requiring refresh, rather than waiting while holding parent locks.
+- `GET /api/inbox/integration-executions` lists safe execution metadata, with optional `case_id`, `run_id` and `state` filters. `GET /api/inbox/integration-executions/{execution_id}/recoveries` lists recorded recovery decisions. Pages contain at most 50 rows; pass the returned `next_cursor` as `cursor` for the next page. Offset paging is not supported. Current organisation/account/case and run-author visibility apply before pagination. History does not decrypt requests or results.
+- `POST /api/inbox/integration-executions/{execution_id}/retry-preview` returns eligibility, a reason, the exact safe intent, fixed expiry and an opaque `confirmation`. `POST /api/inbox/integration-executions/{execution_id}/retry` requires that confirmation, a nonempty safe `reason` and a fresh UUID `operation_id`. HTTP 409 requires review again; HTTP 403/404 means the current user lacks the necessary scope. A replay returns the current execution state, so an already completed operation does not appear newly queued.
 
-External-outcome reconciliation, safe retry controls, integration editor/history UI and full browser acceptance remain outstanding. A header declaration alone does not qualify a provider's retry retention window. Restore/rollback must keep integration dispatch off until pending and unknown work has been reconciled.
+Manual external-outcome reconciliation, successful-output conflict review/application, integration editor/history UI and full browser acceptance remain outstanding. Restore/rollback must keep integration dispatch off until pending and unknown work has been reconciled.

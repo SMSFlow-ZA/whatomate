@@ -29,6 +29,9 @@ type Endpoint struct {
 	URL               string `json:"url"`
 	Method            string `json:"method"`
 	IdempotencyHeader string `json:"idempotency_header,omitempty"`
+	// A positive retention is an operator assertion of the provider's durable
+	// key/payload contract. Zero preserves the legacy no-retry policy.
+	IdempotencyRetentionSeconds int `json:"idempotency_retention_seconds,omitempty"`
 }
 
 type Failure struct {
@@ -88,6 +91,9 @@ func (p Endpoint) Validate() error {
 		return Failure{"method_invalid", false}
 	}
 	if p.IdempotencyHeader != "" && p.IdempotencyHeader != "Idempotency-Key" && p.IdempotencyHeader != "X-Idempotency-Key" {
+		return Failure{"idempotency_invalid", false}
+	}
+	if p.IdempotencyRetentionSeconds < 0 || p.IdempotencyRetentionSeconds > 30*24*60*60 || (p.IdempotencyRetentionSeconds != 0 && (p.IdempotencyHeader == "" || p.IdempotencyRetentionSeconds < 60)) {
 		return Failure{"idempotency_invalid", false}
 	}
 	return nil

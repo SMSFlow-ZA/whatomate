@@ -53,6 +53,8 @@ type InboxIntegrationExecution struct {
 	State                string     `gorm:"size:24;not null;index:idx_inbox_integration_pending,priority:1" json:"state"`
 	Outcome              string     `gorm:"size:64;not null;default:''" json:"outcome"`
 	AttemptCount         int        `gorm:"not null;default:0" json:"attempt_count"`
+	RetryUntil           *time.Time `json:"retry_until,omitempty"`
+	RetryRequested       bool       `gorm:"not null;default:false" json:"-"`
 	StartedAt            *time.Time `gorm:"index:idx_inbox_integration_pending,priority:2" json:"started_at,omitempty"`
 	CompletedAt          *time.Time `json:"completed_at,omitempty"`
 	OutputsAppliedAt     *time.Time `json:"outputs_applied_at,omitempty"`
@@ -60,4 +62,23 @@ type InboxIntegrationExecution struct {
 	DurationMillis       int64      `gorm:"not null;default:0" json:"duration_ms,omitempty"`
 	ReconciledByID       *uuid.UUID `gorm:"type:uuid" json:"reconciled_by_id,omitempty"`
 	ReconciliationReason string     `gorm:"size:1000;not null;default:''" json:"reconciliation_reason,omitempty"`
+}
+
+// InboxIntegrationRecovery retains each explicit recovery decision. Operation
+// IDs make repeated UI submissions idempotent without erasing prior outcomes.
+type InboxIntegrationRecovery struct {
+	BaseModel
+	OrganizationID   uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
+	ExecutionID      uuid.UUID  `gorm:"type:uuid;not null;index" json:"execution_id"`
+	ActorID          uuid.UUID  `gorm:"type:uuid;not null" json:"actor_id"`
+	Kind             string     `gorm:"size:32;not null" json:"kind"`
+	FromState        string     `gorm:"size:24;not null" json:"from_state"`
+	FromOutcome      string     `gorm:"size:64;not null" json:"from_outcome,omitempty"`
+	AttemptCount     int        `gorm:"not null" json:"attempt_count"`
+	PriorStartedAt   *time.Time `json:"prior_started_at,omitempty"`
+	PriorCompletedAt *time.Time `json:"prior_completed_at,omitempty"`
+	ProviderStatus   int        `gorm:"not null;default:0" json:"provider_status,omitempty"`
+	DurationMillis   int64      `gorm:"not null;default:0" json:"duration_ms,omitempty"`
+	Reason           string     `gorm:"size:1000;not null" json:"reason"`
+	RequestDigest    string     `gorm:"size:64;not null" json:"-"`
 }

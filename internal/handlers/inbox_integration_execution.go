@@ -41,6 +41,13 @@ func (a *App) enqueueInboxIntegration(tx *gorm.DB, run models.InboxWorkflowRun, 
 		return execution, err
 	}
 	execution = models.InboxIntegrationExecution{BaseModel: models.BaseModel{ID: uuid.NewSHA1(run.ID, []byte("integration:"+strconv.Itoa(index)))}, OrganizationID: run.OrganizationID, RunID: run.ID, ActionIndex: index, IntegrationID: prepared.Definition.ID, CaseID: run.CaseID, AccountID: run.AccountID, ContactID: run.ContactID, ActorID: run.ActorID, DefinitionDigest: prepared.DefinitionDigest, RequestDigest: prepared.RequestDigest, CaseDigest: run.CaseDigest, EncryptedRequest: encrypted, State: "pending"}
+	// Start conservatively at enqueue, no later than provider acceptance. This
+	// deadline is immutable and never slides forward after a retry.
+	execution.CreatedAt = time.Now().UTC()
+	if prepared.Endpoint.IdempotencyHeader != "" && prepared.Endpoint.IdempotencyRetentionSeconds > 0 {
+		until := execution.CreatedAt.Add(time.Duration(prepared.Endpoint.IdempotencyRetentionSeconds) * time.Second)
+		execution.RetryUntil = &until
+	}
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&execution)
 	if result.Error != nil {
 		return execution, result.Error
@@ -86,6 +93,9 @@ func (a *App) claimInboxIntegration(ctx context.Context, id uuid.UUID) (models.I
 		}
 		if execution.State != "pending" {
 			return nil
+		}
+		if execution.RetryRequested && (execution.RetryUntil == nil || !time.Now().UTC().Add(35*time.Second).Before(*execution.RetryUntil)) {
+			return tx.Model(&execution).Updates(map[string]any{"state": "unknown", "outcome": "retry_window_expired", "retry_requested": false}).Error
 		}
 		var active int64
 		if err := tx.Model(&models.InboxIntegrationExecution{}).Where("state='submitting'").Count(&active).Error; err != nil {
@@ -149,7 +159,7 @@ func (a *App) claimInboxIntegration(ctx context.Context, id uuid.UUID) (models.I
 			return blockIntegration(tx, &execution, "definition_or_values_changed")
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&execution).Updates(map[string]any{"state": "submitting", "started_at": now, "attempt_count": gorm.Expr("attempt_count+1")}).Error; err != nil {
+		if err := tx.Model(&execution).Updates(map[string]any{"state": "submitting", "started_at": now, "attempt_count": gorm.Expr("attempt_count+1"), "retry_requested": false}).Error; err != nil {
 			return err
 		}
 		execution.State, execution.StartedAt, execution.AttemptCount = "submitting", &now, execution.AttemptCount+1
@@ -164,13 +174,18 @@ func blockIntegration(tx *gorm.DB, execution *models.InboxIntegrationExecution, 
 	return tx.Model(execution).Updates(map[string]any{"state": "blocked", "outcome": reason}).Error
 }
 
-// dispatchInboxIntegration never retries an external write. A durable submitting
-// record precedes the call, so interrupted work remains reconcilable.
+// dispatchInboxIntegration never automatically retries an external write. A
+// durable submitting record precedes the call; only a signed explicit recovery
+// can requeue an operation within its recorded idempotency guarantee.
 func (a *App) dispatchInboxIntegration(ctx context.Context, id uuid.UUID) error {
 	execution, prepared, claimed, err := a.claimInboxIntegration(ctx, id)
 	if err != nil || !claimed {
 		return err
 	}
+	return a.executeClaimedInboxIntegration(ctx, execution, prepared)
+}
+
+func (a *App) executeClaimedInboxIntegration(ctx context.Context, execution models.InboxIntegrationExecution, prepared preparedInboxIntegration) error {
 	key, err := a.integrationEncryptionKey()
 	if err != nil {
 		return a.finishInboxIntegration(ctx, execution, "blocked", "encryption_unavailable", inboxintegration.Response{})
@@ -182,6 +197,16 @@ func (a *App) dispatchInboxIntegration(ctx context.Context, id uuid.UUID) error 
 	executor := a.InboxIntegrationExecutor
 	if executor == nil {
 		executor = inboxintegration.NewClient()
+	}
+	if execution.AttemptCount > 1 {
+		// A worker may pause after its database claim. Recheck immediately at
+		// submission and bound the whole call inside the original guarantee.
+		if execution.RetryUntil == nil || !time.Now().UTC().Add(35*time.Second).Before(*execution.RetryUntil) {
+			return a.finishInboxIntegration(ctx, execution, "unknown", "retry_window_expired", inboxintegration.Response{})
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, execution.RetryUntil.Add(-5*time.Second))
+		defer cancel()
 	}
 	response, err := executor.Execute(ctx, prepared.Endpoint, prepared.Definition.AuthMode, credential, prepared.Body, execution.ID.String())
 	if err != nil {
@@ -202,8 +227,7 @@ func (a *App) dispatchInboxIntegration(ctx context.Context, id uuid.UUID) error 
 		if !ok || fields[output.DefinitionID].ValidateValue(value) != nil || emptyInboxField(value) {
 			return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
 		}
-		var text string
-		if json.Unmarshal(value, &text) == nil && credential != "" && strings.Contains(text, credential) {
+		if inboxIntegrationResultContainsCredential(value, credential) {
 			return a.finishInboxIntegration(ctx, execution, "unknown", "output_invalid", response)
 		}
 		selected[output.Name] = value
@@ -225,6 +249,19 @@ func (a *App) dispatchInboxIntegration(ctx context.Context, id uuid.UUID) error 
 		return err
 	}
 	return a.finishInboxIntegration(ctx, execution, "succeeded", "", response)
+}
+
+func inboxIntegrationResultContainsCredential(value json.RawMessage, credential string) bool {
+	if credential == "" {
+		return false
+	}
+	var text string
+	if json.Unmarshal(value, &text) == nil {
+		return strings.Contains(text, credential)
+	}
+	// Scalar numeric/boolean values must not bypass redaction merely because
+	// they are represented without JSON quotes.
+	return strings.Contains(string(value), credential)
 }
 
 func safeIntegrationFailure(category string) string {

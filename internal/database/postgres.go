@@ -92,6 +92,7 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxWorkflowRun", &models.InboxWorkflowRun{}},
 		{"InboxIntegration", &models.InboxIntegration{}},
 		{"InboxIntegrationExecution", &models.InboxIntegrationExecution{}},
+		{"InboxIntegrationRecovery", &models.InboxIntegrationRecovery{}},
 		{"Template", &models.Template{}},
 		{"WhatsAppFlow", &models.WhatsAppFlow{}},
 

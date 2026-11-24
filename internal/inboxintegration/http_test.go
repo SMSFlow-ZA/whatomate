@@ -59,6 +59,21 @@ func TestEndpointValidation(t *testing.T) {
 	require.Error(t, policy.Validate())
 }
 
+func TestIdempotencyRetentionRequiresAnExplicitBoundedContract(t *testing.T) {
+	for _, seconds := range []int{-1, 1, 59, 30*24*60*60 + 1} {
+		p := Endpoint{Key: "crm", Name: "Synthetic CRM", URL: "https://crm.example.invalid/cases", Method: "POST", IdempotencyHeader: "Idempotency-Key", IdempotencyRetentionSeconds: seconds}
+		require.Error(t, p.Validate())
+	}
+	for _, seconds := range []int{0, 60, 3600, 30 * 24 * 60 * 60} {
+		p := Endpoint{Key: "crm", Name: "Synthetic CRM", URL: "https://crm.example.invalid/cases", Method: "POST", IdempotencyHeader: "Idempotency-Key", IdempotencyRetentionSeconds: seconds}
+		require.NoError(t, p.Validate())
+		if seconds > 0 {
+			p.IdempotencyHeader = ""
+			require.Error(t, p.Validate())
+		}
+	}
+}
+
 func TestValidatedDialUsesOneCheckedAddressAndRejectsMixedDNS(t *testing.T) {
 	c := NewClient()
 	lookups, calls := 0, 0
