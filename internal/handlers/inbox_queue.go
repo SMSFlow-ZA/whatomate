@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -25,6 +27,7 @@ type inboxQueueRow struct {
 	MessagePreview string            `json:"message_preview"`
 	AssigneeName   string            `json:"assignee_name"`
 	TeamName       string            `json:"team_name"`
+	DiscoveryKey   *time.Time        `gorm:"column:discovery_key" json:"-"`
 }
 
 func validateInboxFilter(f models.InboxQueueFilter) bool {
@@ -77,63 +80,124 @@ func (a *App) ListInboxQueue(r *fastglue.Request) error {
 		return nil
 	}
 	args := r.RequestCtx.QueryArgs()
-	var f models.InboxQueueFilter
+	var filters models.InboxQueueFilter
 	if raw := args.Peek("filters"); len(raw) > 0 {
-		if err := json.Unmarshal(raw, &f); err != nil || !validateInboxFilter(f) {
+		if json.Unmarshal(raw, &filters) != nil || !validateInboxFilter(filters) {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid inbox filters", nil, "")
 		}
 	}
-	if raw := string(args.Peek("view_id")); raw != "" {
-		id, e := uuid.Parse(raw)
-		if e != nil {
-			return a.inboxError(r, errInboxTransition)
-		}
-		var view models.InboxSavedView
-		if err := a.accessibleInboxViews(a.DB, org, user).First(&view, "id=?", id).Error; err != nil {
-			return a.inboxError(r, err)
-		}
-		if view.TeamID != nil {
-			f.TeamID = view.TeamID
-		}
-	}
-	if f.MessageContains != "" {
+	if filters.MessageContains != "" {
 		return a.inboxError(r, errInboxTransition)
 	}
-	pg := parseInboxQueuePage(args)
-	baseFilter := f
-	baseFilter.Queue = ""
-	base, err := a.inboxQueueQuery(org, user, baseFilter)
+	discovery, err := parseInboxDiscovery(args.Peek("discovery"))
 	if err != nil {
-		return a.inboxError(r, err)
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxDiscoveryCursor.Error(), nil, "inbox_discovery_invalid")
 	}
-	q := applyInboxQueueKind(base.Session(&gorm.Session{}), f.Queue, user)
-	rows := []inboxQueueRow{}
-	err = q.Select(inboxQueueColumns).Joins(inboxQueueOwnerJoin).Joins(inboxQueueTeamJoin).
-		Order("CASE inbox_cases.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, inbox_cases.opened_at, inbox_cases.id").
-		Offset(pg).Limit(51).Scan(&rows).Error
-	if err != nil {
-		return a.inboxError(r, err)
+	keyset := args.Has("discovery") || args.Has("cursor")
+	if keyset && string(args.Peek("offset")) != "" && string(args.Peek("offset")) != "0" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxDiscoveryCursor.Error(), nil, "inbox_discovery_invalid")
 	}
-	rows, hasMore, err := a.prepareInboxRows(org, rows)
-	if err != nil {
-		return a.inboxError(r, err)
-	}
-	response := map[string]any{"cases": rows, "has_more": hasMore}
-	if string(args.Peek("include_counts")) == "true" {
-		counts := map[string]int64{}
-		for _, queue := range []string{"", "mine", "unassigned", "awaiting_reply", "follow_ups"} {
-			scoped := applyInboxQueueKind(base.Session(&gorm.Session{}), queue, user)
-			var count int64
-			if err := scoped.Count(&count).Error; err != nil {
-				return a.inboxError(r, err)
+	response := map[string]any{}
+	// fasthttp does not provide per-request cancellation. Bound this database
+	// read explicitly instead of relying on RequestCtx's server-shutdown signal.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A short read-only snapshot keeps rows, counts and target metadata coherent.
+		// Do not copy App: it contains a waitgroup for unrelated background work.
+		reader := &App{DB: tx, Redis: a.Redis, Config: a.Config, Log: a.Log}
+		viewContext := ""
+		if raw := string(args.Peek("view_id")); raw != "" {
+			id, e := uuid.Parse(raw)
+			if e != nil {
+				return errInboxTransition
 			}
-			key := queue
-			if key == "" {
-				key = "all"
+			var view models.InboxSavedView
+			if e = reader.accessibleInboxViews(tx, org, user).First(&view, "id=?", id).Error; e != nil {
+				return e
 			}
-			counts[key] = count
+			if view.TeamID != nil {
+				filters.TeamID = view.TeamID
+			}
+			viewContext = id.String()
 		}
-		response["counts"] = counts
+		cursorContext, e := inboxDiscoveryContext(org, user, filters, discovery, viewContext)
+		if e != nil {
+			return e
+		}
+		cursor, e := readInboxDiscoveryCursor(string(args.Peek("cursor")), cursorContext, discovery.Order)
+		if e != nil {
+			return errInboxDiscoveryCursor
+		}
+		baseFilter := filters
+		baseFilter.Queue = ""
+		base, e := reader.inboxQueueQuery(org, user, baseFilter)
+		if e != nil {
+			return e
+		}
+		base = applyInboxDiscoveryDates(base, discovery)
+		q := applyInboxQueueKind(base.Session(&gorm.Session{}), filters.Queue, user)
+		revision := ""
+		if keyset {
+			revision, e = inboxDiscoveryRevision(q.Session(&gorm.Session{}), discovery, org)
+			if e != nil {
+				return e
+			}
+			if cursor != nil && cursor.Revision != revision {
+				return errInboxQueueChanged
+			}
+		}
+		q, expression := orderInboxDiscovery(q, discovery, org)
+		if keyset {
+			q = pageInboxDiscovery(q, discovery, cursor)
+		} else {
+			q = q.Offset(parseInboxQueuePage(args))
+		}
+		rows := []inboxQueueRow{}
+		if e = q.Select(inboxQueueColumns + "," + expression + " AS discovery_key").Joins(inboxQueueOwnerJoin).Joins(inboxQueueTeamJoin).Limit(51).Scan(&rows).Error; e != nil {
+			return e
+		}
+		rows, more, e := reader.prepareInboxRows(org, rows)
+		if e != nil {
+			return e
+		}
+		next := ""
+		if keyset && more {
+			next, e = encodeInboxDiscoveryCursor(cursorContext, discovery, rows[len(rows)-1], revision)
+			if e != nil {
+				return e
+			}
+		}
+		paging := "offset"
+		if keyset {
+			paging = "keyset"
+		}
+		response = map[string]any{"cases": rows, "has_more": more, "next_cursor": next, "discovery": discovery, "discovery_version": inboxDiscoveryVersion, "paging": paging, "updated_at": time.Now().UTC()}
+		if string(args.Peek("include_counts")) == "true" {
+			counts := map[string]int64{}
+			for _, queue := range []string{"", "mine", "unassigned", "awaiting_reply", "follow_ups"} {
+				var count int64
+				if e = applyInboxQueueKind(base.Session(&gorm.Session{}), queue, user).Count(&count).Error; e != nil {
+					return e
+				}
+				key := queue
+				if key == "" {
+					key = "all"
+				}
+				counts[key] = count
+			}
+			response["counts"] = counts
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if errors.Is(err, errInboxDiscoveryCursor) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "inbox_discovery_invalid")
+	}
+	if errors.Is(err, errInboxQueueChanged) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, err.Error(), nil, "inbox_queue_changed")
+	}
+	if err != nil {
+		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(response)
 }
@@ -191,7 +255,7 @@ func (a *App) ListInboxSavedViews(r *fastglue.Request) error {
 			}
 			editable = permitted
 		}
-		result = append(result, map[string]any{"id": view.ID, "owner_id": view.OwnerID, "team_id": view.TeamID, "name": view.Name, "filters": view.Filters, "capabilities": map[string]bool{"edit": editable, "remove": editable, "share": view.OwnerID == user && a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org)}})
+		result = append(result, map[string]any{"id": view.ID, "owner_id": view.OwnerID, "team_id": view.TeamID, "name": view.Name, "filters": view.Filters, "discovery": view.Discovery, "capabilities": map[string]bool{"edit": editable, "remove": editable, "share": view.OwnerID == user && a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org)}})
 	}
 	publication := a.DB.Model(&models.Team{}).Where("teams.organization_id=? AND teams.is_active", org)
 	if !a.HasPermission(user, models.ResourceTeams, models.ActionWrite, org) {
@@ -208,7 +272,7 @@ func (a *App) ListInboxSavedViews(r *fastglue.Request) error {
 		capabilities := view["capabilities"].(map[string]bool)
 		capabilities["share"] = view["owner_id"] == user && len(teams) > 0
 	}
-	return r.SendEnvelope(map[string]any{"views": result, "publish_teams": teams})
+	return r.SendEnvelope(map[string]any{"views": result, "publish_teams": teams, "discovery_version": inboxDiscoveryVersion})
 }
 
 func (a *App) UpdateInboxSavedView(r *fastglue.Request) error {
@@ -221,14 +285,22 @@ func (a *App) UpdateInboxSavedView(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
-		Name    string                  `json:"name"`
-		TeamID  *uuid.UUID              `json:"team_id"`
-		Filters models.InboxQueueFilter `json:"filters"`
+		Name      string                      `json:"name"`
+		TeamID    *uuid.UUID                  `json:"team_id"`
+		Filters   models.InboxQueueFilter     `json:"filters"`
+		Discovery *models.InboxQueueDiscovery `json:"discovery"`
 	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
 	}
 	input.Name = strings.TrimSpace(input.Name)
+	if input.Discovery != nil {
+		normalized, err := normalizeInboxDiscovery(*input.Discovery)
+		if err != nil {
+			return a.inboxError(r, err)
+		}
+		input.Discovery = &normalized
+	}
 	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) || input.Filters.MessageContains != "" {
 		return a.inboxError(r, errInboxTransition)
 	}
@@ -266,6 +338,9 @@ func (a *App) UpdateInboxSavedView(r *fastglue.Request) error {
 			input.Filters.TeamID = input.TeamID
 		}
 		view.Name, view.TeamID, view.Filters = input.Name, input.TeamID, input.Filters
+		if input.Discovery != nil {
+			view.Discovery = *input.Discovery
+		}
 		return tx.Save(&view).Error
 	})
 	if err != nil {
@@ -291,14 +366,22 @@ func (a *App) CreateInboxSavedView(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
-		Name    string                  `json:"name"`
-		TeamID  *uuid.UUID              `json:"team_id"`
-		Filters models.InboxQueueFilter `json:"filters"`
+		Name      string                      `json:"name"`
+		TeamID    *uuid.UUID                  `json:"team_id"`
+		Filters   models.InboxQueueFilter     `json:"filters"`
+		Discovery *models.InboxQueueDiscovery `json:"discovery"`
 	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
 	}
 	input.Name = strings.TrimSpace(input.Name)
+	if input.Discovery != nil {
+		normalized, err := normalizeInboxDiscovery(*input.Discovery)
+		if err != nil {
+			return a.inboxError(r, err)
+		}
+		input.Discovery = &normalized
+	}
 	if input.Name == "" || len(input.Name) > 100 || !validateInboxFilter(input.Filters) || input.Filters.MessageContains != "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A name and valid filters are required", nil, "")
 	}
@@ -322,6 +405,9 @@ func (a *App) CreateInboxSavedView(r *fastglue.Request) error {
 	view := models.InboxSavedView{
 		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org, OwnerID: user,
 		Name: input.Name, TeamID: input.TeamID, Filters: input.Filters,
+	}
+	if input.Discovery != nil {
+		view.Discovery = *input.Discovery
 	}
 	if err := a.DB.Create(&view).Error; err != nil {
 		return a.inboxError(r, err)

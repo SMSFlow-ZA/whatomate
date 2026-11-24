@@ -29,11 +29,12 @@ type InboxQueueFilter struct {
 
 type InboxSavedView struct {
 	BaseModel
-	OrganizationID uuid.UUID        `gorm:"type:uuid;not null;index" json:"-"`
-	OwnerID        uuid.UUID        `gorm:"type:uuid;not null;index" json:"owner_id"`
-	TeamID         *uuid.UUID       `gorm:"type:uuid;index" json:"team_id,omitempty"`
-	Name           string           `gorm:"size:100;not null" json:"name"`
-	Filters        InboxQueueFilter `gorm:"serializer:json;type:jsonb;not null" json:"filters"`
+	OrganizationID uuid.UUID           `gorm:"type:uuid;not null;index" json:"-"`
+	OwnerID        uuid.UUID           `gorm:"type:uuid;not null;index" json:"owner_id"`
+	TeamID         *uuid.UUID          `gorm:"type:uuid;index" json:"team_id,omitempty"`
+	Name           string              `gorm:"size:100;not null" json:"name"`
+	Filters        InboxQueueFilter    `gorm:"serializer:json;type:jsonb;not null" json:"filters"`
+	Discovery      InboxQueueDiscovery `gorm:"serializer:json;type:jsonb;not null;default:'{}'" json:"discovery"`
 }
 
 // InboxPredicate is a bounded, non-nested user condition. Authorization and

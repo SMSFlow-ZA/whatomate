@@ -158,6 +158,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := inboxquality.Backfill(db); err != nil {
 		return err
 	}
+	if err := CreateInboxDiscoveryIndexes(db); err != nil {
+		return err
+	}
 	return channelmigration.Run(db)
 }
 
@@ -275,7 +278,7 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
-	return append([]string{
+	indexes := append([]string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE chatbot_sessions ALTER COLUMN phone_number TYPE varchar(50)`,
@@ -339,6 +342,7 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
 	}, inboxWorkflowIndexSQL...)
+	return append(indexes, inboxDiscoveryIndexSQL...)
 }
 
 // CreateIndexes creates additional indexes not handled by GORM tags
