@@ -7,6 +7,7 @@ defineProps<{
   label: string
   variables?: boolean
   disabled?: boolean
+  required?: boolean
   rows?: number
 }>()
 const emit = defineEmits<{ personalised: [] }>()
@@ -36,6 +37,7 @@ async function insert(token: string) {
         :rows="rows ?? 3"
         maxlength="4096"
         :disabled="disabled"
+        :required="required"
       />
     </label>
     <InboxMessageVariables

@@ -2,13 +2,25 @@
 import { useI18n } from 'vue-i18n'
 import { CheckCircle2, AlertCircle } from 'lucide-vue-next'
 import type { InboxAction, InboxWorkflowPreview } from '@/services/inbox'
+import InboxIntegrationIntent from './InboxIntegrationIntent.vue'
 const props = defineProps<{
   purpose?: 'workflow' | 'reply'
   preview: InboxWorkflowPreview
   teams?: { id: string; name: string }[]
   users?: { id: string; full_name: string }[]
 }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+function actionReason(index: number) {
+  const outcome = props.preview.action_outcomes?.[index]
+  if (!outcome) return ''
+  if (
+    outcome.type !== 'integration' &&
+    outcome.reason !== 'prior_integration_result_requires_review'
+  )
+    return t('inboxQuality.preflight.' + outcome.reason)
+  const key = 'inboxIntegrations.reason.' + outcome.reason
+  return te?.(key) ? t(key) : t('inboxIntegrations.reviewUnavailable')
+}
 function actionValue(action: InboxAction, index: number) {
   if (
     ['assign', 'assign_team'].includes(action.type) &&
@@ -88,11 +100,21 @@ function actionValue(action: InboxAction, index: number) {
               {{ t('inboxRules.action.' + action.type) }}
             </p>
             <p
-              v-if="!['send_text', 'send_template'].includes(action.type)"
+              v-if="
+                !['send_text', 'send_template', 'integration'].includes(
+                  action.type,
+                )
+              "
               class="inbox-caption mt-1 whitespace-pre-wrap break-words"
             >
               {{ actionValue(action, index) }}
             </p>
+            <InboxIntegrationIntent
+              v-if="
+                action.type === 'integration' && preview.integrations?.[index]
+              "
+              :intent="preview.integrations[index]!"
+            />
             <p
               v-if="preview.action_outcomes?.[index]"
               class="inbox-caption mt-1"
@@ -101,12 +123,7 @@ function actionValue(action: InboxAction, index: number) {
                   preview.action_outcomes[index]!.status === 'blocked',
               }"
             >
-              {{
-                t(
-                  'inboxQuality.preflight.' +
-                    preview.action_outcomes[index]!.reason,
-                )
-              }}
+              {{ actionReason(index) }}
             </p>
           </div>
         </li>
@@ -135,6 +152,14 @@ function actionValue(action: InboxAction, index: number) {
       </li>
     </ul>
     <div class="border-t border-border pt-4 text-sm">
+      <p
+        v-if="preview.reply?.deferred_variables?.length"
+        role="status"
+        class="inbox-notice"
+      >
+        {{ t('inboxIntegrations.deferredReply') }}
+        {{ preview.reply.deferred_variables.join(', ') }}
+      </p>
       <p class="inbox-caption">{{ t('inboxRules.recipient') }}</p>
       <p class="mt-1 font-medium">{{ preview.recipient.name }}</p>
       <p class="inbox-caption break-words">

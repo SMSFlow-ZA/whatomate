@@ -1,4 +1,5 @@
 import { api, type messagesService } from '@/services/api'
+import type { IntegrationIntent } from '@/services/inboxIntegrations'
 
 export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'select'
 export type FieldValue = string | number | boolean | null
@@ -55,10 +56,12 @@ export interface CapacityChange {
 }
 
 export interface InboxAction {
+  integration_inputs?: Record<string, string>
   personalise?: boolean
   body_parameters?: Record<string, string>
   header_parameters?: Record<string, string>
   type:
+    | 'integration'
     | 'assign'
     | 'assign_team'
     | 'snooze'
@@ -89,6 +92,10 @@ export interface InboxWorkflow extends InboxWorkflowInput {
   enabled_at?: string
 }
 export interface InboxWorkflowRun {
+  actor_id?: string
+  initiated_by_id?: string
+  sequenced?: boolean
+  next_action?: number
   id: string
   workflow_name: string
   state: string
@@ -106,6 +113,8 @@ export interface InboxWorkflowRun {
   message_status?: string
 }
 export interface InboxWorkflowPreview {
+  integrations?: Record<number, IntegrationIntent>
+  deferred_actions?: Record<number, string[]>
   case_id?: string
   case_version?: number
   condition_outcomes?: InboxConditionOutcome[]
@@ -124,6 +133,7 @@ export interface InboxWorkflowPreview {
     canned_name?: string
     interactive?: Parameters<typeof messagesService.send>[1]['interactive']
     missing_variables?: { key: string; reason: string }[]
+    deferred_variables?: string[]
     text: string
     header?: string
     footer?: string

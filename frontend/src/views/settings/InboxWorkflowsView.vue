@@ -9,6 +9,8 @@ import InboxFilterSummary from '@/components/chat/InboxFilterSummary.vue'
 import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
 import InboxTabs from '@/components/shared/InboxTabs.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
+import InboxIntegrations from '@/components/settings/InboxIntegrations.vue'
+import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useRoute } from 'vue-router'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
@@ -59,7 +61,10 @@ import InboxWorkflowPreviewPanel from '@/components/chat/InboxWorkflowPreview.vu
 const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
+const viewerContext = useInboxViewerContext()
 const showTargets = ref(false)
+const showIntegrations = ref(false)
+const integrationEditor = ref<InstanceType<typeof InboxIntegrations>>()
 const targetEditor = ref<InstanceType<typeof InboxSLASettings>>()
 const teamsStore = useTeamsStore()
 const mode = ref<'macro' | 'rule'>('rule')
@@ -109,6 +114,7 @@ const preview = ref<InboxWorkflowPreview | null>(null)
 const previewBusy = ref(false)
 let loadSequence = 0
 let previewSequence = 0
+let mutationSequence = 0
 watch(
   [caseId, dryRunId],
   () => {
@@ -238,7 +244,18 @@ function select(w?: InboxWorkflow, open = true, force = false) {
       team_id: w.team_id,
       trigger: w.trigger ?? '',
       position: w.position,
-      actions: w.actions.map((action) => ({ ...action })),
+      actions: w.actions.map((action) => ({
+        ...action,
+        integration_inputs: action.integration_inputs
+          ? { ...action.integration_inputs }
+          : undefined,
+        body_parameters: action.body_parameters
+          ? { ...action.body_parameters }
+          : undefined,
+        header_parameters: action.header_parameters
+          ? { ...action.header_parameters }
+          : undefined,
+      })),
       conditions: {
         ...w.conditions,
         tags: [...(w.conditions.tags ?? [])],
@@ -252,6 +269,10 @@ function select(w?: InboxWorkflow, open = true, force = false) {
   baseline.value = JSON.stringify(form.value)
 }
 function changeTab(value: string, force = false) {
+  if (showIntegrations.value && !force && integrationEditor.value) {
+    integrationEditor.value.confirmLeave(() => changeTab(value, true))
+    return
+  }
   if (showTargets.value && !force && targetEditor.value) {
     targetEditor.value.confirmLeave(() => changeTab(value, true))
     return
@@ -261,6 +282,11 @@ function changeTab(value: string, force = false) {
   loadSequence++
   closePreview()
   showTargets.value = value === 'sla'
+  showIntegrations.value = value === 'integrations'
+  if (showIntegrations.value) {
+    showHistory.value = false
+    return
+  }
   if (showTargets.value) {
     showHistory.value = false
     return
@@ -283,19 +309,25 @@ async function changeMode(next: typeof mode.value) {
 }
 async function save(remove = false) {
   const target = id.value
+  const request = ++mutationSequence,
+    context = viewerContext.value
+  const input = JSON.parse(JSON.stringify(form.value)) as InboxWorkflowInput
   busy.value = true
   try {
     if (remove) await inboxService.deleteWorkflow(target)
-    else if (target) await inboxService.updateWorkflow(target, form.value)
-    else await inboxService.createWorkflow(form.value)
+    else if (target) await inboxService.updateWorkflow(target, input)
+    else await inboxService.createWorkflow(input)
+    if (request !== mutationSequence || context !== viewerContext.value) return
     select(undefined, false, true)
     await load()
+    if (request !== mutationSequence || context !== viewerContext.value) return
     toast.success(t('settings.saved'))
   } catch {
+    if (request !== mutationSequence || context !== viewerContext.value) return
     saveError.value = t('inboxRules.saveError')
     toast.error(saveError.value)
   } finally {
-    busy.value = false
+    if (request === mutationSequence) busy.value = false
   }
 }
 async function stopOrStart() {
@@ -303,18 +335,22 @@ async function stopOrStart() {
     confirmSends.value = true
     return
   }
+  const request = ++mutationSequence,
+    context = viewerContext.value
   busy.value = true
   try {
     const { data } = await inboxService.setAutomation(
       !switchState.value.enabled,
     )
+    if (request !== mutationSequence || context !== viewerContext.value) return
     confirmSends.value = false
     switchState.value = data.data
     await load()
   } catch {
+    if (request !== mutationSequence || context !== viewerContext.value) return
     toast.error(t('inboxRules.saveError'))
   } finally {
-    busy.value = false
+    if (request === mutationSequence) busy.value = false
   }
 }
 async function prepare(w: InboxWorkflow) {
@@ -373,53 +409,98 @@ function move(index: number, delta: number) {
   const [item] = items.splice(index, 1)
   items.splice(other, 0, item)
 }
-function loadLookups() {
+let lookupSequence = 0
+async function loadLookups() {
+  const request = ++lookupSequence,
+    context = viewerContext.value
   lookupFailed.value = false
-  void accountsService
-    .list()
-    .then((r) => {
-      accounts.value = r.data.data?.accounts ?? []
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
-  void teamsStore
-    .fetchTeams()
-    .then((result) => {
-      teams.value = result.teams
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
-  void usersService
-    .list()
-    .then((r) => {
-      users.value = (r.data as any).data?.users ?? (r.data as any).users ?? []
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
-  void tagsService
-    .list()
-    .then((r) => {
-      tags.value = (r.data as any).data?.tags ?? (r.data as any).tags ?? []
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
-  void templatesService
-    .list({ status: 'APPROVED', category: 'UTILITY', limit: 100 })
-    .then((r) => {
-      templates.value =
-        (r.data as any).data?.templates ?? (r.data as any).templates ?? []
-    })
-    .catch(() => {
-      lookupFailed.value = true
-    })
+  const [wa, team, agent, tag, template] = await Promise.allSettled([
+    accountsService.list(),
+    teamsStore.fetchTeams(),
+    usersService.list(),
+    tagsService.list(),
+    templatesService.list({
+      status: 'APPROVED',
+      category: 'UTILITY',
+      limit: 100,
+    }),
+  ])
+  if (request !== lookupSequence || context !== viewerContext.value) return
+  lookupFailed.value = [wa, team, agent, tag, template].some(
+    (result) => result.status === 'rejected',
+  )
+  if (wa.status === 'fulfilled')
+    accounts.value = wa.value.data.data?.accounts ?? []
+  if (team.status === 'fulfilled') teams.value = team.value.teams
+  if (agent.status === 'fulfilled')
+    users.value =
+      (agent.value.data as any).data?.users ??
+      (agent.value.data as any).users ??
+      []
+  if (tag.status === 'fulfilled')
+    tags.value =
+      (tag.value.data as any).data?.tags ?? (tag.value.data as any).tags ?? []
+  if (template.status === 'fulfilled')
+    templates.value =
+      (template.value.data as any).data?.templates ??
+      (template.value.data as any).templates ??
+      []
 }
+watch(
+  viewerContext,
+  () => {
+    lookupSequence++
+    loadSequence++
+    mutationSequence++
+    closePreview()
+    editing.value = false
+    showTargets.value = false
+    showIntegrations.value = false
+    showHistory.value = false
+    form.value = fresh()
+    id.value = ''
+    caseId.value = ''
+    cases.value = []
+    caseSearch.value = ''
+    caseOffset.value = 0
+    casesMore.value = false
+    casesFailed.value = false
+    historyOffset.value = 0
+    historyMore.value = false
+    syntheticText.value = ''
+    query.value = ''
+    saveError.value = ''
+    deleting.value = false
+    confirmSends.value = false
+    switchState.value = { enabled: false, dispatch_available: false }
+    baseline.value = ''
+    list.value = []
+    runs.value = []
+    accounts.value = []
+    teams.value = []
+    users.value = []
+    tags.value = []
+    templates.value = []
+    ready.value = false
+    failed.value = false
+    void load().then(() => {
+      if (enabled.value) void loadLookups()
+    })
+  },
+  { flush: 'sync' },
+)
+onUnmounted(() => {
+  lookupSequence++
+  mutationSequence++
+})
 onMounted(async () => {
   if (route.query.tab === 'sla' && auth.hasPermission('accounts', 'write'))
     showTargets.value = true
+  if (
+    route.query.tab === 'integrations' &&
+    auth.hasPermission('settings.general', 'write')
+  )
+    showIntegrations.value = true
   await load()
   if (!enabled.value) return
   loadLookups()
@@ -443,7 +524,9 @@ function pageHistory(delta: number) {
     >
       <template #actions
         ><Button
-          v-if="ready && enabled && !editing && !showTargets"
+          v-if="
+            ready && enabled && !editing && !showTargets && !showIntegrations
+          "
           variant="outline"
           size="sm"
           :disabled="busy"
@@ -458,7 +541,14 @@ function pageHistory(delta: number) {
           :disabled="busy || !readyToSave"
           >{{ t('common.save') }}</Button
         ><Button
-          v-if="ready && enabled && !editing && !showHistory && !showTargets"
+          v-if="
+            ready &&
+            enabled &&
+            !editing &&
+            !showHistory &&
+            !showTargets &&
+            !showIntegrations
+          "
           :disabled="busy"
           @click="select()"
           ><Plus class="mr-2 h-4 w-4" aria-hidden="true" />{{
@@ -481,7 +571,11 @@ function pageHistory(delta: number) {
           }}</RouterLink>
         </p>
         <template v-else-if="ready && enabled">
-          <div v-if="!editing" class="inbox-notice" role="status">
+          <div
+            v-if="!editing && !showIntegrations"
+            class="inbox-notice"
+            role="status"
+          >
             <ShieldCheck class="h-5 w-5" aria-hidden="true" />
             <div>
               <strong>{{
@@ -503,12 +597,26 @@ function pageHistory(delta: number) {
           <template v-if="!editing">
             <InboxTabs
               :model-value="
-                showTargets ? 'sla' : showHistory ? 'history' : mode
+                showIntegrations
+                  ? 'integrations'
+                  : showTargets
+                    ? 'sla'
+                    : showHistory
+                      ? 'history'
+                      : mode
               "
               :label="t('inboxRules.title')"
               :items="[
                 { value: 'rule', label: t('inboxRules.rules') },
                 { value: 'macro', label: t('inboxRules.macros') },
+                ...(auth.hasPermission('settings.general', 'write')
+                  ? [
+                      {
+                        value: 'integrations',
+                        label: t('inboxIntegrations.title'),
+                      },
+                    ]
+                  : []),
                 { value: 'history', label: t('inboxUX.historyTab') },
                 ...(auth.hasPermission('accounts', 'write')
                   ? [{ value: 'sla', label: t('inboxUX.responseTargets') }]
@@ -516,7 +624,11 @@ function pageHistory(delta: number) {
               ]"
               @update:model-value="changeTab"
             />
-            <InboxSLASettings v-if="showTargets" ref="targetEditor" />
+            <InboxIntegrations
+              v-if="showIntegrations"
+              ref="integrationEditor"
+            />
+            <InboxSLASettings v-else-if="showTargets" ref="targetEditor" />
             <template v-else-if="!showHistory">
               <div class="inbox-toolbar">
                 <p class="inbox-caption">
@@ -1251,9 +1363,9 @@ function pageHistory(delta: number) {
                   >{{ t('common.cancel') }}</Button
                 ><Button
                   v-if="id"
-                  class="ml-auto text-destructive"
+                  class="ml-auto"
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   :disabled="busy"
                   @click="deleting = true"
                   >{{ t('common.delete') }}</Button

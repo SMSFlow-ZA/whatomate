@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
 import InboxMessageText from './InboxMessageText.vue'
+import InboxIntegrationAction from './InboxIntegrationAction.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { InboxAction } from '@/services/inbox'
@@ -28,6 +29,7 @@ const types: InboxAction['type'][] = [
   'note',
   'send_text',
   'send_template',
+  'integration',
 ]
 function changeType() {
   model.value.value = ''
@@ -36,6 +38,7 @@ function changeType() {
   model.value.personalise = false
   model.value.body_parameters = undefined
   model.value.header_parameters = undefined
+  model.value.integration_inputs = undefined
 }
 const selectedTemplate = computed(() =>
   props.templates.find((template) => template.id === model.value.value),
@@ -174,6 +177,10 @@ function changeTemplate() {
         {{ t('inboxRules.consent') }}</label
       >
     </template>
+    <InboxIntegrationAction
+      v-else-if="model.type === 'integration'"
+      v-model="model"
+    />
     <div v-else class="grid gap-2">
       <InboxMessageText
         v-model="model.value"

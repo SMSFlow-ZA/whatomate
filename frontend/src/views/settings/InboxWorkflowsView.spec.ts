@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createApp, nextTick } from 'vue'
+import { createApp, nextTick, reactive } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import InboxWorkflowsView from './InboxWorkflowsView.vue'
 
@@ -7,6 +7,8 @@ const mock = vi.hoisted(() => ({
   definitions: vi.fn(),
   preview: vi.fn(),
   queue: vi.fn(),
+  create: vi.fn(),
+  auth: undefined as any,
 }))
 vi.mock('@/services/inbox', () => ({
   inboxService: {
@@ -14,6 +16,7 @@ vi.mock('@/services/inbox', () => ({
     workflowDefinitions: mock.definitions,
     previewWorkflow: mock.preview,
     queue: mock.queue,
+    createWorkflow: mock.create,
     workflowRuns: vi.fn().mockResolvedValue({ data: { data: { runs: [] } } }),
     automationState: vi.fn().mockResolvedValue({
       data: { data: { enabled: false, dispatch_available: false } },
@@ -35,7 +38,10 @@ vi.mock('@/services/api', () => ({
   },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ hasPermission: () => true }),
+  useAuthStore: () => mock.auth ?? { hasPermission: () => true },
+}))
+vi.mock('@/stores/organizations', () => ({
+  useOrganizationsStore: () => ({ selectedOrgId: 'synthetic-organization' }),
 }))
 vi.mock('@/stores/teams', () => ({
   useTeamsStore: () => ({
@@ -86,6 +92,7 @@ afterEach(() => {
     root.remove()
   }
   vi.clearAllMocks()
+  mock.auth = undefined
 })
 async function mount() {
   const root = document.createElement('div')
@@ -222,4 +229,67 @@ it('loads and selects cases beyond page one without losing account and case iden
   )
   expect(option?.textContent).toContain('Inbox B')
   expect(option?.textContent).toContain('case-51')
+})
+
+it('clears synthetic trigger text and case selection when the viewer changes', async () => {
+  mock.auth = reactive({
+    user: { id: 'viewer-a' },
+    organizationId: 'org-a',
+    hasPermission: () => true,
+  })
+  const rule = workflow('rule', 'Example rule')
+  rule.conditions = { message_contains: 'hello' } as any
+  mock.definitions.mockResolvedValue(reply([rule]))
+  mock.queue.mockResolvedValue({
+    data: { data: { cases: [], has_more: false } },
+  })
+  const root = await mount()
+  click(root, 'inboxRules.dryRun')
+  await settle()
+  const text = root.querySelector<HTMLTextAreaElement>('textarea')!
+  expect(text).toBeTruthy()
+  text.value = 'OLD_SCOPE_TRIGGER'
+  text.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  mock.auth.user.id = 'viewer-b'
+  await settle()
+  click(root, 'inboxRules.dryRun')
+  await settle()
+  expect(root.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  expect(root.textContent).not.toContain('OLD_SCOPE_TRIGGER')
+})
+
+it('does not let a late save close a new viewer’s draft', async () => {
+  mock.auth = reactive({
+    user: { id: 'viewer-a' },
+    organizationId: 'org-a',
+    hasPermission: () => true,
+  })
+  mock.definitions.mockResolvedValue(reply([]))
+  const save = deferred()
+  mock.create.mockReturnValue(save.promise)
+  const root = await mount()
+  click(root, 'inboxUX.newRule')
+  await settle()
+  root
+    .querySelector<HTMLFormElement>('#inbox-workflow-editor')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await settle()
+  expect(mock.create).toHaveBeenCalledOnce()
+  mock.auth.user.id = 'viewer-b'
+  await settle()
+  click(root, 'inboxUX.newRule')
+  await settle()
+  const name = Array.from(root.querySelectorAll('label'))
+    .find((label) => label.textContent?.includes('inboxRules.name'))!
+    .querySelector<HTMLInputElement>('input')!
+  name.value = 'Current viewer draft'
+  name.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  save.resolve({ data: { data: {} } })
+  await settle()
+  expect(
+    root.querySelector<HTMLFormElement>('#inbox-workflow-editor'),
+  ).toBeTruthy()
+  expect(name.value).toBe('Current viewer draft')
 })

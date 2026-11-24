@@ -66,3 +66,87 @@ it('shows rich saved-reply intent even when blocked, without following links', (
     app.unmount()
   }
 })
+
+it('shows typed integration intent and deferred values without exposing an internal definition ID', () => {
+  const root = document.createElement('div')
+  const id = '2d594d54-c4c4-4709-9d08-bb1a9a57f5e3'
+  const app = createApp({
+    render: () =>
+      h(InboxWorkflowPreview, {
+        preview: {
+          matches: true,
+          confirmation: 'synthetic',
+          send_unavailable: false,
+          actions: [{ type: 'integration', value: id }],
+          recipient: { name: 'Synthetic customer', phone: '+12025550123' },
+          account: 'Support',
+          integrations: {
+            0: {
+              id,
+              name: 'Create service request',
+              method: 'POST',
+              destination: 'https://service.example.invalid',
+              available: true,
+              inputs: {
+                count: 0,
+                consent: false,
+                customer: '<img src=x onerror=alert(1)>',
+              },
+              deferred_inputs: { ticket: ['case.field.ticket'] },
+              outputs: [
+                {
+                  id: 'field',
+                  key: 'case.field.ticket',
+                  label: 'Ticket reference',
+                  scope: 'case',
+                },
+              ],
+            },
+          },
+        },
+      }),
+  })
+  app.mount(root)
+  try {
+    expect(root.textContent).toContain('Create service request')
+    expect(root.textContent).toContain('POST · https://service.example.invalid')
+    expect(root.textContent).toContain('0')
+    expect(root.textContent).toContain('false')
+    expect(root.textContent).toContain('case.field.ticket')
+    expect(root.textContent).toContain('inboxIntegrations.deferredHelp')
+    expect(root.textContent).toContain('Ticket reference')
+    expect(root.textContent).not.toContain(id)
+    expect(root.querySelector('img,script,a')).toBeNull()
+  } finally {
+    app.unmount()
+  }
+})
+
+it('labels a partial reply instead of presenting pending values as approved message content', () => {
+  const root = document.createElement('div')
+  const app = createApp({
+    render: () =>
+      h(InboxWorkflowPreview, {
+        preview: {
+          matches: true,
+          confirmation: 'synthetic',
+          send_unavailable: false,
+          actions: [],
+          recipient: { name: 'Synthetic customer', phone: '+12025550123' },
+          account: 'Support',
+          reply: {
+            text: 'Ticket …',
+            deferred_variables: ['case.field.ticket'],
+          },
+        },
+      }),
+  })
+  app.mount(root)
+  try {
+    expect(root.textContent).toContain('inboxIntegrations.deferredReply')
+    expect(root.textContent).toContain('case.field.ticket')
+    expect(root.textContent).toContain('Ticket …')
+  } finally {
+    app.unmount()
+  }
+})

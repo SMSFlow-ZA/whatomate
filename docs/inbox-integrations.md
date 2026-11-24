@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. The settings/action/history UI and full feature acceptance remain under development. Do not treat these APIs as an accepted customer release or enable live integrations from this checkpoint.
+This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. Definition/action editing and intent review screens are under local qualification. Operational history/recovery screens and full feature acceptance remain outstanding. Do not treat this checkpoint as an accepted customer release or enable live integrations from it.
 
 ## Approval and access
 
@@ -11,6 +11,20 @@ Set an endpoint's `organization_id` to restrict its visibility and use to that o
 Definitions start disabled. Host `integration_dispatch_enabled` and the workspace integration switch default off and are separate from WhatsApp automatic replies and SMS dispatch. Disabling dispatch holds pending work. A request already in flight may finish; a stop cannot retract an accepted external operation.
 
 Managing definitions requires general-settings write permission. Preparing/executing an action also requires chat write, custom-action write, active membership and access to the exact case/account. Mapping an output to a contact field requires contact read and write permissions. Macro visibility will not grant additional execution rights.
+
+## Configure a definition and workflow action
+
+Under **Settings → Inbox workflows → Integrations**, an administrator can create a definition, choose an approved destination and select bearer-token, `X-API-Key` or no authentication. The editor reports whether a credential is stored; it cannot reveal that value. Leave a stored credential unchanged or explicitly replace it. New definitions save disabled. Definition enablement, the workspace dispatch hold and the operator's host hold are independent controls.
+
+Declare named text, number, boolean or date inputs. Names are unique lowercase identifiers, up to 64 characters, using letters, digits and underscores. Mark required inputs explicitly. Selected outputs map top-level JSON response properties to active case/contact fields. Each property and destination field must be unique. An optional reference property retains a bounded string reference without implicitly changing a field.
+
+Choose **Call an integration** in a macro or rule's action editor, select a definition and map its named inputs. Omit optional inputs by leaving them empty. Use `true`/`false` for boolean literals, a JSON number for numeric literals and `YYYY-MM-DD` for dates, or insert a permitted variable. Switching the definition clears its old mappings; changing action type removes integration-specific parameters. Editing a saved workflow keeps the stored definition unchanged until Save succeeds.
+
+Dry run shows the destination origin/method, permitted known values, fields that may change and any deferred input dependencies. It makes no external request. Disabled definitions and dispatch holds remain visible with their intent. A dependent reply is clearly labelled partial; it is not the final approved message. Check the recipient/account and current eligibility again when reviewing actual execution.
+
+If an input schema changes, refresh definitions in the action editor. Obsolete mapping names are shown with an explicit removal control; they are not silently discarded. Complete any renamed required input, remove only the obsolete mappings and save the repaired workflow. Valid mappings remain intact. Reference-property naming errors appear beside the field with the required lowercase identifier format.
+
+Failed lookups offer Retry. A save error keeps the draft, but an uncertain acknowledgement requires refreshing the list before creating a duplicate definition. Unsaved edits are protected when leaving the editor. Viewer, organisation or permission changes invalidate old lookups and clear private credential drafts. Integration settings do not change WhatsApp automatic-reply or SMS controls.
 
 ## Mappings
 
@@ -88,4 +102,4 @@ Cancellation stops remaining workflow steps. It does not retract an in-flight or
 - `GET /api/inbox/integration-executions/{execution_id}/recoveries/{recovery_id}/evidence` returns only the encrypted investigation reference after operator/case authorisation, with phone masking where applicable. It never returns the provider body, credential or encrypted payload.
 - `POST /api/inbox/workflow-runs/{run_id}/cancel-preview` returns whether cancellation is eligible and warns about unresolved or in-flight operations. `POST /api/inbox/workflow-runs/{run_id}/cancel` requires the fresh `confirmation`, safe nonempty `reason` and fresh UUID `operation_id`. `GET /api/inbox/workflow-runs/{run_id}/recoveries` lists scoped recovery metadata using the same bounded cursor paging, including cancellation before any integration execution existed.
 
-Integration editor/history UI and full browser acceptance remain outstanding. Restore/rollback must keep integration dispatch and automatic replies off until pending and unknown work has been reconciled. Older binaries do not understand deferred review markers in encrypted plans; do not resume those plans on an older binary. Keep outbound work held and return to a compatible release for review. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.
+Operational history/recovery UI and full feature acceptance remain outstanding. Restore/rollback must keep integration dispatch and automatic replies off until pending and unknown work has been reconciled. Older binaries do not understand deferred review markers in encrypted plans; do not resume those plans on an older binary. Keep outbound work held and return to a compatible release for review. A cancelled parent run does not prove that all its external operations are resolved; inspect the scoped execution records as well.
