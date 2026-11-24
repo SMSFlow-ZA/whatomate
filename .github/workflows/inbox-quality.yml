@@ -87,6 +87,8 @@ jobs:
           stop_dispatch = true
           [inbox_automation]
           dispatch_enabled = false
+          integration_dispatch_enabled = false
+          integration_endpoints = '[{"key":"synthetic_crm","name":"Synthetic service","url":"https://service.example.invalid/requests","method":"POST"}]'
           EOF
       - name: Start and verify the application
         shell: bash
@@ -107,6 +109,14 @@ jobs:
           PY
       - run: npx playwright install chromium --with-deps
         working-directory: frontend
+      - name: Prepare explicitly owned fake-provider investigation fixture
+        env:
+          TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/whatomate_test
+          INBOX_BROWSER_FIXTURE_MODE: synthetic-held
+        run: |
+          export INBOX_INVESTIGATION_FIXTURE_OUT="$RUNNER_TEMP/investigation-fixture.json"
+          go test ./internal/handlers -run '^TestBrowserInvestigationFixture$' -count=1 -v
+          echo "INBOX_INVESTIGATION_FIXTURE=$INBOX_INVESTIGATION_FIXTURE_OUT" >> "$GITHUB_ENV"
       - name: Test inbox workflows with synthetic data only
         working-directory: frontend
         env:

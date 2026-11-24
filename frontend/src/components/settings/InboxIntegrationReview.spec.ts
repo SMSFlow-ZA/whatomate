@@ -18,12 +18,18 @@ const mock = vi.hoisted(() => ({
   recover: vi.fn(),
   recoveries: vi.fn(),
   runRecoveries: vi.fn(),
+  recoveryPreview: vi.fn(),
+  list: vi.fn(),
+  fieldDefinitions: vi.fn(),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => mock.auth }))
 vi.mock('@/stores/organizations', () => ({
   useOrganizationsStore: () => mock.org,
 }))
 vi.mock('@/services/inboxIntegrations', () => ({ inboxIntegrations: mock }))
+vi.mock('@/services/inbox', () => ({
+  inboxService: { fieldDefinitions: mock.fieldDefinitions },
+}))
 vi.mock('vue-router', () => ({
   onBeforeRouteLeave: (fn: () => unknown) => mock.leave.push(fn),
   onBeforeRouteUpdate: (fn: () => unknown) => mock.update.push(fn),
@@ -102,6 +108,35 @@ const sequencePreview = (changes = {}) =>
     reply: { text: 'Exact reviewed synthetic reply' },
     ...changes,
   })
+const investigation = (
+  action:
+    | 'confirm_succeeded'
+    | 'confirm_not_applied'
+    | 'apply_outputs'
+    | 'discard_outputs' = 'confirm_succeeded',
+): IntegrationControlReview => {
+  const original = proposal()
+  if (original.kind !== 'retry') throw new Error('Synthetic operation required')
+  return { ...original, kind: 'recover', action }
+}
+const investigatedPreview = (action = 'confirm_succeeded', changes = {}) =>
+  envelope({
+    execution_id: operationId,
+    run_id: runId,
+    case_id: 'case-a',
+    case_version: 1,
+    account_id: 'account-a',
+    action,
+    eligible: true,
+    confirmation: 'a'.repeat(64),
+    field_changes: [],
+    evidence_reference: 'INV-1',
+    result_reference: null,
+    manual_attestation: action.startsWith('confirm_'),
+    fact_only: true,
+    remaining_steps_require_review: true,
+    ...changes,
+  })
 function deferred() {
   let resolve!: (value: any) => void
   const promise = new Promise<any>((done) => {
@@ -129,7 +164,8 @@ function button(label: string, root: ParentNode = dialog()) {
   return element!
 }
 async function reason(value = 'Synthetic investigation completed') {
-  const field = dialog().querySelector('textarea')!
+  const field =
+    dialog().querySelector<HTMLTextAreaElement>('textarea[rows="3"]')!
   field.value = value
   field.dispatchEvent(new Event('input', { bubbles: true }))
   await settle()
@@ -185,6 +221,216 @@ afterEach(() => {
     root.remove()
   }
   vi.restoreAllMocks()
+})
+
+it('reviews a fact-only manual finding before requesting a reason and a durable recovery decision', async () => {
+  mock.recoveryPreview.mockResolvedValue(investigatedPreview())
+  mock.recover.mockImplementation((target, input) =>
+    Promise.resolve(
+      envelope({
+        recovery: {
+          id: input.operation_id,
+          kind: input.action,
+          execution_id: target,
+        },
+      }),
+    ),
+  )
+  const { changed } = await mount(investigation())
+  expect(mock.recoveryPreview).not.toHaveBeenCalled()
+  const reference = dialog().querySelector<HTMLInputElement>('[type=text]')!
+  reference.value = 'INV-1'
+  reference.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  button('inboxInvestigation.review').click()
+  await settle()
+  expect(mock.recoveryPreview).toHaveBeenCalledWith(operationId, {
+    action: 'confirm_succeeded',
+    evidence_reference: 'INV-1',
+  })
+  expect(dialog().textContent).toContain('inboxInvestigation.manualPreviewHelp')
+  expect(document.activeElement).toBe(dialog().querySelector('h3'))
+  expect(document.activeElement?.textContent).toBe(
+    'inboxInvestigation.reviewReady',
+  )
+  expect(
+    button('inboxInvestigation.actions.confirm_succeeded.confirm').disabled,
+  ).toBe(true)
+  await reason()
+  button('inboxInvestigation.actions.confirm_succeeded.confirm').click()
+  await settle()
+  expect(mock.recover).toHaveBeenCalledWith(
+    operationId,
+    expect.objectContaining({
+      action: 'confirm_succeeded',
+      evidence_reference: 'INV-1',
+      confirmation: 'a'.repeat(64),
+      operation_id: expect.any(String),
+    }),
+  )
+  expect(mock.recover.mock.calls[0]![1]).not.toHaveProperty('result')
+  expect(changed).toHaveBeenCalledWith(runId)
+  expect(mock.retry).not.toHaveBeenCalled()
+})
+
+it('invalidates a manual preview when authored inputs change and rejects another case response', async () => {
+  mock.recoveryPreview
+    .mockResolvedValueOnce(investigatedPreview())
+    .mockResolvedValueOnce(
+      investigatedPreview('confirm_succeeded', {
+        case_id: 'other-case',
+        evidence_reference: 'WRONG_PREVIEW',
+      }),
+    )
+  await mount(investigation())
+  const reference = dialog().querySelector<HTMLInputElement>('[type=text]')!
+  reference.value = 'INV-1'
+  reference.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  button('inboxInvestigation.review').click()
+  await settle()
+  await reason()
+  expect(
+    button('inboxInvestigation.actions.confirm_succeeded.confirm').disabled,
+  ).toBe(false)
+  reference.value = 'INV-2'
+  reference.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  expect(
+    button('inboxInvestigation.actions.confirm_succeeded.confirm').disabled,
+  ).toBe(true)
+  button('inboxInvestigation.review').click()
+  await settle()
+  expect(dialog().textContent).toContain('inboxRecovery.previewError')
+  expect(dialog().textContent).not.toContain('WRONG_PREVIEW')
+  expect(mock.recover).not.toHaveBeenCalled()
+})
+
+it('separates reviewed field application from manual finding inputs and preserves safe scalar values', async () => {
+  mock.recoveryPreview.mockResolvedValue(
+    investigatedPreview('apply_outputs', {
+      manual_attestation: false,
+      fact_only: false,
+      evidence_reference: '',
+      field_changes: [
+        {
+          id: 'score',
+          label: 'Score',
+          scope: 'case',
+          kind: 'number',
+          current: 5,
+          proposed: 0,
+        },
+        {
+          id: 'active',
+          label: 'Active',
+          scope: 'contact',
+          kind: 'boolean',
+          current: true,
+          proposed: false,
+        },
+      ],
+    }),
+  )
+  mock.recover.mockImplementation((target, input) =>
+    Promise.resolve(
+      envelope({
+        recovery: {
+          id: input.operation_id,
+          kind: input.action,
+          execution_id: target,
+        },
+      }),
+    ),
+  )
+  await mount(investigation('apply_outputs'))
+  expect(dialog().textContent).toContain('inboxInvestigation.applyHelp')
+  expect(dialog().textContent).toContain('inboxInvestigation.currentValue')
+  expect(dialog().textContent).toContain('0')
+  expect(dialog().textContent).toContain('common.no')
+  expect(dialog().querySelector('[type=text]')).toBeNull()
+  await reason()
+  button('inboxInvestigation.actions.apply_outputs.confirm').click()
+  await settle()
+  expect(mock.recover.mock.calls[0]![1]).toMatchObject({
+    action: 'apply_outputs',
+  })
+  expect(mock.recover.mock.calls[0]![1]).not.toHaveProperty('result')
+  expect(mock.recover.mock.calls[0]![1]).not.toHaveProperty(
+    'evidence_reference',
+  )
+})
+
+it('shows a blocked output review without approving its values and offers a separate discard review', async () => {
+  mock.recoveryPreview
+    .mockResolvedValueOnce(
+      investigatedPreview('apply_outputs', {
+        eligible: false,
+        confirmation: '',
+        reason: 'sensitive_current_value',
+        manual_attestation: false,
+      }),
+    )
+    .mockResolvedValueOnce(
+      investigatedPreview('discard_outputs', {
+        manual_attestation: false,
+        evidence_reference: '',
+      }),
+    )
+  const { request } = await mount(investigation('apply_outputs'))
+  expect(dialog().textContent).toContain(
+    'inboxRecovery.reason.sensitive_current_value',
+  )
+  expect(
+    button('inboxInvestigation.actions.apply_outputs.confirm').disabled,
+  ).toBe(true)
+  request.value = investigation('discard_outputs')
+  await settle()
+  expect(dialog().textContent).toContain('inboxInvestigation.discardHelp')
+  expect(dialog().textContent).not.toContain(
+    'inboxInvestigation.manualPreviewHelp',
+  )
+  await reason()
+  expect(
+    button('inboxInvestigation.actions.discard_outputs.confirm').disabled,
+  ).toBe(false)
+  expect(mock.recover).not.toHaveBeenCalled()
+})
+
+it('does not expose or submit manual investigation controls without operator permission', async () => {
+  mock.auth.allowed = false
+  const { request } = await mount(investigation('apply_outputs'))
+  expect(mock.recoveryPreview).not.toHaveBeenCalled()
+  expect(
+    button('inboxInvestigation.actions.apply_outputs.confirm').disabled,
+  ).toBe(true)
+  request.value = investigation('confirm_succeeded')
+  await settle()
+  expect(dialog().querySelector('[type=text]')).toBeNull()
+  expect(mock.recoveryPreview).not.toHaveBeenCalled()
+  expect(mock.list).not.toHaveBeenCalled()
+})
+
+it('escapes selected output values and does not render provider objects as raw JSON', async () => {
+  mock.recoveryPreview.mockResolvedValue(
+    investigatedPreview('apply_outputs', {
+      manual_attestation: false,
+      fact_only: false,
+      field_changes: [
+        {
+          id: 'text',
+          label: 'Text',
+          scope: 'case',
+          kind: 'text',
+          current: '<img src=x onerror=alert(1)>',
+          proposed: '<script>unexpected()</script>',
+        },
+      ],
+    }),
+  )
+  await mount(investigation('apply_outputs'))
+  expect(dialog().textContent).toContain('<img src=x onerror=alert(1)>')
+  expect(dialog().querySelector('img,script')).toBeNull()
 })
 
 it('lets an owning agent review and authorise the exact remainder without operator permissions', async () => {

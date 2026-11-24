@@ -92,6 +92,12 @@ export type IntegrationControlReview =
   | { kind: 'retry'; run: InboxWorkflowRun; execution: IntegrationExecution }
   | { kind: 'cancel'; run: InboxWorkflowRun }
   | { kind: 'resume'; run: InboxWorkflowRun }
+  | {
+      kind: 'recover'
+      run: InboxWorkflowRun
+      execution: IntegrationExecution
+      action: IntegrationRecoveryAction
+    }
 export type IntegrationRecoveryAction =
   | 'confirm_succeeded'
   | 'confirm_not_applied'
@@ -104,6 +110,11 @@ export interface IntegrationRecoveryInput {
 }
 export interface IntegrationRecoveryPreview {
   execution_id: string
+  run_id: string
+  case_id: string
+  case_version: number
+  account_id: string
+  action: IntegrationRecoveryAction
   eligible: boolean
   confirmation: string
   reason?: string
@@ -117,6 +128,7 @@ export interface IntegrationRecoveryPreview {
   }[]
   evidence_reference?: string
   result_reference?: FieldValue
+  result_origin?: string
   manual_attestation: boolean
   fact_only: boolean
   remaining_steps_require_review: boolean

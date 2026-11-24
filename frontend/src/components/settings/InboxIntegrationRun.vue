@@ -302,6 +302,65 @@ function actor(id: string) {
           @click="emit('review', { kind: 'retry', run, execution: item })"
           >{{ t('inboxRecovery.reviewRetry') }}</Button
         >
+        <details
+          v-if="
+            operator &&
+            ((['unknown', 'failed'].includes(item.state) &&
+              item.attempt_count > 0) ||
+              (item.state === 'succeeded' &&
+                !item.outputs_applied_at &&
+                !item.outputs_discarded_at))
+          "
+        >
+          <summary class="min-h-11 cursor-pointer py-2 text-sm font-medium">
+            {{ t('inboxInvestigation.investigationActions') }}
+          </summary>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <template v-if="['unknown', 'failed'].includes(item.state)">
+              <Button
+                v-for="action in [
+                  'confirm_succeeded',
+                  'confirm_not_applied',
+                ] as const"
+                :key="action"
+                type="button"
+                variant="outline"
+                :disabled="busy || failed"
+                @click="
+                  emit('review', {
+                    kind: 'recover',
+                    run,
+                    execution: item,
+                    action,
+                  })
+                "
+                >{{
+                  t('inboxInvestigation.actions.' + action + '.title')
+                }}</Button
+              >
+            </template>
+            <template v-else>
+              <Button
+                v-for="action in ['apply_outputs', 'discard_outputs'] as const"
+                :key="action"
+                type="button"
+                variant="outline"
+                :disabled="busy || failed"
+                @click="
+                  emit('review', {
+                    kind: 'recover',
+                    run,
+                    execution: item,
+                    action,
+                  })
+                "
+                >{{
+                  t('inboxInvestigation.actions.' + action + '.title')
+                }}</Button
+              >
+            </template>
+          </div>
+        </details>
       </li>
     </ol>
     <div v-if="position || hasOlder" class="flex flex-wrap items-center gap-2">

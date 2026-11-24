@@ -435,7 +435,9 @@ func (a *App) ListInboxWorkflowRuns(r *fastglue.Request) error {
 		MessageStatus string `json:"message_status"`
 	}{}
 	cases := a.scopeInboxCaseHistory(a.DB.Model(&models.InboxCase{}), user, org).Select("inbox_cases.id")
-	q := a.DB.Model(&models.InboxWorkflowRun{}).Where("inbox_workflow_runs.organization_id = ? AND case_id IN (?)", org, cases)
+	q := a.DB.Model(&models.InboxWorkflowRun{}).
+		Joins("JOIN inbox_cases case_context ON case_context.id=inbox_workflow_runs.case_id AND case_context.organization_id=inbox_workflow_runs.organization_id AND case_context.account_id=inbox_workflow_runs.account_id AND case_context.contact_id=inbox_workflow_runs.contact_id AND case_context.deleted_at IS NULL").
+		Where("inbox_workflow_runs.organization_id = ? AND inbox_workflow_runs.case_id IN (?)", org, cases)
 	if !a.HasPermission(user, models.ResourceSettingsGeneral, models.ActionWrite, org) {
 		q = q.Where("(actor_id = ? OR initiated_by_id = ?) AND kind = 'macro'", user, user)
 	}

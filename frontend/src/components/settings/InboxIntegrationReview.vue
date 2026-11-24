@@ -21,6 +21,8 @@ import {
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import InboxIntegrationIntent from '@/components/chat/InboxIntegrationIntent.vue'
 import InboxWorkflowPreview from '@/components/chat/InboxWorkflowPreview.vue'
+import InboxIntegrationRecoveryForm from './InboxIntegrationRecoveryForm.vue'
+import InboxIntegrationRecoveryPreview from './InboxIntegrationRecoveryPreview.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
 import { useInboxDialogFocus } from '@/composables/useInboxDialogFocus'
@@ -29,6 +31,8 @@ import { useInboxRecoveryDecision } from '@/composables/useInboxRecoveryDecision
 import {
   inboxIntegrations,
   type IntegrationControlReview,
+  type IntegrationRecoveryInput,
+  type IntegrationRecoveryPreview,
 } from '@/services/inboxIntegrations'
 
 const props = defineProps<{ request?: IntegrationControlReview }>()
@@ -45,6 +49,17 @@ const open = ref(false),
 const closeBlocked = ref(false),
   investigated = ref(false)
 const pendingHeading = ref<HTMLElement>()
+const investigationHeading = ref<HTMLElement>()
+const recoveryPreview = shallowRef<IntegrationRecoveryPreview>()
+const recoveryInput = shallowRef<IntegrationRecoveryInput>()
+const recoveryDirty = ref(false)
+const selectionEpoch = ref(0)
+const manualAction = computed(() =>
+  selected.value?.kind === 'recover' &&
+  ['confirm_succeeded', 'confirm_not_applied'].includes(selected.value.action)
+    ? (selected.value.action as 'confirm_succeeded' | 'confirm_not_applied')
+    : undefined,
+)
 const reasonHelpId = 'inbox-recovery-reason-help-' + getCurrentInstance()!.uid
 const reasonErrorId = reasonHelpId + '-error'
 const reasonError = computed(
@@ -78,11 +93,12 @@ const allowed = computed(() =>
 )
 const locked = computed(() => !!decision.pending.value)
 const target = computed(() =>
-  selected.value?.kind === 'retry'
+  selected.value?.kind === 'retry' || selected.value?.kind === 'recover'
     ? selected.value.execution.id
     : selected.value?.run.id,
 )
 const result = computed(() => {
+  if (selected.value?.kind === 'recover') return recoveryPreview.value
   if (selected.value?.kind === 'retry') return retry.value
   if (selected.value?.kind !== 'resume') return cancellation.value
   const preview = sequence.value
@@ -99,13 +115,22 @@ const result = computed(() => {
   }
 })
 const reviewKind = computed(() => selected.value?.kind || 'cancel')
-const titleKey = computed(() => 'inboxRecovery.' + reviewKind.value + 'Title')
-const helpKey = computed(() => 'inboxRecovery.' + reviewKind.value + 'Help')
-const confirmKey = computed(
-  () =>
-    'inboxRecovery.confirm' +
-    reviewKind.value[0]!.toUpperCase() +
-    reviewKind.value.slice(1),
+const titleKey = computed(() =>
+  selected.value?.kind === 'recover'
+    ? 'inboxInvestigation.actions.' + selected.value.action + '.title'
+    : 'inboxRecovery.' + reviewKind.value + 'Title',
+)
+const helpKey = computed(() =>
+  selected.value?.kind === 'recover'
+    ? 'inboxInvestigation.actions.' + selected.value.action + '.help'
+    : 'inboxRecovery.' + reviewKind.value + 'Help',
+)
+const confirmKey = computed(() =>
+  selected.value?.kind === 'recover'
+    ? 'inboxInvestigation.actions.' + selected.value.action + '.confirm'
+    : 'inboxRecovery.confirm' +
+      reviewKind.value[0]!.toUpperCase() +
+      reviewKind.value.slice(1),
 )
 const retryIntent = computed(() => {
   const intent = retry.value?.intent
@@ -145,7 +170,12 @@ function preventPendingLeave() {
 onBeforeRouteLeave(preventPendingLeave)
 onBeforeRouteUpdate(preventPendingLeave)
 const { discardOpen, requestDiscard, confirmDiscard, cancelDiscard } =
-  useInboxDraftGuard(() => open.value && !locked.value && !!reason.value.trim())
+  useInboxDraftGuard(
+    () =>
+      open.value &&
+      !locked.value &&
+      (!!reason.value.trim() || recoveryDirty.value),
+  )
 function beforeUnload(event: BeforeUnloadEvent) {
   if (locked.value) {
     event.preventDefault()
@@ -164,6 +194,9 @@ function clear() {
   retry.value = undefined
   cancellation.value = undefined
   sequence.value = undefined
+  recoveryPreview.value = undefined
+  recoveryInput.value = undefined
+  recoveryDirty.value = false
   reason.value = ''
   loading.value = false
   failed.value = false
@@ -203,10 +236,15 @@ watch(
     }
     const apply = () => {
       decision.reset()
+      selectionEpoch.value++
       selected.value = JSON.parse(
         JSON.stringify(request),
       ) as IntegrationControlReview
       reason.value = ''
+      recoveryPreview.value = undefined
+      recoveryInput.value =
+        request.kind === 'recover' ? { action: request.action } : undefined
+      recoveryDirty.value = false
       investigated.value = false
       closeBlocked.value = false
       open.value = true
@@ -224,11 +262,53 @@ async function loadPreview() {
   retry.value = undefined
   cancellation.value = undefined
   sequence.value = undefined
+  recoveryPreview.value = undefined
+  loading.value = false
+  failed.value = false
+  if (!allowed.value) {
+    failed.value = true
+    return
+  }
+  if (
+    selection.kind === 'recover' &&
+    (!recoveryInput.value ||
+      (manualAction.value && !recoveryInput.value.evidence_reference))
+  )
+    return
   loading.value = true
   failed.value = false
   try {
     if (!allowed.value) throw new Error('Current review access required')
-    if (selection.kind === 'resume') {
+    if (selection.kind === 'recover') {
+      const input = recoveryInput.value!
+      if (input.action !== selection.action)
+        throw new Error('Inconsistent recovery action')
+      const { data } = await inboxIntegrations.recoveryPreview(
+        selection.execution.id,
+        input,
+      )
+      if (request !== generation || context !== viewer.value) return
+      const preview = data.data
+      if (
+        preview.execution_id !== selection.execution.id ||
+        preview.run_id !== selection.run.id ||
+        preview.case_id !== selection.execution.case_id ||
+        preview.account_id !== selection.execution.account_id ||
+        preview.action !== selection.action ||
+        typeof preview.eligible !== 'boolean' ||
+        preview.remaining_steps_require_review !== true ||
+        preview.manual_attestation !== !!manualAction.value ||
+        typeof preview.fact_only !== 'boolean' ||
+        !Array.isArray(preview.field_changes) ||
+        preview.field_changes.length > 16 ||
+        (preview.eligible &&
+          !!manualAction.value &&
+          preview.fact_only !== (input.result === undefined)) ||
+        (preview.eligible && !/^[a-f0-9]{64}$/.test(preview.confirmation))
+      )
+        throw new Error('Inconsistent investigation review')
+      recoveryPreview.value = preview
+    } else if (selection.kind === 'resume') {
       const { data } = await inboxIntegrations.sequencePreview(selection.run.id)
       if (request !== generation || context !== viewer.value) return
       const preview = data.data
@@ -278,11 +358,50 @@ async function confirm() {
   const selection = selected.value,
     confirmation = result.value?.confirmation
   if (!selection || !target.value || !confirmation || !eligible.value) return
-  await decision.begin({
-    kind: selection.kind,
-    target: target.value,
-    input: { confirmation, reason: reason.value.trim() },
-  })
+  if (selection.kind === 'recover') {
+    if (!recoveryInput.value || recoveryInput.value.action !== selection.action)
+      return
+    await decision.begin({
+      kind: 'recover',
+      target: target.value,
+      input: {
+        ...recoveryInput.value,
+        confirmation,
+        reason: reason.value.trim(),
+      },
+    })
+  } else
+    await decision.begin({
+      kind: selection.kind,
+      target: target.value,
+      input: { confirmation, reason: reason.value.trim() },
+    })
+}
+function updateRecoveryInput(
+  input: IntegrationRecoveryInput | undefined,
+  dirty: boolean,
+) {
+  if (locked.value || selected.value?.kind !== 'recover') return
+  generation++
+  loading.value = false
+  failed.value = false
+  recoveryPreview.value = undefined
+  recoveryInput.value = input
+    ? (JSON.parse(JSON.stringify(input)) as IntegrationRecoveryInput)
+    : undefined
+  recoveryDirty.value = dirty
+}
+function editInvestigation() {
+  if (locked.value) return
+  generation++
+  recoveryPreview.value = undefined
+  failed.value = false
+  loading.value = false
+  void nextTick(() =>
+    document
+      .querySelector<HTMLElement>('[data-investigation-form] input[type=text]')
+      ?.focus(),
+  )
 }
 watch(decision.confirmedId, (id) => {
   if (!id || !selected.value) return
@@ -300,6 +419,18 @@ watch(decision.phase, (phase) => {
       return
     pendingHeading.value?.focus({ preventScroll: true })
     pendingHeading.value?.scrollIntoView?.({ block: 'start', behavior: 'auto' })
+  })
+})
+watch(recoveryPreview, (preview) => {
+  if (!preview || !manualAction.value) return
+  const context = viewer.value
+  void nextTick(() => {
+    if (context !== viewer.value || recoveryPreview.value !== preview) return
+    investigationHeading.value?.focus({ preventScroll: true })
+    investigationHeading.value?.scrollIntoView?.({
+      block: 'start',
+      behavior: 'auto',
+    })
   })
 })
 async function freshReview() {
@@ -357,13 +488,24 @@ defineExpose({
           <p class="inbox-caption break-all">
             {{
               t(
-                selected.kind === 'retry'
+                selected.kind === 'retry' || selected.kind === 'recover'
                   ? 'inboxIntegrationHistory.operationId'
                   : 'inboxIntegrationHistory.runId',
               )
             }}: {{ target }}
           </p>
         </div>
+        <InboxIntegrationRecoveryForm
+          v-if="selected.kind === 'recover' && manualAction && operator"
+          v-show="!recoveryPreview"
+          :key="selectionEpoch"
+          data-investigation-form
+          :execution="selected.execution"
+          :action="manualAction"
+          :disabled="locked"
+          @change="updateRecoveryInput"
+          @review="loadPreview"
+        />
         <p v-if="loading" role="status">{{ t('common.loading') }}</p>
         <div v-if="failed" role="alert" class="grid gap-2">
           <p>{{ t('inboxRecovery.previewError') }}</p>
@@ -377,6 +519,35 @@ defineExpose({
           >
         </div>
         <template v-if="result">
+          <div v-if="recoveryPreview" class="flex flex-wrap gap-2">
+            <Button
+              v-if="manualAction"
+              type="button"
+              variant="outline"
+              :disabled="locked || loading"
+              @click="editInvestigation"
+              >{{ t('inboxInvestigation.edit') }}</Button
+            >
+            <Button
+              type="button"
+              variant="outline"
+              :disabled="locked || loading"
+              @click="loadPreview"
+              >{{ t('inboxInvestigation.refresh') }}</Button
+            >
+          </div>
+          <h3
+            v-if="recoveryPreview && manualAction"
+            ref="investigationHeading"
+            tabindex="-1"
+            class="font-semibold"
+          >
+            {{ t('inboxInvestigation.reviewReady') }}
+          </h3>
+          <InboxIntegrationRecoveryPreview
+            v-if="recoveryPreview"
+            :preview="recoveryPreview"
+          />
           <p v-if="!result.eligible" role="status" class="inbox-notice">
             {{ unavailableReason() }}
           </p>

@@ -203,11 +203,9 @@ test('configures approved integration actions with held dispatch and responsive 
         })
         await reference.fill('request-id')
         await expect(reference).toHaveAttribute('aria-invalid', 'true')
-        const referenceError = page
-          .getByRole('alert')
-          .filter({
-            hasText: 'Use a lowercase property name starting with a letter',
-          })
+        const referenceError = page.getByRole('alert').filter({
+          hasText: 'Use a lowercase property name starting with a letter',
+        })
         await expect(referenceError).toBeVisible()
         await referenceError.scrollIntoViewIfNeeded()
         await expect(
@@ -404,8 +402,8 @@ test('configures approved integration actions with held dispatch and responsive 
     expect(
       (
         await client.query(
-          'SELECT count(*)::int AS n FROM inbox_integration_executions WHERE organization_id=$1',
-          [profile.organization_id],
+          'SELECT count(*)::int AS n FROM inbox_integration_executions WHERE organization_id=$1 AND case_id=$2',
+          [profile.organization_id, current.id],
         )
       ).rows[0].n,
     ).toBe(0)

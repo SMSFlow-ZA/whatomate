@@ -160,6 +160,7 @@
   font-size: 0.8125rem;
 }
 .inbox-control,
+.inbox-ui .inbox-input,
 .inbox-label > input:not([type='checkbox']),
 .inbox-label > select,
 .inbox-label > textarea {
@@ -175,11 +176,20 @@
   font-size: 0.875rem;
   font-weight: 400;
 }
-.inbox-label > textarea {
+
+.inbox-ui .inbox-input[type='date'] {
+  color-scheme: light;
+}
+.dark .inbox-ui .inbox-input[type='date'] {
+  color-scheme: dark;
+}
+.inbox-label > textarea,
+.inbox-ui textarea.inbox-input {
   min-height: 5.5rem;
   resize: vertical;
 }
 .inbox-control:focus-visible,
+.inbox-ui .inbox-input:focus-visible,
 .inbox-label > input:focus-visible,
 .inbox-label > select:focus-visible,
 .inbox-label > textarea:focus-visible,
