@@ -97,7 +97,11 @@ func (a *App) evaluateInboxWorkflow(tx *gorm.DB, w models.InboxWorkflow, c model
 }
 
 func inboxReplyFingerprint(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, reply inboxReplyPreview) string {
-	return workflowDigest([]any{c.OrganizationID, account.ID, account.Name, account.PhoneID, contact.ID, contact.PhoneNumber, reply, reply.TemplateRevision})
+	payload := []any{c.OrganizationID, account.ID, account.Name, account.PhoneID, contact.ID, contact.PhoneNumber, reply, reply.TemplateRevision}
+	if reply.CannedRevision != "" {
+		payload = append(payload, reply.CannedRevision)
+	}
+	return workflowDigest(payload)
 }
 
 func (a *App) workflowActorActive(db *gorm.DB, org, user uuid.UUID) bool {

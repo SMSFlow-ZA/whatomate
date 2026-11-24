@@ -27,6 +27,10 @@ type inboxReplyPreview struct {
 	HeaderParameters map[string]string   `json:"header_parameters,omitempty"`
 	Missing          []inboxtext.Missing `json:"missing_variables,omitempty"`
 	TemplateRevision string              `json:"-"`
+	Interactive      *InteractiveContent `json:"interactive,omitempty"`
+	CannedResponseID *uuid.UUID          `json:"canned_response_id,omitempty"`
+	CannedName       string              `json:"canned_name,omitempty"`
+	CannedRevision   string              `json:"-"`
 }
 
 func (a *App) previewInboxReply(c models.InboxCase, account models.WhatsAppAccount, contact models.Contact, action models.InboxAction, now time.Time) (inboxReplyPreview, error) {

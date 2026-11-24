@@ -32,26 +32,28 @@ type CannedResponseButton struct {
 
 // CannedResponseRequest represents the request body for creating/updating a canned response
 type CannedResponseRequest struct {
-	Name     string                 `json:"name"`
-	Shortcut string                 `json:"shortcut"`
-	Content  string                 `json:"content"`
-	Category string                 `json:"category"`
-	IsActive bool                   `json:"is_active"`
-	Buttons  []CannedResponseButton `json:"buttons"`
+	Personalise *bool                  `json:"personalise,omitempty"`
+	Name        string                 `json:"name"`
+	Shortcut    string                 `json:"shortcut"`
+	Content     string                 `json:"content"`
+	Category    string                 `json:"category"`
+	IsActive    bool                   `json:"is_active"`
+	Buttons     []CannedResponseButton `json:"buttons"`
 }
 
 // CannedResponseResponse represents the API response for a canned response
 type CannedResponseResponse struct {
-	ID         uuid.UUID              `json:"id"`
-	Name       string                 `json:"name"`
-	Shortcut   string                 `json:"shortcut"`
-	Content    string                 `json:"content"`
-	Category   string                 `json:"category"`
-	IsActive   bool                   `json:"is_active"`
-	UsageCount int                    `json:"usage_count"`
-	Buttons    []CannedResponseButton `json:"buttons"`
-	CreatedAt  string                 `json:"created_at"`
-	UpdatedAt  string                 `json:"updated_at"`
+	Personalise bool                   `json:"personalise,omitempty"`
+	ID          uuid.UUID              `json:"id"`
+	Name        string                 `json:"name"`
+	Shortcut    string                 `json:"shortcut"`
+	Content     string                 `json:"content"`
+	Category    string                 `json:"category"`
+	IsActive    bool                   `json:"is_active"`
+	UsageCount  int                    `json:"usage_count"`
+	Buttons     []CannedResponseButton `json:"buttons"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
 }
 
 // ListCannedResponses returns all canned responses for the organization
@@ -120,7 +122,8 @@ func (a *App) CreateCannedResponse(r *fastglue.Request) error {
 			"name and content are required", nil, "")
 	}
 
-	if err := validateCannedResponseButtons(req.Buttons); err != nil {
+	personalise := req.Personalise != nil && *req.Personalise
+	if err := validatePersonalisedCanned(req.Content, req.Buttons, personalise); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
 
@@ -133,6 +136,7 @@ func (a *App) CreateCannedResponse(r *fastglue.Request) error {
 	}
 
 	cannedResponse := models.CannedResponse{
+		Personalise:    personalise,
 		OrganizationID: orgID,
 		Name:           req.Name,
 		Shortcut:       req.Shortcut,
@@ -201,7 +205,15 @@ func (a *App) UpdateCannedResponse(r *fastglue.Request) error {
 		return nil
 	}
 
-	if err := validateCannedResponseButtons(req.Buttons); err != nil {
+	personalise := cannedResponse.Personalise
+	if req.Personalise != nil {
+		personalise = *req.Personalise
+	}
+	content := cannedResponse.Content
+	if req.Content != "" {
+		content = req.Content
+	}
+	if err := validatePersonalisedCanned(content, req.Buttons, personalise); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
 
@@ -216,6 +228,7 @@ func (a *App) UpdateCannedResponse(r *fastglue.Request) error {
 		cannedResponse.Content = req.Content
 	}
 	cannedResponse.Category = req.Category
+	cannedResponse.Personalise = personalise
 	cannedResponse.IsActive = req.IsActive
 	cannedResponse.Buttons = buttonsToJSONBArray(req.Buttons)
 
@@ -303,22 +316,24 @@ func cannedResponseAuditSnapshot(cr *models.CannedResponse) map[string]any {
 		"content":       cr.Content,
 		"category":      cr.Category,
 		"is_active":     cr.IsActive,
+		"personalise":   cr.Personalise,
 		"button_config": buttonsToAuditString(cr.Buttons),
 	}
 }
 
 func cannedResponseToResponse(cr models.CannedResponse) CannedResponseResponse {
 	return CannedResponseResponse{
-		ID:         cr.ID,
-		Name:       cr.Name,
-		Shortcut:   cr.Shortcut,
-		Content:    cr.Content,
-		Category:   cr.Category,
-		IsActive:   cr.IsActive,
-		UsageCount: cr.UsageCount,
-		Buttons:    jsonbArrayToButtons(cr.Buttons),
-		CreatedAt:  cr.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:  cr.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		Personalise: cr.Personalise,
+		ID:          cr.ID,
+		Name:        cr.Name,
+		Shortcut:    cr.Shortcut,
+		Content:     cr.Content,
+		Category:    cr.Category,
+		IsActive:    cr.IsActive,
+		UsageCount:  cr.UsageCount,
+		Buttons:     jsonbArrayToButtons(cr.Buttons),
+		CreatedAt:   cr.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   cr.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 

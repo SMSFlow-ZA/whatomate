@@ -31,12 +31,13 @@ import (
 
 // OutgoingMessageRequest contains all parameters for sending any type of message
 type OutgoingMessageRequest struct {
-	IdempotencyKey      uuid.UUID
-	Source              string
-	Channel             string
-	ChannelConnectionID uuid.UUID
-	ConsentConfirmed    bool
-	Fallback            *SMSFallbackOptions
+	ReviewedPayloadDigest string
+	IdempotencyKey        uuid.UUID
+	Source                string
+	Channel               string
+	ChannelConnectionID   uuid.UUID
+	ConsentConfirmed      bool
+	Fallback              *SMSFallbackOptions
 	// Required
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
@@ -202,6 +203,9 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		}{req.Type, req.Content, req.MediaID, req.MediaURL, req.Caption, req.InteractiveType, req.BodyText, req.ButtonText, req.URL, req.FlowID, req.FlowToken, req.Buttons, req.Fallback})
 		if err != nil {
 			return nil, err
+		}
+		if req.ReviewedPayloadDigest != "" {
+			payload = append(payload, []byte("\x00reviewed-payload:v1\x00"+req.ReviewedPayloadDigest)...)
 		}
 		if msg.Metadata == nil {
 			msg.Metadata = models.JSONB{}

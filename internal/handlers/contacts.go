@@ -647,7 +647,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
-	if req.Personalisation != nil && (req.Type != models.MessageTypeText || (req.Channel != "" && req.Channel != "whatsapp")) {
+	if req.Personalisation != nil && ((req.Type != models.MessageTypeText && req.Type != models.MessageTypeInteractive) || (req.Channel != "" && req.Channel != "whatsapp")) {
 		return a.inboxError(r, errInboxTransition)
 	}
 
@@ -692,19 +692,21 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Handle reply context
 	var personalisationID uuid.UUID
+	reviewedDigest := ""
 	if req.Personalisation != nil {
 		personalisationID, err = uuid.Parse(req.ClientMessageID)
 		if err != nil || personalisationID == uuid.Nil {
 			return a.inboxError(r, errInboxTransition)
 		}
-		rendered, err := a.confirmInboxMessage(a.DB, orgID, userID, *account, contact, *req.Personalisation)
+		rendered, err := a.confirmInboxReply(a.DB, orgID, userID, *account, contact, *req.Personalisation)
 		if err != nil {
 			return a.inboxError(r, err)
 		}
-		if rendered != req.Content.Body {
+		if rendered.Text != req.Content.Body || workflowDigest(rendered.Interactive) != workflowDigest(req.Interactive) || string(req.Type) != rendered.Type {
 			return a.inboxError(r, errInboxConflict)
 		}
-		req.Content.Body = rendered
+		req.Content.Body = rendered.Text
+		reviewedDigest = workflowDigest([]any{userID, req.Type, req.Content.Body, req.Interactive})
 	}
 	var replyToMessage *models.Message
 	if req.ReplyToMessageID != "" {
@@ -719,13 +721,14 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Build request and send using unified sender
 	msgReq := OutgoingMessageRequest{
-		IdempotencyKey: personalisationID,
-		Fallback:       req.Fallback,
-		Account:        account,
-		Contact:        &contact,
-		Type:           req.Type,
-		Content:        req.Content.Body,
-		ReplyToMessage: replyToMessage,
+		ReviewedPayloadDigest: reviewedDigest,
+		IdempotencyKey:        personalisationID,
+		Fallback:              req.Fallback,
+		Account:               account,
+		Contact:               &contact,
+		Type:                  req.Type,
+		Content:               req.Content.Body,
+		ReplyToMessage:        replyToMessage,
 	}
 
 	// Handle interactive messages
@@ -771,6 +774,9 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 			msgReq.FlowFirstScreen = req.Interactive.FirstScreen
 			msgReq.BodyText = body
 			msgReq.FlowToken = fmt.Sprintf("agent_%s_%d", contact.ID, time.Now().UnixNano())
+			if req.Personalisation != nil {
+				msgReq.FlowToken = "agent_" + contact.ID.String() + "_" + personalisationID.String()
+			}
 		}
 
 		if req.Interactive.Type == "voice_call" {
