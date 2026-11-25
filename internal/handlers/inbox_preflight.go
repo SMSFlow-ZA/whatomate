@@ -19,6 +19,7 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 	canWrite := a.HasPermission(user, models.ResourceChat, models.ActionWrite, c.OrganizationID)
 	plannedFields := map[uuid.UUID]bool{}
 	plannedVariables := map[string]bool{}
+	plannedAssignments := map[uuid.UUID]int64{}
 	for i, action := range w.Actions {
 		item := models.InboxActionOutcome{Index: i, Type: action.Type, Status: "ready", Reason: "will_apply"}
 		if !canWrite {
@@ -72,12 +73,12 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 					item.Status, item.Reason = "blocked", "agent_ineligible"
 					break
 				}
-				full, err := inboxAgentFull(db, c, id)
+				reason, err := inboxRoutingAssignmentPreflight(db, c, id, now, plannedAssignments)
 				if err != nil {
 					return nil, false, err
 				}
-				if full {
-					item.Status, item.Reason = "blocked", "agent_at_capacity"
+				if reason != "" {
+					item.Status, item.Reason = "blocked", reason
 					break
 				}
 				var assignee models.User
@@ -85,6 +86,9 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 					return nil, false, err
 				}
 				item.Detail = assignee.FullName
+				if c.AssigneeID == nil || *c.AssigneeID != id {
+					plannedAssignments[id]++
+				}
 				c.AssigneeID = &id
 			case "assign_team":
 				if c.Status == models.InboxCaseResolved {
@@ -109,25 +113,42 @@ func (a *App) preflightInboxActions(db *gorm.DB, w models.InboxWorkflow, c model
 				}
 				item.Detail = team.Name
 				c.TeamID, c.AssigneeID = &id, nil
-				if team.AssignmentStrategy == models.AssignmentStrategyManual || !inboxCountsForCapacity(c.Status) {
+				plan, err := resolveInboxRoutingPlan(db, c)
+				if err != nil {
+					return nil, false, err
+				}
+				if plan.Reason == "manual" || !inboxCountsForCapacity(c.Status) {
 					item.Status, item.Reason = "unassigned", "manual_assignment_required"
 					break
 				}
-				var members []models.TeamMember
-				if err := db.Joins("JOIN users u ON u.id=team_members.user_id AND u.is_active AND u.is_available AND u.deleted_at IS NULL").Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id=u.id AND uo.organization_id=?", c.OrganizationID).Where("team_members.team_id=?", id).Find(&members).Error; err != nil {
+				candidate, reason, err := chooseInboxRoutingCandidate(db, c, plan, now)
+				if err != nil {
 					return nil, false, err
 				}
-				item.Status, item.Reason = "unassigned", "team_unavailable"
-				for _, member := range members {
-					full, err := inboxAgentFull(db, c, member.UserID)
-					if err != nil {
-						return nil, false, err
+				item.Status, item.Reason = "ready", "team_strategy_will_select_agent"
+				if reason == "" {
+					// Prior actions can change the rate/fairness ordering. Do not
+					// claim that a read-only team prediction reserves this agent.
+					if len(plannedAssignments) > 0 {
+						item.Status, item.Reason = "deferred", "routing_rechecks_prior_assignments"
 					}
-					if !full {
-						item.Status, item.Reason = "ready", "team_strategy_will_select_agent"
-						break
+					plannedAssignments[candidate.UserID]++
+					c.AssigneeID = &candidate.UserID
+				}
+				if reason != "" {
+					item.Status = "unassigned"
+					switch reason {
+					case "capacity":
+						item.Reason = "team_at_capacity"
+					case "rate_limited":
+						item.Reason = "team_rate_limited"
+					case "permission_required":
+						item.Reason = "team_permission_required"
+					case "invalid_config":
+						item.Reason = "routing_configuration_invalid"
+					default:
+						item.Reason = "team_unavailable"
 					}
-					item.Reason = "team_at_capacity"
 				}
 			case "tag":
 				if !canAssign {

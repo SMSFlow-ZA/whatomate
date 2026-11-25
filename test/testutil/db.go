@@ -120,6 +120,10 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxIntakeBinding{},
 		&models.InboxAgentCapacity{},
 		&models.InboxCapacityPreset{},
+		&models.InboxRoutingPolicy{},
+		&models.InboxRoutingConfiguration{},
+		&models.InboxAgentAssignmentRate{},
+		&models.InboxAssignmentReceipt{},
 		&models.InboxWorkflow{},
 		&models.InboxWorkflowRun{},
 		&models.InboxIntegration{},
@@ -183,6 +187,7 @@ func cleanupTables(db *gorm.DB) {
 		"inbox_intake_bindings", "inbox_intake_mappings", "inbox_field_stamps",
 		"inbox_field_values", "inbox_field_definitions",
 		"inbox_agent_capacities",
+		"inbox_routing_policies", "inbox_routing_configurations", "inbox_agent_assignment_rates", "inbox_assignment_receipts",
 		"inbox_workflow_runs", "inbox_workflows",
 		"inbox_integration_recoveries", "inbox_integration_executions", "inbox_integrations",
 		// Dashboard tables

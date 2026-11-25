@@ -96,6 +96,10 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxIntakeBinding", &models.InboxIntakeBinding{}},
 		{"InboxAgentCapacity", &models.InboxAgentCapacity{}},
 		{"InboxCapacityPreset", &models.InboxCapacityPreset{}},
+		{"InboxRoutingPolicy", &models.InboxRoutingPolicy{}},
+		{"InboxRoutingConfiguration", &models.InboxRoutingConfiguration{}},
+		{"InboxAgentAssignmentRate", &models.InboxAgentAssignmentRate{}},
+		{"InboxAssignmentReceipt", &models.InboxAssignmentReceipt{}},
 		{"InboxWorkflow", &models.InboxWorkflow{}},
 		{"InboxWorkflowRun", &models.InboxWorkflowRun{}},
 		{"InboxIntegration", &models.InboxIntegration{}},
@@ -159,6 +163,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := InstallInboxFieldStamps(db); err != nil {
 		return err
 	}
+	if err := InstallInboxAssignmentReceipts(db); err != nil {
+		return err
+	}
 	if err := MigrateInboxWorkflowAuthority(db); err != nil {
 		return err
 	}
@@ -208,6 +215,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 
 	// Create indexes
 	if err := InstallInboxFieldStamps(silentDB); err != nil {
+		return err
+	}
+	if err := InstallInboxAssignmentReceipts(silentDB); err != nil {
 		return err
 	}
 	if err := inboxquality.Backfill(silentDB); err != nil {

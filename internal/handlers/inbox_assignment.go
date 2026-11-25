@@ -39,6 +39,18 @@ func (a *App) InboxAssignmentOptions(r *fastglue.Request) error {
 	if err := q.Select("users.id AS agent_id,users.full_name AS name,users.is_available AS available,COALESCE(lim.max_active,0) AS max_active,(SELECT COUNT(*) FROM inbox_cases work WHERE work.organization_id=? AND work.account_id=? AND work.assignee_id=users.id AND work.id<>? AND work.status IN ? AND work.deleted_at IS NULL) AS active", t.org, t.account, c.ID, inboxActiveStatuses).Order("users.full_name,users.id").Scan(&rows).Error; err != nil {
 		return a.inboxError(r, err)
 	}
+	team := uuid.Nil
+	if c.TeamID != nil {
+		team = *c.TeamID
+	}
+	contexts := make([]inboxRoutingCapacityContext, 0, len(rows))
+	fullCounts := a.HasPermission(user, models.ResourceTeams, models.ActionRead, t.org) && a.HasPermission(user, models.ResourceContacts, models.ActionRead, t.org)
+	for i := range rows {
+		contexts = append(contexts, inboxRoutingCapacityContext{Row: &rows[i], Account: t.account, Team: team, CurrentOwner: c.AssigneeID, ShowCounts: fullCounts || rows[i].AgentID == user})
+	}
+	if err := decorateInboxRoutingCapacity(a.DB, t.org, contexts); err != nil {
+		return a.inboxError(r, err)
+	}
 	return r.SendEnvelope(map[string]any{"case": c, "agents": rows, "can_override": a.HasPermission(user, models.ResourceTeams, models.ActionWrite, t.org)})
 }
 func (a *App) AssignInboxConversation(r *fastglue.Request) error {

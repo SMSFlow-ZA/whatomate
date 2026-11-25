@@ -58,9 +58,25 @@ func protectInboxActiveAssignment(tx *gorm.DB, c *models.InboxCase) error {
 	if c.AssigneeID == nil {
 		return nil
 	}
-	switch err := reserveInboxAgent(tx, *c, *c.AssigneeID); {
+	err := inboxNamedAssignmentAuthority(tx, *c, *c.AssigneeID)
+	if err == nil {
+		err = reserveInboxAgent(tx, *c, *c.AssigneeID)
+	}
+	if err == nil {
+		err = reserveInboxRoutingAssignment(tx, *c, *c.AssigneeID)
+	}
+	switch {
 	case errors.Is(err, errInboxAgentAtCapacity):
 		c.AssigneeID, c.RoutingReason = nil, "capacity"
+		return nil
+	case errors.Is(err, errInboxAssignmentRate):
+		c.AssigneeID, c.RoutingReason = nil, "rate_limited"
+		return nil
+	case errors.Is(err, errInboxRoutingPermission):
+		c.AssigneeID, c.RoutingReason = nil, "permission_required"
+		return nil
+	case errors.Is(err, errInboxRoutingConfig):
+		c.AssigneeID, c.RoutingReason = nil, "invalid_config"
 		return nil
 	default:
 		return err
@@ -69,12 +85,18 @@ func protectInboxActiveAssignment(tx *gorm.DB, c *models.InboxCase) error {
 
 // InboxCapacityRow is exported so GORM can populate embedded report rows.
 type InboxCapacityRow struct {
-	AgentID   uuid.UUID `json:"agent_id"`
-	Name      string    `json:"name"`
-	MaxActive int       `json:"max_active"`
-	Active    int64     `json:"active"`
-	Available bool      `json:"available"`
-	Inactive  bool      `json:"inactive"`
+	AgentID           uuid.UUID  `json:"agent_id"`
+	Name              string     `json:"name"`
+	MaxActive         int        `json:"max_active"`
+	Active            int64      `json:"active"`
+	Available         bool       `json:"available"`
+	Inactive          bool       `json:"inactive"`
+	MaxAssignments    int        `json:"max_assignments"`
+	WindowSeconds     int        `json:"window_seconds"`
+	Assignments       int64      `json:"assignments"`
+	RateResumesAt     *time.Time `json:"rate_resumes_at,omitempty"`
+	RateDetailsHidden bool       `json:"rate_details_hidden"`
+	AssignmentReason  string     `json:"assignment_reason,omitempty"`
 }
 
 func (a *App) inboxTeamCapacityContext(r *fastglue.Request, action string) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
@@ -112,6 +134,13 @@ func (a *App) GetInboxTeamCapacity(r *fastglue.Request) error {
 			org, account, inboxActiveStatuses).
 		Order("u.full_name, u.id").Scan(&rows).Error
 	if err != nil {
+		return a.inboxError(r, err)
+	}
+	contexts := make([]inboxRoutingCapacityContext, 0, len(rows))
+	for i := range rows {
+		contexts = append(contexts, inboxRoutingCapacityContext{Row: &rows[i], Account: account, Team: team, ShowCounts: true})
+	}
+	if err := decorateInboxRoutingCapacity(a.DB, org, contexts); err != nil {
 		return a.inboxError(r, err)
 	}
 	return r.SendEnvelope(map[string]any{"agents": rows})
@@ -154,7 +183,10 @@ func (a *App) SetInboxTeamCapacity(r *fastglue.Request) error {
 func (a *App) routeInboxOverflow(ctx context.Context) error {
 	var cases []models.InboxCase
 	err := a.DB.WithContext(ctx).
-		Where("assignee_id IS NULL AND team_id IS NOT NULL AND status IN ? AND routing_reason <> '' AND routing_reason <> 'manual'", inboxActiveStatuses).
+		Where("assignee_id IS NULL AND team_id IS NOT NULL AND status IN ? AND routing_reason <> ''", inboxActiveStatuses).
+		Where(`(routing_reason<>'manual' OR EXISTS (SELECT 1 FROM inbox_routing_configurations cfg JOIN teams team ON team.id=cfg.team_id AND team.organization_id=cfg.organization_id AND team.deleted_at IS NULL
+ WHERE cfg.organization_id=inbox_cases.organization_id AND cfg.account_id=inbox_cases.account_id AND cfg.team_id=inbox_cases.team_id
+ AND (cfg.strategy IN ('round_robin','load_balanced') OR (cfg.strategy='inherit' AND team.assignment_strategy IN ('round_robin','load_balanced')))))`).
 		Where("routing_next_attempt_at IS NULL OR routing_next_attempt_at <= ?", time.Now().UTC()).
 		Where("EXISTS (SELECT 1 FROM organizations o WHERE o.id = inbox_cases.organization_id AND o.inbox_workflows_enabled AND o.deleted_at IS NULL)").
 		Order("routing_next_attempt_at ASC NULLS FIRST, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, opened_at, id").
@@ -219,54 +251,64 @@ func (a *App) RunInboxOverflow(ctx context.Context, interval time.Duration) {
 
 // Caller holds the thread and case locks. Capacity is reserved atomically.
 func (a *App) routeEligibleInboxCase(tx *gorm.DB, c *models.InboxCase) error {
-	var team models.Team
-	err := tx.First(&team, "id = ? AND organization_id = ? AND is_active", *c.TeamID, c.OrganizationID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil || team.AssignmentStrategy == models.AssignmentStrategyManual {
-		return err
-	}
 	if err := lockInboxCapacity(tx, c.OrganizationID, c.AccountID); err != nil {
 		return err
 	}
-	q := tx.Model(&models.TeamMember{}).
-		Joins("JOIN users u ON u.id = team_members.user_id AND u.is_active AND u.is_available AND u.deleted_at IS NULL").
-		Joins("JOIN user_organizations uo ON uo.deleted_at IS NULL AND uo.user_id = u.id AND uo.organization_id = ?", c.OrganizationID).
-		Where("team_members.team_id = ?", team.ID)
-	if team.AssignmentStrategy == models.AssignmentStrategyLoadBalanced {
-		q = q.Select("team_members.*, (SELECT COUNT(*) FROM inbox_cases ic WHERE ic.organization_id = ? AND ic.account_id = ? "+
-			"AND ic.assignee_id = u.id AND ic.status IN ? AND ic.deleted_at IS NULL) AS inbox_load",
-			c.OrganizationID, c.AccountID, inboxActiveStatuses).Order("inbox_load")
-	}
-	var members []models.TeamMember
-	if err := q.Order("team_members.last_assigned_at ASC NULLS FIRST, team_members.user_id").Find(&members).Error; err != nil {
+	plan, err := resolveInboxRoutingPlan(tx, *c)
+	if err != nil {
 		return err
 	}
-	reason := "unavailable"
-	for _, m := range members {
-		if err := reserveInboxAgent(tx, *c, m.UserID); err != nil {
-			if errors.Is(err, errInboxAgentAtCapacity) {
-				reason = "capacity"
-				continue
-			}
-			return err
-		}
-		c.AssigneeID, c.RoutingReason = &m.UserID, ""
-		c.RoutingNextAttemptAt = nil
-		c.Version++
-		if err := tx.Save(c).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&m).Update("last_assigned_at", time.Now().UTC()).Error; err != nil {
-			return err
-		}
-		return appendInboxActivity(tx, *c, models.InboxCaseActivity{Kind: "assigned"})
+	now, err := inboxRoutingNow(tx)
+	if err != nil {
+		return err
 	}
-	if c.RoutingReason != reason {
+	hold := func(reason string) error {
+		if c.RoutingReason == reason && reason != "manual" {
+			return nil
+		}
 		c.RoutingReason = reason
+		if reason == "manual" {
+			c.RoutingNextAttemptAt = nil
+		}
 		c.Version++
 		return tx.Save(c).Error
 	}
-	return nil
+	if plan.Reason != "" {
+		return hold(plan.Reason)
+	}
+	if plan.Named {
+		first, err := inboxRoutingCaseFirst(tx, *c, now)
+		if err != nil {
+			return err
+		}
+		if !first {
+			return hold("priority_wait")
+		}
+	}
+	m, reason, err := chooseInboxRoutingCandidate(tx, *c, plan, now)
+	if err != nil {
+		return err
+	}
+	if reason != "" {
+		return hold(reason)
+	}
+	if err := inboxNamedAssignmentAuthority(tx, *c, m.UserID); err != nil {
+		if errors.Is(err, errInboxRoutingPermission) {
+			return hold("permission_required")
+		}
+		return err
+	}
+	if err := reserveInboxRoutingAssignment(tx, *c, m.UserID); err != nil {
+		return err
+	}
+	c.AssigneeID, c.RoutingReason = &m.UserID, ""
+	c.RoutingNextAttemptAt = nil
+	c.Version++
+	if err := tx.Save(c).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&m).Update("last_assigned_at", now).Error; err != nil {
+		return err
+	}
+	return appendInboxActivity(tx, *c, models.InboxCaseActivity{Kind: "assigned"})
 }

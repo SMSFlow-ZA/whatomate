@@ -123,6 +123,7 @@ type auditResourceSpec struct {
 // Only static server-owned resource/table names may enter these SQL fragments.
 // A missing target can use verified typed ownership, never a guessed legacy ID.
 var auditResourceSpecs = []auditResourceSpec{
+	{"inbox_routing_policy", models.ResourceTeams, models.ActionRead, "inbox_routing_policies", "", nil},
 	{"user", models.ResourceUsers, models.ActionRead, "users", "user", []audit.EventKind{audit.SignIn, audit.SignOut, audit.SessionsRevoked, audit.UserSecurityChanged, audit.PermissionChanged, audit.IdentityProvisioned}},
 	{"api_key", models.ResourceAPIKeys, models.ActionRead, "api_keys", "", nil},
 	{"organization_member", models.ResourceUsers, models.ActionRead, "users", "user", nil},

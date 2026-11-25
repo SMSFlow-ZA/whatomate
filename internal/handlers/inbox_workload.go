@@ -71,5 +71,13 @@ func (a *App) GetInboxWorkload(r *fastglue.Request) error {
 	if more {
 		rows = rows[:100]
 	}
+	contexts := make([]inboxRoutingCapacityContext, 0, len(rows))
+	fullCounts := a.HasPermission(user, models.ResourceTeams, models.ActionRead, org) && a.HasPermission(user, models.ResourceContacts, models.ActionRead, org)
+	for i := range rows {
+		contexts = append(contexts, inboxRoutingCapacityContext{Row: &rows[i].InboxCapacityRow, Account: rows[i].AccountID, Team: rows[i].TeamID, ShowCounts: fullCounts || rows[i].AgentID == user})
+	}
+	if err := decorateInboxRoutingCapacity(a.DB, org, contexts); err != nil {
+		return a.inboxError(r, err)
+	}
 	return r.SendEnvelope(map[string]any{"agents": rows, "has_more": more, "unique_agents": uniqueAgents, "updated_at": time.Now().UTC()})
 }

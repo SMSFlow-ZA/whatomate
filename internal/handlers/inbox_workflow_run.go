@@ -196,8 +196,12 @@ func (a *App) runInboxWorkflowActions(tx *gorm.DB, c *models.InboxCase, contact 
 			c.TeamID, c.AssigneeID, c.RoutingReason = &id, nil, "unavailable"
 			c.RoutingNextAttemptAt = nil
 			c.Version++
-			if team.AssignmentStrategy == models.AssignmentStrategyManual {
-				c.RoutingReason = "manual"
+			plan, err := resolveInboxRoutingPlan(tx, *c)
+			if err != nil {
+				return err
+			}
+			if plan.Reason != "" {
+				c.RoutingReason = plan.Reason
 			}
 			if err := tx.Save(c).Error; err != nil {
 				return err
@@ -205,7 +209,7 @@ func (a *App) runInboxWorkflowActions(tx *gorm.DB, c *models.InboxCase, contact 
 			if err := appendInboxActivity(tx, *c, models.InboxCaseActivity{Kind: "assigned_team", ActorID: &actor}); err != nil {
 				return err
 			}
-			if inboxCountsForCapacity(c.Status) && team.AssignmentStrategy != models.AssignmentStrategyManual {
+			if inboxCountsForCapacity(c.Status) && plan.Reason == "" {
 				if err := a.routeEligibleInboxCase(tx, c); err != nil {
 					return err
 				}

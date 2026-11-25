@@ -472,6 +472,14 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxConflict.Error(), nil, "")
 	case errors.Is(err, errInboxSendIneligible):
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxSendIneligible.Error(), nil, "inbox_send_ineligible")
+	case errors.Is(err, errInboxAssignmentRate):
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxAssignmentRate.Error(), nil, "assignment_rate_limited")
+	case errors.Is(err, errInboxRoutingPermission):
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxRoutingPermission.Error(), nil, "assignment_permission_required")
+	case errors.Is(err, errInboxOverrideForbidden):
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, errInboxOverrideForbidden.Error(), nil, "assignment_override_forbidden")
+	case errors.Is(err, errInboxRoutingConfig):
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errInboxRoutingConfig.Error(), nil, "routing_configuration_invalid")
 	case errors.Is(err, errRequiredInboxFields):
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errRequiredInboxFields.Error(), nil, "required_inbox_fields")
 	case errors.Is(err, errInboxTransition):

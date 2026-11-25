@@ -577,6 +577,15 @@ func (a *App) updateInboxCaseInBulk(org, user uuid.UUID, item bulkInboxItem, inp
 }
 
 func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID, override string) error {
+	if override != "" {
+		actor, err := loadAuditViewer(tx, c.OrganizationID, user, nil)
+		if err != nil || !actor.has(models.ResourceTeams, models.ActionWrite) {
+			if err != nil && !errors.Is(err, errAuditForbidden) && !errors.Is(err, errAuditUnauthenticated) {
+				return err
+			}
+			return errInboxOverrideForbidden
+		}
+	}
 	var member models.UserOrganization
 	if err := tx.Joins("JOIN users u ON u.id = user_organizations.user_id AND u.is_active AND u.deleted_at IS NULL").
 		Where("user_organizations.organization_id = ? AND user_organizations.user_id = ?", c.OrganizationID, assignee).First(&member).Error; err != nil {
@@ -589,11 +598,17 @@ func assignInboxCase(tx *gorm.DB, c *models.InboxCase, user, assignee uuid.UUID,
 		}
 	}
 	kind, overrideDetail := "assigned", ""
-	if err := reserveInboxAgent(tx, *c, assignee); err != nil {
-		if !errors.Is(err, errInboxAgentAtCapacity) || override == "" {
+	if err := inboxNamedAssignmentAuthority(tx, *c, assignee); err != nil {
+		return err
+	}
+	if err := reserveInboxRoutingAssignment(tx, *c, assignee); err != nil {
+		if (!errors.Is(err, errInboxAgentAtCapacity) && !errors.Is(err, errInboxAssignmentRate)) || override == "" {
 			return err
 		}
 		kind, overrideDetail = "capacity_override", override
+		if errors.Is(err, errInboxAssignmentRate) {
+			kind = "assignment_rate_override"
+		}
 	}
 	c.AssigneeID, c.RoutingReason = &assignee, ""
 	c.Version++
