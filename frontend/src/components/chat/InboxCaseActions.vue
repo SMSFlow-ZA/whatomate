@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import InboxFieldPanel from './InboxFieldPanel.vue'
+import InboxIntakeSummary from './InboxIntakeSummary.vue'
 import InboxResolutionDialog from './InboxResolutionDialog.vue'
 import InboxSLAIndicators from './InboxSLAIndicators.vue'
 import {
@@ -516,6 +517,12 @@ function resolvedCase(value: InboxCase) {
           )
         }}</Button
       >
+      <InboxIntakeSummary
+        v-if="current"
+        :account="accountId"
+        :contact="contactId"
+        :case-id="current.id"
+      />
       <InboxFieldPanel
         ref="fieldPanel"
         v-if="current"

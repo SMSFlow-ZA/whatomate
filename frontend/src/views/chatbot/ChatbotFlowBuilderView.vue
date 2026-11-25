@@ -157,6 +157,7 @@ const {
 
 const entryNodeId = ref<string>('')
 const selectedNodeId = ref<string | null>(null)
+const mobilePanelOpen = ref(false)
 
 const selectedNode = computed(() => {
   if (!selectedNodeId.value) return null
@@ -178,6 +179,7 @@ const selectedChatNode = computed<ChatNode | null>(() => {
 
 function onNodeClick(event: NodeMouseEvent) {
   selectedNodeId.value = event.node.id
+  mobilePanelOpen.value = true
 }
 
 function onPaneClick() {
@@ -694,26 +696,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-muted/30">
+  <div class="flex min-h-0 min-w-0 flex-col h-full bg-muted/30">
     <!-- Header -->
     <header class="border-b bg-background px-4 py-3 flex-shrink-0">
-      <div class="flex items-center gap-4">
+      <div class="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="icon" @click="handleCancel">
           <ArrowLeft class="h-5 w-5" />
         </Button>
 
-        <div class="flex-1 flex items-center gap-6">
-          <div class="flex items-center gap-2">
+        <div class="min-w-0 flex-1 flex flex-wrap items-center gap-3">
+          <div class="min-w-0 flex flex-1 items-center gap-2 sm:flex-none">
             <Label class="text-sm text-muted-foreground whitespace-nowrap">{{ $t('flowBuilder.name') }}</Label>
-            <Input v-model="name" :placeholder="$t('flowBuilder.namePlaceholder')" class="w-48 font-medium" />
+            <Input v-model="name" :placeholder="$t('flowBuilder.namePlaceholder')" class="min-w-0 w-full sm:w-48 font-medium" />
           </div>
-          <div class="flex items-center gap-2">
+          <div class="min-w-0 flex w-full items-center gap-2 sm:w-auto">
             <Label class="text-sm text-muted-foreground whitespace-nowrap">{{ $t('flowBuilder.description') }}</Label>
-            <Input v-model="description" :placeholder="$t('flowBuilder.optional')" class="w-64" />
+            <Input v-model="description" :placeholder="$t('flowBuilder.optional')" class="min-w-0 w-full sm:w-64" />
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex w-full flex-wrap items-center gap-3 xl:w-auto">
           <div class="flex items-center gap-2">
             <Switch :checked="enabled" @update:checked="enabled = $event" />
             <span class="text-sm">{{ enabled ? $t('flowBuilder.enabled') : $t('flowBuilder.disabled') }}</span>
@@ -727,6 +729,9 @@ onMounted(async () => {
           <Button @click="saveFlow" :disabled="isSaving">
             <Save class="h-4 w-4 mr-2" />
             {{ isSaving ? $t('flowBuilder.saving') + '...' : $t('flowBuilder.saveFlow') }}
+          </Button>
+          <Button variant="outline" size="sm" class="md:hidden" :aria-expanded="mobilePanelOpen" aria-controls="chatbot-properties" @click="mobilePanelOpen = !mobilePanelOpen">
+            {{ mobilePanelOpen ? $t('flowBuilder.backToCanvas') : $t('flowBuilder.properties') }}
           </Button>
         </div>
       </div>
@@ -750,9 +755,9 @@ onMounted(async () => {
     </div>
 
     <!-- Main: canvas + right panel -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="min-h-0 min-w-0 flex-1 flex overflow-hidden">
       <!-- Canvas -->
-      <div class="flex-1 relative">
+      <div class="min-w-0 flex-1 relative" :class="mobilePanelOpen ? 'hidden md:block' : 'block'">
         <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
@@ -785,7 +790,7 @@ onMounted(async () => {
       </div>
 
       <!-- Right panel -->
-      <Card class="w-[420px] min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex flex-col">
+      <Card id="chatbot-properties" class="w-full max-w-full md:w-[420px] min-h-0 min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex-col" :class="mobilePanelOpen ? 'flex' : 'hidden md:flex'">
         <!-- Node properties when a node is selected -->
         <div v-if="selectedChatNode && selectedChatNode.type !== 'start'" class="flex-1 overflow-y-auto">
           <ChatNodeProperties

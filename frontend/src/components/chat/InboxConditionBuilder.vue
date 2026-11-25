@@ -14,6 +14,7 @@ const model = defineModel<InboxFilters>({ required: true })
 const props = defineProps<{
   allowedFields?: InboxPredicate['field'][]
   help?: string
+  activeDefinitionsOnly?: boolean
 }>()
 const emit = defineEmits<{ validity: [value: boolean] }>()
 const allowed = (field: InboxPredicate['field']) =>
@@ -69,7 +70,10 @@ const definition = (condition: InboxPredicate) =>
   definitions.value.find((field) => field.id === condition.definition_id)
 const fieldUnavailable = (condition: InboxPredicate) =>
   condition.field === 'custom_field' &&
-  (loading.value || failed.value || !definition(condition))
+  (loading.value ||
+    failed.value ||
+    !definition(condition) ||
+    (props.activeDefinitionsOnly && !!definition(condition)?.archived_at))
 watch(
   () => !(model.value.predicates ?? []).some(fieldUnavailable),
   (value) => emit('validity', value),
@@ -100,7 +104,7 @@ function operators(condition: InboxPredicate) {
     ? [
         'eq',
         'not_eq',
-        ...(kind === 'text' ? ['contains'] : []),
+        ...(['text', 'email', 'url'].includes(kind ?? '') ? ['contains'] : []),
         ...(['number', 'date'].includes(kind ?? '')
           ? ['gt', 'gte', 'lt', 'lte']
           : []),
@@ -168,6 +172,7 @@ function add() {
             v-for="d in allowed('custom_field') ? definitions : []"
             :key="d.id"
             :value="'custom:' + d.id"
+            :disabled="activeDefinitionsOnly && !!d.archived_at"
           >
             {{ d.label }} · {{ t('inboxFields.scope.' + d.scope)
             }}{{ d.archived_at ? ' · ' + t('inboxFields.archived') : '' }}
@@ -211,7 +216,11 @@ function add() {
       >
         <InboxFieldInput
           v-if="definition(condition)"
-          :definition="definition(condition)!"
+          :definition="
+            ['email', 'url'].includes(definition(condition)!.kind)
+              ? { ...definition(condition)!, kind: 'text' }
+              : definition(condition)!
+          "
           :model-value="condition.value ?? null"
           @update:model-value="condition.value = $event"
         />

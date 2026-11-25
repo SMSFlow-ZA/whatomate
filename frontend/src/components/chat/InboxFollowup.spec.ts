@@ -11,6 +11,16 @@ const mock = vi.hoisted(() => ({
   values: vi.fn(),
 }))
 const route = reactive<{ query: Record<string, string> }>({ query: {} })
+vi.mock('@/composables/useInboxViewerContext', () => ({
+  useInboxViewerContext: () => ({ value: 'followup-fixture-viewer' }),
+}))
+vi.mock('@/services/inboxIntake', () => ({
+  inboxIntake: {
+    summary: async (_account: string, _contact: string, caseId: string) => ({
+      data: { data: { case_id: caseId, summaries: [], has_more: false } },
+    }),
+  },
+}))
 vi.mock('vue-router', () => ({
   useRoute: () => route,
   onBeforeRouteLeave: vi.fn(),

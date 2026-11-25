@@ -146,6 +146,9 @@ defineExpose({ requestLeave: requestDiscard })
         >
         <p :id="'field-help-' + d.id" class="inbox-caption">
           {{ d.description }}
+          <span v-if="d.conditional_required && !d.archived_at">{{
+            t('inboxIntake.conditional')
+          }}</span>
           <span v-if="d.required_on_resolve && !d.archived_at">{{
             t('inboxFields.required')
           }}</span

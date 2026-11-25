@@ -95,7 +95,9 @@ test('runs the inbox support workflow on an isolated workspace', async ({
     const key = 'reference_' + Date.now()
     await fieldForm.getByLabel('Advanced: edit the generated field key').check()
     await fieldForm.getByLabel('Field key', { exact: true }).fill(key)
-    await fieldForm.getByLabel('Required to resolve').check()
+    await fieldForm
+      .getByRole('combobox', { name: 'Requirement', exact: true })
+      .selectOption('always')
     const [savedField] = await Promise.all([
       page.waitForResponse(
         (response) =>

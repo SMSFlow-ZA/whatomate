@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ChannelOptions from '@/components/shared/ChannelOptions.vue'
+import ChatIntakeSelect from './ChatIntakeSelect.vue'
 import { initialChannelOptions } from '@/lib/channels'
 import type { ChatNode } from '@/services/api'
 import { useTeamsStore } from '@/stores/teams'
@@ -28,6 +29,10 @@ const teamsStore = useTeamsStore()
 if (teamsStore.teams.length === 0) teamsStore.fetchTeams()
 
 const config = computed(() => props.node.config || {})
+const intakeTransportBlocked = computed(() => {
+  const delivery = config.value.delivery_options
+  return !!delivery && ((!!delivery.channel && delivery.channel !== 'whatsapp') || !!delivery.fallback_enabled)
+})
 
 function updateConfig(key: string, value: any) {
   emit('update:node', {
@@ -54,7 +59,7 @@ const expectedResponse = computed<string>(() => {
 function setExpectedResponse(value: string) {
   if (value === 'none') {
     // Drop prompt-only fields, switch type back to message.
-    const { input_type: _unused, validation_regex: _r, validation_error: _e, store_as: _s, max_retries: _m, buttons: _b, body, ...rest } = props.node.config || {}
+    const { input_type: _unused, validation_regex: _r, validation_error: _e, store_as: _s, max_retries: _m, buttons: _b, intake_mapping_id: _intake, body, ...rest } = props.node.config || {}
     void _unused; void _r; void _e; void _s; void _m; void _b
     emit('update:node', {
       ...props.node,
@@ -680,6 +685,7 @@ const typeLabel: Record<string, string> = {
     </template>
 
     <div v-if="smsFlow && node.type === 'buttons'" class="space-y-2 border-t pt-3"><Label>SMS version with numbered choices</Label><Textarea :model-value="config.sms_text || ''" @update:model-value="v => updateConfig('sms_text', v)" placeholder="Reply 1 for Sales, 2 for Support" /><p class="text-xs text-muted-foreground">Use reply buttons as text choices; URL and phone buttons are unavailable on SMS.</p></div>
+    <ChatIntakeSelect v-if="!smsFlow && ['prompt', 'buttons', 'whatsapp_flow'].includes(node.type)" :value="config.intake_mapping_id || ''" :step-type="node.type" :transport-blocked="intakeTransportBlocked" @select="v => updateConfig('intake_mapping_id', v)" />
     <ChannelOptions v-if="!smsFlow && ['message','prompt','end','buttons'].includes(node.type)" :model-value="config.delivery_options || initialChannelOptions()" :text="textBodyValue || config.message || ''" :rich="node.type === 'buttons'" @update:model-value="v => updateConfig('delivery_options',v)" />
     <!-- Skip condition. Evaluated by the runner before executing the
          node; truthy → fall through via the default edge without

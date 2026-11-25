@@ -1,7 +1,14 @@
 import { api, type messagesService } from '@/services/api'
 import type { IntegrationIntent } from '@/services/inboxIntegrations'
 
-export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'select'
+export type FieldKind =
+  | 'text'
+  | 'email'
+  | 'url'
+  | 'number'
+  | 'date'
+  | 'boolean'
+  | 'select'
 export type FieldValue = string | number | boolean | null
 export interface FieldDefinition {
   id: string
@@ -13,6 +20,15 @@ export interface FieldDefinition {
   options?: string[]
   required_on_resolve: boolean
   archived_at?: string
+  revision?: number
+  conditional_required?: boolean
+  required_when?: FieldRequirement | null
+}
+export interface FieldRequirement {
+  account_id?: string
+  team_id?: string
+  match?: 'all' | 'any'
+  predicates: InboxPredicate[]
 }
 export interface FieldMatch {
   definition_id: string
@@ -39,6 +55,7 @@ export interface InboxActionOutcome {
   detail?: string
 }
 export interface MissingInboxField extends FieldDefinition {
+  required_now?: boolean
   can_edit: boolean
   editor_path?: string
   handoff?: string
@@ -356,6 +373,8 @@ export const inboxService = {
       description?: string
       label?: string
       required_on_resolve?: boolean
+      required_when?: FieldRequirement | null
+      revision?: number
       archive?: boolean
     },
   ) => api.put('/inbox/fields/' + encodeURIComponent(id), input),
