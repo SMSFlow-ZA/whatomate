@@ -111,6 +111,29 @@ test('qualifies queue discovery through normal HTTP while preserving legacy queu
             () => document.documentElement.scrollWidth <= innerWidth + 1,
           ),
         ).toBe(true)
+        // The queue clips horizontal overflow independently of the document.
+        // Check its actual controls so a narrow pane cannot hide Refresh or
+        // response alerts while the page-wide overflow check still passes.
+        expect(
+          await page.locator('.inbox-queue-tools').evaluate((root) => {
+            const bounds = root.getBoundingClientRect()
+            const refresh = root.querySelector('[data-queue-refresh]')
+            const row = refresh?.parentElement
+            if (!row) throw new Error('Queue action controls are missing')
+            return [...row.querySelectorAll<HTMLElement>('button,a')]
+              .filter((element) => element.getClientRects().length)
+              .filter((element) => {
+                const box = element.getBoundingClientRect()
+                return (
+                  box.left < bounds.left - 1 || box.right > bounds.right + 1
+                )
+              })
+              .map(
+                (element) =>
+                  element.getAttribute('aria-label') || element.textContent,
+              )
+          }),
+        ).toEqual([])
         expect(
           (await inboxContrast(page, true)).filter(
             (item) => item.ratio + 0.01 < item.minimum,

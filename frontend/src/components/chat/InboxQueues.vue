@@ -708,7 +708,7 @@ async function applyBulk() {
           >
         </button>
       </nav>
-      <div class="mt-3 flex items-center gap-1">
+      <div class="mt-3 flex flex-wrap items-center gap-1">
         <Popover
           ><PopoverTrigger as-child
             ><Button variant="outline" size="sm"
