@@ -86,6 +86,37 @@ func TestInboxRoutingConcurrentWorkersKeepOldestPriorityAndOneRateClaim(t *testi
 	require.EqualValues(t, 1, receipts)
 }
 
+func TestInboxRoutingRateSpansTeamsButNotOtherAccounts(t *testing.T) {
+	f := newRoutingPolicyFixture(t)
+	f.enable(t)
+	f.apply(t, models.AssignmentStrategyRoundRobin, 1)
+	first := f.route(t, f.waiting(t, f.account.ID, models.InboxPriorityNormal))
+	require.NotNil(t, first.AssigneeID)
+	team := models.Team{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: f.org.ID, Name: "Synthetic second routing team", IsActive: true, AssignmentStrategy: models.AssignmentStrategyRoundRobin}
+	require.NoError(t, f.db.Create(&team).Error)
+	require.NoError(t, f.db.Create(&models.TeamMember{TeamID: team.ID, UserID: f.agent.ID}).Error)
+	// Freeing active capacity must not erase the distinct assignment-rate slot.
+	require.NoError(t, f.db.Model(&first).Update("status", models.InboxCaseResolved).Error)
+	held := f.waiting(t, f.account.ID, models.InboxPriorityNormal)
+	held.TeamID = &team.ID
+	require.NoError(t, f.db.Save(&held).Error)
+	held = f.route(t, held)
+	require.Nil(t, held.AssigneeID)
+	require.Equal(t, "rate_limited", held.RoutingReason)
+	otherAccount := testutil.CreateTestWhatsAppAccount(t, f.db, f.org.ID)
+	independent := f.waiting(t, otherAccount.ID, models.InboxPriorityNormal)
+	independent.TeamID = &team.ID
+	require.NoError(t, f.db.Save(&independent).Error)
+	independent = f.route(t, independent)
+	require.NotNil(t, independent.AssigneeID)
+	require.Equal(t, f.agent.ID, *independent.AssigneeID)
+	var receipts int64
+	require.NoError(t, f.db.Model(&models.InboxAssignmentReceipt{}).Where("organization_id=? AND account_id=?", f.org.ID, f.account.ID).Count(&receipts).Error)
+	require.EqualValues(t, 1, receipts)
+	require.NoError(t, f.db.Model(&models.InboxAssignmentReceipt{}).Where("organization_id=? AND account_id=?", f.org.ID, otherAccount.ID).Count(&receipts).Error)
+	require.EqualValues(t, 1, receipts)
+}
+
 func (f routingPolicyFixture) enable(t *testing.T) {
 	t.Helper()
 	require.NoError(t, database.InstallInboxAssignmentReceipts(f.db))
