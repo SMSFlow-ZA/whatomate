@@ -304,25 +304,11 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 			return nil
 		}
 
-		// Auto-create user in the SSO config's organization
-		roleName := ssoConfig.DefaultRoleName
-		if roleName == "" {
-			roleName = "agent"
-		}
-
-		// Look up the CustomRole by name for this organization
-		var customRole models.CustomRole
-		if err := a.DB.Where("organization_id = ? AND name = ?", orgID, roleName).First(&customRole).Error; err != nil {
-			a.Log.Error("Failed to find role for SSO user", "error", err, "role_name", roleName)
-			a.redirectWithError(r, "Failed to create user account: role not found")
-			return nil
-		}
-
+		// Provision the identity, membership and policy audit in one transaction.
 		user = models.User{
 			OrganizationID: orgID,
 			Email:          userInfo.Email,
 			FullName:       userInfo.Name,
-			RoleID:         &customRole.ID,
 			IsActive:       true,
 			IsAvailable:    true,
 			SSOProvider:    provider,
@@ -330,25 +316,13 @@ func (a *App) CallbackSSO(r *fastglue.Request) error {
 			SSOBinding:     SSOProviderBinding(&ssoConfig),
 		}
 
-		if err := a.DB.Create(&user).Error; err != nil {
+		if err := a.provisionSSOIdentity(r, &user, ssoConfig); err != nil {
 			if handled, responseErr := a.sendPlanError(r, err); handled {
 				return responseErr
 			}
-			a.Log.Error("Failed to create SSO user", "error", err, "email", userInfo.Email)
+			a.Log.Error("Failed to create SSO user", "code", audit.ErrorCode(err))
 			a.redirectWithError(r, "Failed to create user account")
 			return nil
-		}
-
-		// Create UserOrganization entry
-		userOrg := models.UserOrganization{
-			UserID:         user.ID,
-			OrganizationID: orgID,
-			RoleID:         &customRole.ID,
-			IsDefault:      true,
-		}
-		if err := a.DB.Create(&userOrg).Error; err != nil {
-			a.Log.Error("Failed to create user organization entry for SSO user", "error", err)
-			// Non-fatal: user was already created
 		}
 
 		a.Log.Info("Created SSO user", "user_id", user.ID, "email", user.Email, "provider", provider)

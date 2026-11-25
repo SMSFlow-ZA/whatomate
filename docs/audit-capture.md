@@ -144,8 +144,46 @@ records successful validation only when the corresponding configuration commits.
 Audit failure rolls back that configuration and any pending-work cancellation;
 uncertain submissions keep their existing reconciliation state.
 
-These records cover the named management handlers, not every possible bootstrap,
-embedded-signup or external provisioning path. Initial registration/SSO lifecycle
-provenance and scoped investigation/export remain separate unfinished work. The
-feature is not yet ready for a managed release. Existing dispatch holds and
-automation defaults are unchanged.
+These records cover the named application handlers, not arbitrary direct database,
+bootstrap or external provisioning writes. Scoped investigation/export remains
+unfinished. The feature is not yet ready for a managed release. Existing dispatch
+holds and automation defaults are unchanged.
+
+## Registration and onboarding provenance
+
+Native registration and policy-enabled SSO auto-creation commit the identity,
+membership and `identity.provisioned` observation together. This event has no
+authenticated human actor: it displays `Provisioning policy`, with
+`actor_verified=false`. It does not claim that an administrator created the user.
+The selected role belongs to the target organisation and is checked inside the
+transaction. Existing password-authenticated cross-organisation joins compare
+the current credential/security snapshot before granting membership; they cannot
+revive a removed membership. Existing native organisation and role data remain
+unchanged. SSO provisioning rechecks the exact saved provider/policy after its
+network calls; a changed or disabled policy cannot grant access using the earlier
+OAuth snapshot.
+
+Successful registration sign-in is a separate best-effort authentication event,
+recorded only after both session tokens exist. If session creation fails after
+provisioning commits, the provisioned identity/membership remain and the sign-in
+is recorded as failed. No successful authentication is inferred from account
+creation alone. Authentication tokens and password hashes never enter these rows.
+
+Embedded WhatsApp signup commits an encrypted pending account and its creation
+event before remote registration/subscription calls, on managed and unmanaged
+instances. Account reservation serialises competing creations for the same
+organisation/phone identity. An archived identity requires administrator review;
+signup cannot resurrect it. Remote calls run outside configuration locks.
+Afterward, a version-checked transaction saves credentials/status and the matching
+`integration.registration_updated` observation. Manual registration uses the same
+scoped version fence and atomic local capture. Concurrent edits/removal are never
+overwritten. The registration reason describes the saved active, pending or
+inactive local state; it is not independent proof of Meta registration success.
+
+Meta operations cannot participate in a PostgreSQL transaction. If Meta may have
+processed registration but local saving/capture fails, the API explicitly asks
+the administrator to check account/Meta status before retrying. No automatic
+remote replay is added. Provider error bodies, authorization codes, credentials
+and PINs are absent from audit/diagnostic payloads. Existing write-authorised
+setup responses may still show the webhook verification token and generated PIN
+needed for configuration; this does not grant audit readers access to them.

@@ -35,6 +35,10 @@ func (a *App) recordIntegrationSecurity(r *fastglue.Request, tx *gorm.DB, org, a
 // transaction. A failed write/capture rolls back both; no request payload enters
 // the event. Existing targets are locked/scoped so Save cannot resurrect them.
 func (a *App) mutateAuditedIntegration(r *fastglue.Request, org, actor uuid.UUID, resource string, id *uuid.UUID, reason audit.Reason, write func(*gorm.DB) error, expected ...time.Time) error {
+	return a.mutateAuditedIntegrationEvent(r, org, actor, resource, id, audit.IntegrationChanged, reason, write, expected...)
+}
+
+func (a *App) mutateAuditedIntegrationEvent(r *fastglue.Request, org, actor uuid.UUID, resource string, id *uuid.UUID, kind audit.EventKind, reason audit.Reason, write func(*gorm.DB) error, expected ...time.Time) error {
 	if id == nil || write == nil || len(expected) > 1 {
 		return audit.ErrInvalidEvent
 	}
@@ -66,7 +70,7 @@ func (a *App) mutateAuditedIntegration(r *fastglue.Request, org, actor uuid.UUID
 			}
 		}
 		if reason == audit.Deleted {
-			if err := a.recordIntegrationSecurity(r, tx, org, actor, resource, *id, audit.IntegrationChanged, reason); err != nil {
+			if err := a.recordIntegrationSecurity(r, tx, org, actor, resource, *id, kind, reason); err != nil {
 				return err
 			}
 			return write(tx)
@@ -74,6 +78,6 @@ func (a *App) mutateAuditedIntegration(r *fastglue.Request, org, actor uuid.UUID
 		if err := write(tx); err != nil {
 			return err
 		}
-		return a.recordIntegrationSecurity(r, tx, org, actor, resource, *id, audit.IntegrationChanged, reason)
+		return a.recordIntegrationSecurity(r, tx, org, actor, resource, *id, kind, reason)
 	})
 }

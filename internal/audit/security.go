@@ -20,9 +20,11 @@ const (
 	SignOut              EventKind = "auth.sign_out"
 	SessionsRevoked      EventKind = "auth.sessions_revoked"
 	UserSecurityChanged  EventKind = "user.security_changed"
+	IdentityProvisioned  EventKind = "identity.provisioned"
 	PermissionChanged    EventKind = "permissions.changed"
 	IntegrationChanged   EventKind = "integration.changed"
 	IntegrationValidated EventKind = "integration.validated"
+	RegistrationUpdated  EventKind = "integration.registration_updated"
 	AuthorizationDenied  EventKind = "authorization.denied"
 	Exported             EventKind = "audit.exported"
 	CaseChanged          EventKind = "inbox.case_changed"
@@ -66,6 +68,12 @@ const (
 	MembershipRemoved         Reason = "membership_removed"
 	UserAuthorityChanged      Reason = "user_authority_changed"
 	Created                   Reason = "created"
+	RegistrationCreated       Reason = "registration_created"
+	RegistrationJoined        Reason = "registration_joined"
+	SSOProvisioned            Reason = "sso_provisioned"
+	RegistrationActive        Reason = "registration_active"
+	RegistrationPending       Reason = "registration_pending"
+	RegistrationInactive      Reason = "registration_inactive"
 	ConfigurationChanged      Reason = "configuration_changed"
 	CredentialRotated         Reason = "credential_rotated"
 	Validated                 Reason = "validated"
@@ -89,9 +97,11 @@ var eventReasons = map[EventKind][]Reason{
 	SignOut:              {SignedOut, AlreadySignedOut, SessionStorageUnavailable},
 	SessionsRevoked:      {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, MembershipRemoved, RoleChanged, ManualRevocation, BeforeSecurityUpdate, SessionStorageUnavailable},
 	UserSecurityChanged:  {PasswordChanged, PasswordReset, UserDisabled, UserEnabled, SSOIdentityChanged, SecuritySettingsChanged},
+	IdentityProvisioned:  {RegistrationCreated, RegistrationJoined, SSOProvisioned},
 	PermissionChanged:    {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, MembershipAdded, MembershipRemoved, UserRoleChanged, UserAuthorityChanged},
 	IntegrationChanged:   {Created, ConfigurationChanged, CredentialRotated, Disabled, Deleted},
 	IntegrationValidated: {Validated},
+	RegistrationUpdated:  {RegistrationActive, RegistrationPending, RegistrationInactive},
 	AuthorizationDenied:  {PermissionMissing, ProtectedResource},
 	Exported:             {ExportCompleted},
 	CaseChanged:          {StatusChanged, PriorityChanged, AssignmentChanged, FieldChanged, WorkflowAction},
@@ -134,7 +144,10 @@ func eventAllowed(e SecurityEvent) bool {
 	if e.Outcome != Success && e.Outcome != Denied && e.Outcome != Failed {
 		return false
 	}
-	if e.ActorID == uuid.Nil && (e.Kind != SignIn || e.Outcome == Success) {
+	if e.ActorID == uuid.Nil && e.Kind != IdentityProvisioned && (e.Kind != SignIn || e.Outcome == Success) {
+		return false
+	}
+	if e.Kind == IdentityProvisioned && (e.ActorID != uuid.Nil || e.ResourceType != "user" || e.Outcome != Success) {
 		return false
 	}
 	allowed := false
@@ -211,6 +224,9 @@ func eventAllowed(e SecurityEvent) bool {
 			return false
 		}
 	}
+	if e.Kind == RegistrationUpdated && (e.ResourceType != "account" || e.Outcome != Success) {
+		return false
+	}
 	if e.Kind == Exported && (e.ResourceType != "audit_logs" || e.ResourceID != e.OrganizationID) {
 		return false
 	}
@@ -221,7 +237,7 @@ func eventAllowed(e SecurityEvent) bool {
 	} else if e.Context.CaseID != nil {
 		return false
 	}
-	if e.Context.AccountID != nil && e.Kind != CaseChanged && (e.Kind != IntegrationChanged || e.ResourceType != "account" || *e.Context.AccountID != e.ResourceID) {
+	if e.Context.AccountID != nil && e.Kind != CaseChanged && ((e.Kind != IntegrationChanged && e.Kind != RegistrationUpdated) || e.ResourceType != "account" || *e.Context.AccountID != e.ResourceID) {
 		return false
 	}
 	if e.Context.Origin.Source == "unknown" {
@@ -262,6 +278,9 @@ func RecordSecurity(db *gorm.DB, e SecurityEvent) (captureErr error) {
 		return err
 	}
 	name := "Unauthenticated"
+	if e.Kind == IdentityProvisioned {
+		name = "Provisioning policy"
+	}
 	if e.ActorID != uuid.Nil {
 		var actor models.User
 		if err := db.Select("users.id,users.full_name").Where("id=? AND is_active AND (is_super_admin OR organization_id=? OR EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id=users.id AND uo.organization_id=? AND uo.deleted_at IS NULL))", e.ActorID, e.OrganizationID, e.OrganizationID).First(&actor).Error; err != nil {
@@ -272,6 +291,14 @@ func RecordSecurity(db *gorm.DB, e SecurityEvent) (captureErr error) {
 	var target int64
 	switch e.ResourceType {
 	case "user":
+		if e.Kind == IdentityProvisioned {
+			// A policy-created membership is not an authenticated administrator.
+			// Verify the committed target, active membership and scoped role instead.
+			if err := db.Model(&models.User{}).Where("id=? AND is_active AND EXISTS (SELECT 1 FROM user_organizations uo JOIN custom_roles r ON r.id=uo.role_id AND r.organization_id=uo.organization_id AND r.deleted_at IS NULL WHERE uo.user_id=users.id AND uo.organization_id=? AND uo.deleted_at IS NULL)", e.ResourceID, e.OrganizationID).Count(&target).Error; err != nil {
+				return err
+			}
+			break
+		}
 		if err := db.Unscoped().Model(&models.User{}).Where("id=? AND (organization_id=? OR EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.user_id=users.id AND uo.organization_id=?) OR (is_super_admin AND id=?))", e.ResourceID, e.OrganizationID, e.OrganizationID, e.ActorID).Count(&target).Error; err != nil {
 			return err
 		}

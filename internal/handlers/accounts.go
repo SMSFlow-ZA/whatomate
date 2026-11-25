@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
@@ -644,44 +646,69 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	// 2. Exchange code for user access token using WhatsApp service
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	a.Log.Info("Exchanging code for access token")
 
 	accessToken, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
 		appID, appSecret, a.Config.WhatsApp.APIVersion)
 	if err != nil {
-		a.Log.Error("Failed to exchange token", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		a.Log.Error("Failed to exchange token", "code", "provider_exchange_failed")
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Could not exchange the authorization code. Start WhatsApp signup again.", nil, "")
 	}
 
 	// DISCOVERY: If IDs are missing, try to find them using the token
 	phoneID, wabaID, name, err := a.discoverWABAAndPhone(ctx, orgID, accessToken, req.PhoneID, req.WABAID, req.Name)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Could not discover the WhatsApp business account or number. Check your Meta access.", nil, "")
 	}
 
 	// 3. We can now create/update the account
 	account, phoneInfo, existingAccount, oldAccount, err := a.createOrUpdateAccount(ctx, orgID, phoneID, wabaID, name, req.WebhookVerifyToken, accessToken, appSecret)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
+		if errors.Is(err, errAuditedIntegrationChanged) {
+			return r.SendErrorEnvelope(409, "Account is archived or changed. Reload or ask an administrator to review it.", nil, "integration_changed")
+		}
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not prepare the WhatsApp account", nil, "")
 	}
 
-	// Reserve a managed number before registration/subscription side effects.
+	// Reserve an encrypted pending identity before registration/subscription side effects.
 	// Pending registration still consumes an allowance. Keep plaintext credentials
 	// in memory for the following API calls, and persist only encrypted values.
-	if a.Config.Plan.Enabled && !existingAccount {
+	if !existingAccount {
 		reserved := *account
 		if err := a.encryptAccountSecrets(&reserved); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to secure account credentials", nil, "")
 		}
-		if err := a.DB.Create(&reserved).Error; err != nil {
+		reserved.CreatedByID, reserved.UpdatedByID = &userID, &userID
+		if err := a.mutateAuditedIntegration(r, orgID, userID, "account", &reserved.ID, audit.Created, func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "embedded-account:"+orgID.String()+":"+phoneID).Error; err != nil {
+				return err
+			}
+			var count int64
+			if err := tx.Unscoped().Model(&models.WhatsAppAccount{}).Where("organization_id=? AND phone_id=?", orgID, phoneID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 0 {
+				return errAuditedIntegrationChanged
+			}
+			return tx.Create(&reserved).Error
+		}); err != nil {
+			if handled, responseErr := sendIntegrationConflict(r, err); handled {
+				return responseErr
+			}
 			if handled, responseErr := a.sendPlanError(r, err); handled {
 				return responseErr
 			}
-			a.Log.Error("Failed to reserve account", "error", err)
+			a.Log.Error("Failed to reserve account", "code", audit.ErrorCode(err))
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 		}
+		// Reload stored timestamp precision before the post-network version fence.
+		if err := privateInboxIntegrationDB(a.DB).First(&reserved, "id=? AND organization_id=?", reserved.ID, orgID).Error; err != nil {
+			return r.SendErrorEnvelope(503, "Account creation is retained; reload before continuing", nil, "")
+		}
 		account.BaseModel = reserved.BaseModel
+		account.CreatedByID, account.UpdatedByID = &userID, &userID
 	}
 
 	// 4. Attempt Auto-Registration
@@ -693,22 +720,42 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	// 5. Subscribe app to WABA webhooks
 	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(account)); err != nil {
-		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+		a.Log.Error("Failed to subscribe app to WABA", "code", "provider_subscription_failed")
 	}
 
 	// 6. Encrypt credentials at rest
 	plaintextPin := account.Pin
 	if err := a.encryptAccountSecrets(account); err != nil {
-		a.Log.Error("Failed to encrypt account secrets", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
+		a.Log.Error("Failed to encrypt account secrets", "code", "credential_encryption_failed")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not secure account credentials. Check account status before continuing.", nil, "")
 	}
 
-	if err := a.DB.Save(account).Error; err != nil {
+	kind, reason := audit.RegistrationUpdated, accountRegistrationReason(account)
+	if existingAccount {
+		kind, reason = audit.IntegrationChanged, audit.CredentialRotated
+	}
+	expected := account.UpdatedAt
+	if oldAccount != nil {
+		expected = oldAccount.UpdatedAt
+	}
+	account.UpdatedByID = &userID
+	if err := a.mutateAuditedIntegrationEvent(r, orgID, userID, "account", &account.ID, kind, reason, func(tx *gorm.DB) error {
+		if err := tx.Omit(clause.Associations).Save(account).Error; err != nil {
+			return err
+		}
+		if existingAccount {
+			return a.recordIntegrationSecurity(r, tx, orgID, userID, "account", account.ID, audit.RegistrationUpdated, accountRegistrationReason(account))
+		}
+		return nil
+	}, expected); err != nil {
+		if errors.Is(err, errAuditedIntegrationChanged) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(409, "Account changed during registration. Reload and check Meta before retrying.", nil, "integration_changed")
+		}
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to save account", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
+		a.Log.Error("Failed to save account", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(503, "Meta may have processed registration, but the local change was not saved. Check account status before retrying.", nil, "registration_not_saved")
 	}
 
 	// Invalidate cache
@@ -738,7 +785,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		out["pin"] = plaintextPin
 	}
 	if regErr != nil {
-		out["warning"] = "Registration failed: " + regErr.Error()
+		out["warning"] = "Meta registration did not complete. Check the number and business setup before retrying."
 	}
 
 	return r.SendEnvelope(out)
@@ -761,7 +808,7 @@ func (a *App) discoverWABAAndPhone(ctx context.Context, orgID uuid.UUID, accessT
 
 	debugInfo, err := a.WhatsApp.GetTokenDebugInfo(ctx, accessToken, appAccessToken)
 	if err != nil {
-		a.Log.Error("Failed to debug token", "error", err)
+		a.Log.Error("Failed to debug token", "code", "provider_token_check_failed")
 		return "", "", "", fmt.Errorf("failed to validate token details: %w", err)
 	}
 
@@ -794,7 +841,7 @@ func (a *App) discoverWABAAndPhone(ctx context.Context, orgID uuid.UUID, accessT
 	if phoneID == "" {
 		phonesResp, err := a.WhatsApp.GetWABAPhoneNumbers(ctx, wabaID, accessToken)
 		if err != nil {
-			a.Log.Error("Failed to fetch phone numbers from Meta", "error", err)
+			a.Log.Error("Failed to fetch phone numbers from Meta", "code", "provider_phone_discovery_failed")
 			return "", "", "", fmt.Errorf("failed to fetch phone numbers from WABA: %w", err)
 		}
 
@@ -822,16 +869,22 @@ func (a *App) createOrUpdateAccount(ctx context.Context, orgID uuid.UUID, phoneI
 	var oldAccount *models.WhatsAppAccount
 
 	// Use Unscoped to find even soft-deleted accounts to avoid unique constraint violations
-	if err := a.DB.Unscoped().Where("phone_id = ? AND organization_id = ?", phoneID, orgID).First(&account).Error; err == nil {
+	err := privateInboxIntegrationDB(a.DB).Unscoped().Where("phone_id = ? AND organization_id = ?", phoneID, orgID).First(&account).Error
+	if err == nil {
+		if account.DeletedAt.Valid {
+			return nil, nil, false, nil, errAuditedIntegrationChanged
+		}
 		existingAccount = true
 		temp := account
 		oldAccount = &temp
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, false, nil, err
 	}
 
 	// Fetch phone info from Meta using WhatsApp service unconditionally
 	phoneInfo, err := a.WhatsApp.GetPhoneNumberInfo(ctx, phoneID, accessToken, a.Config.WhatsApp.APIVersion)
 	if err != nil {
-		a.Log.Warn("Failed to fetch phone info from Meta", "error", err)
+		a.Log.Warn("Failed to fetch phone info from Meta", "code", "provider_phone_info_failed")
 	}
 
 	if name == "" {
@@ -919,7 +972,7 @@ func (a *App) attemptAutoRegistration(ctx context.Context, account *models.Whats
 		a.Log.Info("Phone number auto-registration successful", "phone_id", account.PhoneID)
 	} else {
 		a.Log.Warn("Phone number auto-registration failed",
-			"error", regErr,
+			"code", "provider_registration_failed",
 			"phone_id", account.PhoneID)
 		if priorStatus != "" {
 			account.Status = priorStatus
@@ -965,7 +1018,8 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 		}
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Check if this is an SMB phone — SMB numbers are already registered
 	// via the Business App and don't support the two-step registration API.
@@ -975,8 +1029,8 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 	} else {
 		// Call Meta Register endpoint using WhatsApp service
 		if err := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, pin, account.AccessToken, account.APIVersion); err != nil {
-			a.Log.Error("Manual registration failed", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+			a.Log.Error("Manual registration failed", "code", "provider_registration_failed")
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Meta rejected registration. Verify the number and business setup before retrying.", nil, "")
 		}
 	}
 
@@ -986,15 +1040,22 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 
 	// Encrypt secrets before saving
 	if err := a.encryptAccountSecrets(account); err != nil {
-		a.Log.Error("Failed to encrypt account secrets", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
+		a.Log.Error("Failed to encrypt account secrets", "code", "credential_encryption_failed")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not secure account credentials. Check account status before continuing.", nil, "")
 	}
 
-	if err := a.DB.Save(account).Error; err != nil {
+	account.UpdatedByID = &userID
+	if err := a.mutateAuditedIntegrationEvent(r, orgID, userID, "account", &account.ID, audit.RegistrationUpdated, accountRegistrationReason(account), func(tx *gorm.DB) error {
+		return tx.Omit(clause.Associations).Save(account).Error
+	}, oldAccount.UpdatedAt); err != nil {
+		if errors.Is(err, errAuditedIntegrationChanged) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(409, "Account changed during registration. Reload and check Meta before retrying.", nil, "integration_changed")
+		}
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
+		a.Log.Error("Failed to save registration status", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(503, "Meta may have processed registration, but the local change was not saved. Check account status before retrying.", nil, "registration_not_saved")
 	}
 
 	// Invalidate cache
@@ -1022,6 +1083,16 @@ func generateNumericPIN(length int) (string, error) {
 		b[i] = byte(num.Int64()) + '0'
 	}
 	return string(b), nil
+}
+
+func accountRegistrationReason(account *models.WhatsAppAccount) audit.Reason {
+	if account.Status == "active" {
+		return audit.RegistrationActive
+	}
+	if account.Status == "pending_registration" {
+		return audit.RegistrationPending
+	}
+	return audit.RegistrationInactive
 }
 
 func (a *App) defaultAPIVersion() string {

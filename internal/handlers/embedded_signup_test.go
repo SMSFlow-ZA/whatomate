@@ -235,7 +235,7 @@ func TestApp_ExchangeToken_InvalidCode(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 
 	body := string(testutil.GetResponseBody(req))
-	assert.Contains(t, body, "Invalid authorization code")
+	assert.Contains(t, body, "Could not exchange the authorization code")
 }
 
 func TestApp_ExchangeToken_Success_CodeOnly_Discovery(t *testing.T) {
@@ -579,7 +579,7 @@ func TestApp_RegisterPhoneNumber_RegistrationFailed(t *testing.T) {
 
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 	body := string(testutil.GetResponseBody(req))
-	assert.Contains(t, body, "Phone number must be verified")
+	assert.Contains(t, body, "Meta rejected registration")
 
 	// Verify account status NOT updated
 	var updated models.WhatsAppAccount
