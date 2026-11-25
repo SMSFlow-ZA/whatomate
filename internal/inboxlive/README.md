@@ -60,3 +60,29 @@ Fake-source tests cover retries, reset ordering, restored lower revisions,
 overflow, invalid payloads and cancellation. The opt-in PostgreSQL test checks
 real commit-only delivery, reconnect after terminating its own uniquely named
 test connection and credential-redacted failures.
+
+## Scoped socket transport
+
+The existing authenticated socket accepts `inbox_watch` protocol1 with a positive
+generation and up to three client-known contexts. Its ordinary512-byte frame
+limit is unchanged. New generations fence previous lookups immediately. Changes
+are rate limited to500ms and must be renewed within70seconds. Empty scopes
+unsubscribe. Current database roles, memberships, account ownership and read
+boundaries are checked both when subscribing and when delivering; socket request
+flags and cached permissions never grant authority.
+
+`inbox_state` frames contain the generation, connection/watch epoch, sequence,
+availability and scoped changes. Scope keys repeat only selected identifiers.
+Resource keys are per-connection HMACs, not new case/contact/owner identifiers.
+Generic resets cover access changes and reassignment out of a previously visible
+queue without exposing the new assignment. Subscription caches are bounded to256
+revisions; loss, overflow, expiry or changed epochs require authorised API reloads.
+Local dispatch ordering prevents a late reconnect snapshot from replacing a newer
+listener state. This order is not a database commit cursor.
+
+Authorisation runs outside subscription and socket registry locks. Up to four
+delivery workers run separately from the ordinary socket hub loop with bounded
+lookup contexts. HTTP-server startup owns one reconnecting PostgreSQL listener;
+shutdown cancels and waits for it. No message or external action is dispatched by
+an invalidation. Clients must retain independent polling/manual refresh and must
+not overwrite drafts, reviews or selections when applying refresh hints.

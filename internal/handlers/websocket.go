@@ -7,6 +7,7 @@ import (
 	"github.com/fasthttp/websocket"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxlive"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	ws "github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
@@ -42,6 +43,7 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 		done := make(chan struct{})
 		defer close(done)
 		authenticate := a.validateWSTokenFn()
+		var socketClaims *middleware.JWTClaims
 		validate := func(encoded string) (uuid.UUID, uuid.UUID, error) {
 			userID, orgID, err := authenticate(encoded)
 			if err == nil {
@@ -49,12 +51,19 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 				if parseErr != nil {
 					return uuid.Nil, uuid.Nil, parseErr
 				}
+				socketClaims = claims
 				go a.watchWSSession(done, claims, 5*time.Second, func() { _ = conn.Close() })
 			}
 			return userID, orgID, err
 		}
 		// Create unauthenticated client — auth happens via first message
 		client := ws.NewUnauthenticatedClient(a.WSHub, conn, validate)
+		client.SetInboxAuthorizer(func(ctx context.Context, scope inboxlive.WatchScope, event *inboxlive.Event) (inboxlive.Decision, error) {
+			if socketClaims == nil {
+				return inboxlive.Decision{}, errAuditUnauthenticated
+			}
+			return a.inboxLiveAuthorizer(socketClaims.OrganizationID, socketClaims.UserID, socketClaims)(ctx, scope, event)
+		})
 
 		// Start pumps in goroutines
 		// Client self-registers with hub after successful auth message

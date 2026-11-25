@@ -6,6 +6,7 @@ import (
 
 	"github.com/fasthttp/websocket"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxlive"
 )
 
 const (
@@ -54,6 +55,11 @@ type Client struct {
 
 	// Current contact being viewed (nil if none)
 	currentContact *uuid.UUID
+
+	// Installed before pumps start; its authority is evaluated after auth.
+	inbox *inboxlive.Subscription
+	// Guarded by hub.mu, like send channel closure.
+	closed bool
 }
 
 // NewClient creates a new unauthenticated Client instance.
@@ -249,6 +255,8 @@ func (c *Client) handleMessage(data []byte) {
 		c.handleSetContact(msg.Payload)
 	case TypePing:
 		c.sendPong()
+	case TypeInboxWatch:
+		c.handleInboxWatch(msg.Payload)
 	}
 }
 

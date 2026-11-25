@@ -34,6 +34,8 @@ type Connector func(context.Context) (Source, error)
 // Update is internal transport state. Public frames must be independently
 // scoped/authorised and use opaque resource keys rather than these DB events.
 type Update struct {
+	// Assigned locally by the socket hub, never a database commit cursor.
+	Order     uint64    `json:"-"`
 	Epoch     uuid.UUID `json:"-"`
 	Available bool      `json:"-"`
 	Reset     bool      `json:"-"`

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/inboxlive"
 	"github.com/zerodha/logf"
 )
 
@@ -24,6 +25,9 @@ type Hub struct {
 
 	// mutex for thread-safe access to clients map
 	mu sync.RWMutex
+
+	// Only transport state, never a retained event or database content.
+	inboxState inboxlive.Update
 
 	// logger
 	log logf.Logger
@@ -92,6 +96,7 @@ func (h *Hub) unregisterClient(client *Client) {
 		if userClients, ok := orgClients[client.userID]; ok {
 			if _, exists := userClients[client]; exists {
 				delete(userClients, client)
+				client.closed = true
 				close(client.send)
 
 				// Clean up empty user map

@@ -266,6 +266,9 @@ func runServer(args []string) {
 	if err := app.StartCampaignStatsSubscriber(); err != nil {
 		lo.Error("Failed to start campaign stats subscriber", "error", err)
 	}
+	if err := app.StartInboxLiveSubscriber(); err != nil {
+		lo.Error("Failed to start inbox live subscriber", "error", err)
+	}
 
 	// Parse allowed origins for CORS
 	allowedOrigins := middleware.ParseAllowedOrigins(cfg.Server.AllowedOrigins)
@@ -339,6 +342,7 @@ func runServer(args []string) {
 	// Stop campaign stats subscriber
 	lo.Info("Stopping campaign stats subscriber...")
 	app.StopCampaignStatsSubscriber()
+	app.StopInboxLiveSubscriber()
 	lo.Info("Campaign stats subscriber stopped")
 
 	// Stop SLA processor

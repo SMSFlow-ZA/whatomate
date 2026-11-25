@@ -17,6 +17,8 @@ const (
 	TypeSetContact    = "set_contact"
 	TypePing          = "ping"
 	TypePong          = "pong"
+	TypeInboxWatch    = "inbox_watch"
+	TypeInboxState    = "inbox_state"
 
 	// Agent transfer types
 	TypeAgentTransfer       = "agent_transfer"

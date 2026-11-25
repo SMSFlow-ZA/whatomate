@@ -26,3 +26,8 @@ func ClientOrgID(c *Client) uuid.UUID {
 func ClientHandleAuthMessage(c *Client, data []byte) bool {
 	return c.handleAuthMessage(data)
 }
+
+// ClientHandleInboxWatch exercises the actual authenticated message handler.
+func ClientHandleInboxWatch(c *Client, payload any) {
+	c.handleInboxWatch(payload)
+}

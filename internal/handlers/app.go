@@ -39,6 +39,9 @@ type App struct {
 	Queue                    queue.Queue
 	Channels                 *channelapp.Service
 	CampaignSubCancel        context.CancelFunc
+	inboxLiveMu              sync.Mutex
+	inboxLiveCancel          context.CancelFunc
+	inboxLiveDone            chan struct{}
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)
