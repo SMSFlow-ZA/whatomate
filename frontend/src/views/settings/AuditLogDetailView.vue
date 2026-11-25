@@ -1,178 +1,231 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useI18n } from 'vue-i18n'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
+import { PageHeader } from '@/components/shared'
+import AuditChanges from '@/components/shared/AuditChanges.vue'
 import { auditLogsService, type AuditLogEntry } from '@/services/api'
+import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
+import {
+  auditContextLabel,
+  auditFailure,
+  auditResourceLink,
+} from '@/lib/auditInvestigation'
 import { formatDateTime, formatLabel } from '@/lib/utils'
-import { ScrollText, Info, ExternalLink, ArrowRight } from 'lucide-vue-next'
+import { ScrollText } from 'lucide-vue-next'
+import '@/assets/inbox.css'
 
-const route = useRoute()
-const { t } = useI18n()
-
-const logId = computed(() => route.params.id as string)
-const log = ref<AuditLogEntry | null>(null)
-const isLoading = ref(true)
-
-const resourceRouteMap: Record<string, (id: string) => string> = {
-  template: (id) => `/templates/${id}`,
-  chatbot_settings: () => `/settings/chatbot`,
-  chatbot_flow: (id) => `/chatbot/flows/${id}`,
-  keyword_rule: (id) => `/chatbot/keywords/${id}`,
-  account: (id) => `/settings/accounts/${id}`,
-  organization: () => `/settings`,
-  user: (id) => `/settings/users/${id}`,
-  role: (id) => `/settings/roles/${id}`,
-  team: (id) => `/settings/teams/${id}`,
-  webhook: () => `/settings/webhooks`,
-  ivr_flow: (id) => `/calling/ivr-flows/${id}`,
-  campaign: (id) => `/campaigns/${id}`,
-  custom_action: () => `/settings/custom-actions`,
-  canned_response: () => `/settings/canned-responses`,
-  api_key: () => `/settings/api-keys`,
-  ai_context: () => `/chatbot/ai`,
-  contact: (id) => `/chat?contact=${id}`,
-  tag: () => `/settings/tags`,
-}
-
-const resourceLink = computed(() => {
-  if (!log.value) return null
-  const fn = resourceRouteMap[log.value.resource_type]
-  return fn ? fn(log.value.resource_id) : null
-})
-
-const title = computed(() => {
-  if (!log.value) return t('auditLogs.title')
-  return `${formatLabel(log.value.resource_type)} ${log.value.action}`
-})
-
-const breadcrumbs = computed(() => [
-  { label: t('nav.settings'), href: '/settings' },
-  { label: t('auditLogs.title'), href: '/settings/audit-logs' },
-  { label: title.value },
-])
-
-function formatValue(val: any): string {
-  if (val === null || val === undefined || val === '') return '—'
-  if (typeof val === 'boolean') return val ? 'Yes' : 'No'
-  if (Array.isArray(val)) {
-    if (val.length === 0) return '—'
-    if (typeof val[0] === 'object' && val[0] !== null) {
-      return val.map(item => item.text || item.name || item.title || JSON.stringify(item)).join(', ')
-    }
-    return val.join(', ') || '—'
+const route = useRoute(),
+  viewer = useInboxViewerContext()
+const log = ref<AuditLogEntry>(),
+  busy = ref(false),
+  failure = ref(''),
+  missing = ref(false)
+const scope = computed(() => JSON.stringify([viewer.value, route.params.id]))
+const resourceLink = computed(() =>
+  log.value ? auditResourceLink(log.value) : undefined,
+)
+const title = computed(() =>
+  log.value
+    ? `${formatLabel(log.value.resource_type)} ${log.value.action}`
+    : 'Audit record',
+)
+let generation = 0
+async function load() {
+  const request = ++generation,
+    context = scope.value,
+    id = String(route.params.id ?? '')
+  log.value = undefined
+  busy.value = true
+  missing.value = false
+  failure.value = ''
+  if (
+    !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(id) ||
+    id === '00000000-0000-0000-0000-000000000000'
+  ) {
+    missing.value = true
+    busy.value = false
+    return
   }
-  if (typeof val === 'object') {
-    if (val.body) return String(val.body)
-    return JSON.stringify(val)
-  }
-  return String(val)
-}
-
-function actionVariant(action: string): string {
-  switch (action) {
-    case 'created': return 'bg-green-500/10 text-green-500 border-green-500/20'
-    case 'updated': return 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-    case 'deleted': return 'bg-red-500/10 text-red-500 border-red-500/20'
-    default: return ''
-  }
-}
-
-onMounted(async () => {
   try {
-    const response = await auditLogsService.get(logId.value)
-    log.value = (response.data as any).data || response.data
-  } catch {
-    // handled by isNotFound
+    const response = await auditLogsService.get(id)
+    if (request !== generation || context !== scope.value) return
+    const result = response.data.data
+    if (result?.id !== id) throw new Error('Mismatched audit record')
+    log.value = result
+  } catch (error) {
+    const message = await auditFailure(error)
+    if (request !== generation || context !== scope.value) return
+    if ((error as { response?: { status?: number } })?.response?.status === 404)
+      missing.value = true
+    else failure.value = message
   } finally {
-    isLoading.value = false
+    if (request === generation && context === scope.value) busy.value = false
   }
-})
+}
+watch(scope, load, { immediate: true, flush: 'sync' })
+onUnmounted(() => generation++)
 </script>
-
 <template>
-  <DetailPageLayout
-    :title="title"
-    :icon="ScrollText"
-    back-link="/settings/audit-logs"
-    :breadcrumbs="breadcrumbs"
-    :is-loading="isLoading"
-    :is-not-found="!isLoading && !log"
-    :not-found-title="t('auditLogs.noLogs')"
-  >
-    <Card v-if="log">
-      <CardHeader class="pb-3">
-        <CardTitle class="text-sm font-medium">{{ t('auditLogs.changes') }}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div v-if="log.changes && log.changes.length > 0" class="space-y-3">
-          <div
-            v-for="(change, idx) in log.changes"
-            :key="idx"
-            class="rounded-md bg-muted/50 px-3 py-2.5"
+  <div class="inbox-ui inbox-page">
+    <PageHeader
+      :title="title"
+      :icon="ScrollText"
+      back-link="/settings/audit-logs"
+      :breadcrumbs="[
+        { label: 'Settings', href: '/settings' },
+        { label: 'Audit logs', href: '/settings/audit-logs' },
+        { label: 'Record details' },
+      ]"
+    />
+    <div class="inbox-page-scroll">
+      <div class="inbox-container space-y-5" :aria-busy="busy">
+        <p v-if="busy" role="status" class="inbox-panel p-5">
+          Loading audit record…
+        </p>
+        <div v-else-if="failure" role="alert" class="inbox-panel p-5 space-y-3">
+          <p>{{ failure }}</p>
+          <Button variant="outline" class="min-h-11" @click="load"
+            >Retry record</Button
           >
-            <span class="text-sm font-medium">{{ formatLabel(change.field) }}</span>
-            <div class="mt-1 text-sm">
-              <template v-if="log.action === 'updated'">
-                <div class="flex items-start gap-2 text-muted-foreground">
-                  <span class="text-red-400 line-through break-words">{{ formatValue(change.old_value) }}</span>
-                  <ArrowRight class="h-4 w-4 shrink-0 mt-0.5" />
-                  <span class="text-green-400 break-words">{{ formatValue(change.new_value) }}</span>
+        </div>
+        <div v-else-if="missing" class="inbox-panel p-5 space-y-2">
+          <h2 class="font-semibold">No readable audit record</h2>
+          <p>
+            This record is unavailable or outside your current access. Return to
+            Audit logs to investigate other records.
+          </p>
+        </div>
+        <template v-else-if="log">
+          <section
+            class="inbox-panel p-5 space-y-3"
+            aria-labelledby="audit-context-title"
+          >
+            <h2 id="audit-context-title" class="font-semibold">
+              {{ auditContextLabel(log) }}
+            </h2>
+            <p v-if="!log.context_available" class="max-w-prose">
+              This historical record does not have supported request, origin or
+              outcome context. No identity or outcome has been inferred from the
+              change history.
+            </p>
+            <p v-else class="max-w-prose">
+              This records what the application observed. A local success does
+              not independently prove an external provider completed an
+              operation.
+            </p>
+            <dl
+              class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 text-sm"
+            >
+              <div>
+                <dt class="text-muted-foreground">Recorded actor</dt>
+                <dd class="mt-1 break-words">
+                  {{ log.user_name
+                  }}<span v-if="log.actor_masked"> · identity restricted</span
+                  ><span
+                    v-else-if="log.context_available && !log.actor_verified"
+                  >
+                    · not an authenticated human actor</span
+                  >
+                </dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">Recorded at</dt>
+                <dd class="mt-1">
+                  {{ formatDateTime(log.created_at) }}
+                  <p class="text-muted-foreground">
+                    UTC: {{ new Date(log.created_at).toISOString() }}
+                  </p>
+                </dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">Resource and action</dt>
+                <dd class="mt-1">
+                  {{ formatLabel(log.resource_type) }} ·
+                  {{ formatLabel(log.action) }}
+                </dd>
+              </div>
+              <template v-if="log.context_available">
+                <div>
+                  <dt class="text-muted-foreground">Event and outcome</dt>
+                  <dd class="mt-1 break-words">
+                    {{ formatLabel(log.event || 'Not recorded') }} ·
+                    {{ formatLabel(log.outcome || 'Not recorded') }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-muted-foreground">Reason</dt>
+                  <dd class="mt-1 break-words">
+                    {{ formatLabel(log.reason || 'Not recorded') }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-muted-foreground">Origin</dt>
+                  <dd class="mt-1 break-all">
+                    {{
+                      log.origin_masked
+                        ? 'Restricted to readers with staff directory access'
+                        : log.origin_ip
+                          ? `${log.origin_ip} (${log.origin_source || 'source unavailable'})`
+                          : 'Not recorded'
+                    }}
+                  </dd>
                 </div>
               </template>
-              <template v-else-if="log.action === 'created'">
-                <span class="text-muted-foreground break-words">{{ formatValue(change.new_value) }}</span>
-              </template>
-              <template v-else>
-                <span class="text-red-400 break-words">{{ formatValue(change.old_value) }}</span>
-              </template>
-            </div>
-          </div>
-        </div>
-        <p v-else class="text-sm text-muted-foreground">{{ t('auditLogs.noChanges') }}</p>
-      </CardContent>
-    </Card>
-
-    <template #sidebar>
-      <Card v-if="log" class="overflow-hidden">
-        <CardHeader class="pb-3">
-          <div class="flex items-center gap-2">
-            <Info class="h-4 w-4 text-muted-foreground" />
-            <CardTitle class="text-sm font-medium">{{ t('common.details', 'Details') }}</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent class="space-y-3 text-sm">
-          <div>
-            <span class="text-muted-foreground text-xs">{{ t('auditLogs.user') }}</span>
-            <p class="font-medium">{{ log.user_name }}</p>
-          </div>
-          <div>
-            <span class="text-muted-foreground text-xs">{{ t('auditLogs.action') }}</span>
-            <div class="mt-0.5">
-              <Badge variant="outline" :class="[actionVariant(log.action), 'text-xs']">
-                {{ t(`auditLogs.${log.action}`) }}
-              </Badge>
-            </div>
-          </div>
-          <div>
-            <span class="text-muted-foreground text-xs">{{ t('auditLogs.resource') }}</span>
-            <p class="font-medium">{{ formatLabel(log.resource_type) }}</p>
-          </div>
-          <div>
-            <span class="text-muted-foreground text-xs">{{ t('auditLogs.date') }}</span>
-            <p>{{ formatDateTime(log.created_at) }}</p>
-          </div>
-          <RouterLink v-if="resourceLink" :to="resourceLink">
-            <Button variant="outline" size="sm" class="w-full mt-2">
-              <ExternalLink class="h-3.5 w-3.5 mr-1.5" />
-              {{ t('auditLogs.viewResource') }}
-            </Button>
-          </RouterLink>
-        </CardContent>
-      </Card>
-    </template>
-  </DetailPageLayout>
+            </dl>
+          </section>
+          <section
+            class="inbox-panel p-5 space-y-4"
+            aria-labelledby="audit-changes"
+          >
+            <h2 id="audit-changes" class="font-semibold">Changes</h2>
+            <AuditChanges :log="log" />
+          </section>
+          <section
+            class="inbox-panel p-5 space-y-4"
+            aria-labelledby="audit-references"
+          >
+            <h2 id="audit-references" class="font-semibold">
+              Investigation references
+            </h2>
+            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt class="text-muted-foreground">Audit record ID</dt>
+                <dd class="font-mono break-all mt-1">{{ log.id }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">Resource ID</dt>
+                <dd class="font-mono break-all mt-1">{{ log.resource_id }}</dd>
+              </div>
+              <template v-if="log.context_available"
+                ><div
+                  v-for="reference in [
+                    { label: 'Request ID', value: log.request_id },
+                    { label: 'Account ID', value: log.account_id },
+                    { label: 'Case ID', value: log.case_id },
+                  ]"
+                  :key="reference.label"
+                >
+                  <dt class="text-muted-foreground">{{ reference.label }}</dt>
+                  <dd class="font-mono break-all mt-1">
+                    {{ reference.value || 'Not recorded' }}
+                  </dd>
+                </div></template
+              >
+            </dl>
+            <RouterLink
+              v-if="resourceLink"
+              :to="resourceLink"
+              class="inline-flex min-h-[44px] items-center underline underline-offset-4"
+              >View resource</RouterLink
+            >
+            <p v-else class="inbox-caption">
+              A current resource link is unavailable. The recorded reference is
+              retained for investigation.
+            </p>
+          </section>
+        </template>
+      </div>
+    </div>
+  </div>
 </template>

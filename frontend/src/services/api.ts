@@ -847,25 +847,69 @@ export interface AuditLogEntry {
   resource_id: string
   user_id: string
   user_name: string
-  action: 'created' | 'updated' | 'deleted'
+  action: 'created' | 'updated' | 'deleted' | 'event'
   changes: AuditLogChange[]
   created_at: string
+  context_available?: boolean
+  context_state?: 'captured' | 'legacy' | 'unsupported'
+  context_version?: number
+  category?: string
+  event?: string
+  outcome?: string
+  reason?: string
+  permission?: string
+  request_id?: string
+  origin_ip?: string
+  origin_source?: string
+  actor_verified?: boolean
+  actor_masked?: boolean
+  origin_masked?: boolean
+  actor_available?: boolean
+  resource_available?: boolean
+  account_id?: string
+  case_id?: string
+}
+
+export interface AuditFilters {
+  resource_type?: string
+  resource_id?: string
+  user_id?: string
+  action?: string
+  from?: string
+  to?: string
+  category?: string
+  event?: string
+  outcome?: string
+  request_id?: string
+  account_id?: string
+  case_id?: string
+  page?: number
+  limit?: number
+  cursor?: string
+}
+export interface AuditPage {
+  audit_logs: AuditLogEntry[]
+  total: number
+  has_more: boolean
+  next_cursor?: string
+  first_cursor: string
+  as_of: string
+  capabilities: { export: boolean; actor_details: boolean }
+}
+export interface AuditChoices {
+  resources: string[]
+  events: string[]
+  outcomes: string[]
+  actors: { id: string; name: string }[]
+  actor_choices_limited: boolean
 }
 
 export const auditLogsService = {
   get: (id: string) =>
-    api.get<AuditLogEntry>(`/audit-logs/${id}`),
-  list: (params?: {
-    resource_type?: string
-    resource_id?: string
-    user_id?: string
-    action?: string
-    from?: string
-    to?: string
-    page?: number
-    limit?: number
-  }) =>
-    api.get<{ audit_logs: AuditLogEntry[]; total: number }>('/audit-logs', { params }),
+    api.get<{ data: AuditLogEntry }>(`/audit-logs/${id}`),
+  list: (params?: AuditFilters) => api.get<{ data: AuditPage }>('/audit-logs', { params }),
+  filters: () => api.get<{ data: AuditChoices }>('/audit-logs/filters'),
+  export: (params: AuditFilters) => api.post('/audit-logs/export', null, { params, responseType: 'blob' }),
 }
 
 export const webhooksService = {

@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  computed,
+  nextTick,
+  onUnmounted,
+  reactive,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
+import { PageHeader, DataTable, type Column } from '@/components/shared'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -11,236 +18,558 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { PageHeader, DataTable, DateRangePicker, type Column } from '@/components/shared'
-import { auditLogsService, type AuditLogEntry } from '@/services/api'
-import { useUsersStore } from '@/stores/users'
-import { useDateRange } from '@/composables/useDateRange'
-import { ScrollText } from 'lucide-vue-next'
-import { formatDate, formatLabel } from '@/lib/utils'
+import { ScrollText, RefreshCw, Download, ChevronDown } from 'lucide-vue-next'
+import {
+  auditLogsService,
+  type AuditChoices,
+  type AuditFilters,
+  type AuditLogEntry,
+} from '@/services/api'
+import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
+import { useAuditPage } from '@/composables/useAuditPage'
+import { useAuditExport } from '@/composables/useAuditExport'
+import { auditContextLabel, auditFailure } from '@/lib/auditInvestigation'
+import { formatDateTime, formatLabel } from '@/lib/utils'
+import '@/assets/inbox.css'
 
-const { t } = useI18n()
-const usersStore = useUsersStore()
-
-const logs = ref<AuditLogEntry[]>([])
-const isLoading = ref(true)
-
-// Pagination
-const currentPage = ref(1)
-const totalItems = ref(0)
-const pageSize = 25
-
-// Sort
-const sortKey = ref('created_at')
-const sortDirection = ref<'asc' | 'desc'>('desc')
-
-// Filters
-const filterUser = ref('all')
-const filterAction = ref('all')
-const filterResourceType = ref('all')
-
-// Date range
+const viewer = useInboxViewerContext(),
+  page = useAuditPage(() => viewer.value)
 const {
-  selectedRange, customDateRange, isDatePickerOpen,
-  dateRange, formatDateRangeDisplay, applyCustomRange: baseApplyCustomRange,
-} = useDateRange()
-
-function applyCustomRange() {
-  baseApplyCustomRange()
-  applyFilter()
-}
-
-watch(selectedRange, (val) => {
-  if (val !== 'custom') applyFilter()
-})
-
-const columns = computed<Column<AuditLogEntry>[]>(() => [
-  { key: 'user_name', label: t('auditLogs.user'), sortable: true },
-  { key: 'action', label: t('auditLogs.action') },
-  { key: 'resource_type', label: t('auditLogs.resource') },
-  { key: 'changes', label: t('auditLogs.changes') },
-  { key: 'created_at', label: t('auditLogs.date'), sortable: true },
+  rows,
+  busy,
+  failure,
+  total,
+  asOf,
+  canExport,
+  position,
+  hasMore,
+  ready,
+  attemptedTarget,
+} = page
+const draft = reactive<Record<string, string>>({}),
+  applied = shallowRef<AuditFilters>({ limit: 25 })
+const choices = shallowRef<AuditChoices>(),
+  choicesError = ref(''),
+  choicesBusy = ref(false)
+const exporter = useAuditExport(
+  () => JSON.stringify([viewer.value, applied.value]),
+  () => canExport.value && !busy.value && !dirty.value,
+)
+const {
+  exporting,
+  error: exportError,
+  notice: exportNotice,
+  cursor: exportCursor,
+  parts: exportParts,
+  retryAvailable: retryExportAvailable,
+} = exporter
+const exportSize = ref('250'),
+  heading = ref<HTMLElement>(),
+  advanced = ref(false)
+let choicesGeneration = 0
+const columns: Column<AuditLogEntry>[] = [
+  { key: 'activity', label: 'Activity' },
+  { key: 'user_name', label: 'Actor' },
+  { key: 'context', label: 'Outcome and context' },
+  { key: 'created_at', label: 'Recorded at' },
+]
+const filterChoices = computed(() => [
+  {
+    key: 'resource_type',
+    label: 'Resource',
+    values: (choices.value?.resources ?? []).map((value) => ({
+      value,
+      label: formatLabel(value),
+    })),
+  },
+  {
+    key: 'action',
+    label: 'Action',
+    values: ['created', 'updated', 'deleted', 'event'].map((value) => ({
+      value,
+      label: formatLabel(value),
+    })),
+  },
+  {
+    key: 'outcome',
+    label: 'Outcome',
+    values: ['success', 'denied', 'failed', 'unavailable'].map((value) => ({
+      value,
+      label: value === 'unavailable' ? 'Not recorded' : formatLabel(value),
+    })),
+  },
+  {
+    key: 'user_id',
+    label: 'Actor',
+    values: (choices.value?.actors ?? []).map((actor) => ({
+      value: actor.id,
+      label: actor.name,
+    })),
+  },
 ])
-
-function handlePageChange(page: number) {
-  currentPage.value = page
-  fetchLogs()
+const identifiers = [
+  { key: 'request_id', label: 'Request ID' },
+  { key: 'account_id', label: 'Account ID' },
+  { key: 'case_id', label: 'Case ID' },
+  { key: 'resource_id', label: 'Resource ID' },
+]
+const dirty = computed(
+  () => JSON.stringify(cleanDraft()) !== JSON.stringify(applied.value),
+)
+function cleanDraft(): AuditFilters {
+  return {
+    limit: 25,
+    ...Object.fromEntries(
+      Object.entries(draft).filter(([, value]) => value && value !== 'all'),
+    ),
+  }
 }
-
-async function fetchLogs() {
-  isLoading.value = true
+function clearExport() {
+  exporter.reset()
+}
+async function loadChoices() {
+  const request = ++choicesGeneration,
+    context = viewer.value
+  choicesBusy.value = true
+  choicesError.value = ''
   try {
-    const { from, to } = dateRange.value
-    const params: Record<string, any> = { page: currentPage.value, limit: pageSize, from, to }
-    if (filterUser.value && filterUser.value !== 'all') params.user_id = filterUser.value
-    if (filterAction.value && filterAction.value !== 'all') params.action = filterAction.value
-    if (filterResourceType.value && filterResourceType.value !== 'all') params.resource_type = filterResourceType.value
-
-    const response = await auditLogsService.list(params)
-    const data = (response.data as any).data || response.data
-    logs.value = data.audit_logs || []
-    totalItems.value = data.total || 0
-  } catch {
-    logs.value = []
-    totalItems.value = 0
+    const response = await auditLogsService.filters()
+    if (request === choicesGeneration && context === viewer.value)
+      choices.value = response.data.data
+  } catch (error) {
+    const message = await auditFailure(error)
+    if (request === choicesGeneration && context === viewer.value)
+      choicesError.value = message
   } finally {
-    isLoading.value = false
+    if (request === choicesGeneration && context === viewer.value)
+      choicesBusy.value = false
   }
 }
-
-function applyFilter() {
-  currentPage.value = 1
-  fetchLogs()
+async function apply(reset = false) {
+  if (reset) for (const key of Object.keys(draft)) delete draft[key]
+  applied.value = cleanDraft()
+  page.reset()
+  clearExport()
+  await page.load(applied.value, 0)
 }
-
-function actionVariant(action: string): string {
-  switch (action) {
-    case 'created': return 'bg-green-500/10 text-green-500 border-green-500/20'
-    case 'updated': return 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-    case 'deleted': return 'bg-red-500/10 text-red-500 border-red-500/20'
-    default: return ''
-  }
+async function move(target: number) {
+  await page.load(applied.value, target)
+  await nextTick()
+  heading.value?.focus()
 }
-
-function changeSummary(log: AuditLogEntry): string {
-  if (!log.changes || log.changes.length === 0) return '—'
-  if (log.action === 'created') return `${log.changes.length} fields set`
-  if (log.action === 'deleted') return `${log.changes.length} fields`
-  return log.changes.map(c => formatLabel(c.field)).join(', ')
+function download(continuation = false) {
+  return continuation
+    ? exporter.next(applied.value, Number(exportSize.value))
+    : exporter.start(applied.value, Number(exportSize.value))
 }
-
-onMounted(async () => {
-  await usersStore.fetchUsers()
-  fetchLogs()
+async function retryResults() {
+  await page.retry(applied.value)
+  await nextTick()
+  heading.value?.focus()
+}
+watch(
+  viewer,
+  () => {
+    choicesGeneration++
+    choices.value = undefined
+    choicesError.value = ''
+    void apply(true)
+    void loadChoices()
+  },
+  { immediate: true, flush: 'sync' },
+)
+onUnmounted(() => {
+  choicesGeneration++
+  clearExport()
 })
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div class="inbox-ui inbox-page">
     <PageHeader
-      :title="t('auditLogs.title')"
-      :description="t('auditLogs.description')"
+      title="Audit logs"
+      description="Investigate recorded changes and security events."
       :icon="ScrollText"
-      icon-gradient="bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-500/20"
     />
-
-    <ScrollArea class="flex-1">
-      <div class="p-6">
-        <div>
-          <Card>
-            <CardHeader>
-              <div class="flex items-center justify-between flex-wrap gap-4">
-                <div>
-                  <CardTitle>{{ t('auditLogs.allActivity') }}</CardTitle>
-                  <CardDescription>{{ t('auditLogs.allActivityDesc') }}</CardDescription>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap">
-                  <Select v-model="filterUser" @update:model-value="applyFilter">
-                    <SelectTrigger class="w-[180px]">
-                      <SelectValue :placeholder="t('auditLogs.allUsers')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{{ t('auditLogs.allUsers') }}</SelectItem>
-                      <SelectItem v-for="user in usersStore.users" :key="user.id" :value="user.id">
-                        {{ user.full_name || user.email }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select v-model="filterAction" @update:model-value="applyFilter">
-                    <SelectTrigger class="w-[140px]">
-                      <SelectValue :placeholder="t('auditLogs.allActions')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{{ t('auditLogs.allActions') }}</SelectItem>
-                      <SelectItem value="created">{{ t('auditLogs.created') }}</SelectItem>
-                      <SelectItem value="updated">{{ t('auditLogs.updated') }}</SelectItem>
-                      <SelectItem value="deleted">{{ t('auditLogs.deleted') }}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select v-model="filterResourceType" @update:model-value="applyFilter">
-                    <SelectTrigger class="w-[180px]">
-                      <SelectValue :placeholder="t('auditLogs.allResources')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{{ t('auditLogs.allResources') }}</SelectItem>
-                      <SelectItem value="account">Account</SelectItem>
-                      <SelectItem value="ai_context">AI Context</SelectItem>
-                      <SelectItem value="campaign">Campaign</SelectItem>
-                      <SelectItem value="chatbot_settings">Chatbot Settings</SelectItem>
-                      <SelectItem value="chatbot_flow">Chatbot Flow</SelectItem>
-                      <SelectItem value="ivr_flow">IVR Flow</SelectItem>
-                      <SelectItem value="keyword_rule">Keyword Rule</SelectItem>
-                      <SelectItem value="team">Team</SelectItem>
-                      <SelectItem value="template">Template</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <DateRangePicker
-                    v-model:selected-range="selectedRange"
-                    v-model:custom-date-range="customDateRange"
-                    v-model:is-date-picker-open="isDatePickerOpen"
-                    :format-date-range-display="formatDateRangeDisplay"
-                    @apply-custom="applyCustomRange"
-                  />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <DataTable
-                :items="logs"
-                :columns="columns"
-                :is-loading="isLoading"
-                :empty-icon="ScrollText"
-                :empty-title="t('auditLogs.noLogs')"
-                :empty-description="t('auditLogs.noLogsDesc')"
-                v-model:sort-key="sortKey"
-                v-model:sort-direction="sortDirection"
-                server-pagination
-                :current-page="currentPage"
-                :total-items="totalItems"
-                :page-size="pageSize"
-                item-name="audit logs"
-                @page-change="handlePageChange"
+    <div class="inbox-page-scroll">
+      <div class="inbox-container space-y-6">
+        <form
+          class="inbox-panel p-4 sm:p-5 space-y-4"
+          aria-label="Audit filters"
+          @submit.prevent="apply()"
+        >
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div
+              v-for="filter in filterChoices"
+              :key="filter.key"
+              class="space-y-1.5"
+            >
+              <label
+                :id="`audit-label-${filter.key}`"
+                class="text-sm font-medium"
+                >{{ filter.label }}</label
               >
-                <template #cell-user_name="{ item: log }">
-                  <div class="py-1">
-                    <RouterLink
-                      :to="`/settings/audit-logs/${log.id}`"
-                      class="font-medium text-inherit no-underline hover:opacity-80"
-                    >
-                      {{ log.user_name }}
-                    </RouterLink>
-                  </div>
-                </template>
+              <Select
+                :model-value="draft[filter.key] || 'all'"
+                @update:model-value="draft[filter.key] = String($event)"
+              >
+                <SelectTrigger
+                  :aria-labelledby="`audit-label-${filter.key}`"
+                  class="w-full min-h-11"
+                  ><SelectValue
+                /></SelectTrigger>
+                <SelectContent
+                  ><SelectItem value="all"
+                    >All
+                    {{
+                      filter.label === 'Actor'
+                        ? 'actors'
+                        : filter.label.toLowerCase() + 's'
+                    }}</SelectItem
+                  >
+                  <SelectItem
+                    v-for="option in filter.values"
+                    :key="option.value"
+                    :value="option.value"
+                    >{{ option.label }}</SelectItem
+                  >
+                </SelectContent>
+              </Select>
+            </div>
+            <label class="space-y-1.5 text-sm font-medium"
+              >From (UTC)<Input
+                v-model="draft.from"
+                type="date"
+                :max="draft.to || undefined"
+                class="inbox-input min-h-11"
+            /></label>
+            <label class="space-y-1.5 text-sm font-medium"
+              >To (UTC, inclusive)<Input
+                v-model="draft.to"
+                type="date"
+                :min="draft.from || undefined"
+                class="inbox-input min-h-11"
+            /></label>
+          </div>
+          <details
+            class="group"
+            :open="advanced"
+            @toggle="advanced = ($event.target as HTMLDetailsElement).open"
+          >
+            <summary
+              class="min-h-11 cursor-pointer flex items-center gap-2 font-medium text-sm"
+            >
+              <ChevronDown
+                aria-hidden="true"
+                class="h-4 w-4 group-open:rotate-180"
+              />
+              <span>More filters · event and identifiers</span>
+            </summary>
+            <div
+              class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pt-2"
+            >
+              <label class="space-y-1.5 text-sm font-medium"
+                >Category
+                <Select
+                  :model-value="draft.category || 'all'"
+                  @update:model-value="draft.category = String($event)"
+                  ><SelectTrigger class="w-full min-h-11" aria-label="Category"
+                    ><SelectValue /></SelectTrigger
+                  ><SelectContent
+                    ><SelectItem value="all">All categories</SelectItem
+                    ><SelectItem value="security">Security</SelectItem
+                    ><SelectItem value="configuration"
+                      >Configuration</SelectItem
+                    ></SelectContent
+                  ></Select
+                >
+              </label>
+              <label class="space-y-1.5 text-sm font-medium"
+                >Event<Input
+                  v-model="draft.event"
+                  placeholder="For example, auth.sign_in"
+                  maxlength="64"
+                  class="inbox-input min-h-11"
+                  list="audit-events"
+              /></label>
+              <datalist id="audit-events">
+                <option
+                  v-for="event in choices?.events"
+                  :key="event"
+                  :value="event"
+                />
+              </datalist>
+              <label
+                v-for="field in identifiers"
+                :key="field.key"
+                class="space-y-1.5 text-sm font-medium"
+                >{{ field.label
+                }}<Input
+                  v-model="draft[field.key]"
+                  placeholder="Paste the exact UUID"
+                  maxlength="36"
+                  class="inbox-input min-h-11"
+              /></label>
+            </div>
+          </details>
+          <p v-if="choicesBusy" role="status" class="inbox-caption">
+            Loading readable filter choices…
+          </p>
+          <div v-if="choicesError" role="alert" class="space-y-2">
+            <p>{{ choicesError }}</p>
+            <Button
+              type="button"
+              variant="outline"
+              class="min-h-11"
+              @click="loadChoices"
+              >Retry filter choices</Button
+            >
+          </div>
+          <p v-if="choices?.actor_choices_limited" class="inbox-caption">
+            Showing the first 100 recorded actors. Use an exact actor ID through
+            the API for other recorded actors.
+          </p>
+          <div class="flex items-center gap-3 flex-wrap">
+            <Button type="submit" :disabled="busy" class="min-h-11"
+              >Apply filters</Button
+            ><Button
+              type="button"
+              variant="ghost"
+              :disabled="busy"
+              class="min-h-11"
+              @click="apply(true)"
+              >Clear filters</Button
+            ><span v-if="dirty" class="inbox-caption"
+              >Filters changed. Apply them to update the results.</span
+            >
+          </div>
+        </form>
 
-                <template #cell-action="{ item: log }">
-                  <div class="py-1">
-                    <Badge variant="outline" :class="[actionVariant(log.action), 'text-xs']">
-                      {{ t(`auditLogs.${log.action}`) }}
-                    </Badge>
-                  </div>
-                </template>
-
-                <template #cell-resource_type="{ item: log }">
-                  <div class="py-1">
-                    <span class="text-sm text-muted-foreground">{{ formatLabel(log.resource_type) }}</span>
-                  </div>
-                </template>
-
-                <template #cell-changes="{ item: log }">
-                  <div class="py-1">
-                    <span class="text-sm text-muted-foreground">{{ changeSummary(log) }}</span>
-                  </div>
-                </template>
-
-                <template #cell-created_at="{ item: log }">
-                  <div class="py-1">
-                    <span class="text-muted-foreground text-sm">{{ formatDate(log.created_at) }}</span>
-                  </div>
-                </template>
+        <section
+          aria-labelledby="audit-results"
+          :aria-busy="busy"
+          class="space-y-3"
+        >
+          <div class="inbox-toolbar">
+            <div>
+              <h2
+                id="audit-results"
+                ref="heading"
+                tabindex="-1"
+                class="font-semibold"
+              >
+                Recorded activity
+              </h2>
+              <p class="inbox-caption">
+                Newest first · <span v-if="busy">Loading record count…</span
+                ><span v-else-if="!ready">Record count unavailable</span
+                ><span v-else
+                  >{{ total }} readable record{{ total === 1 ? '' : 's' }}</span
+                ><span v-if="ready && asOf">
+                  · Snapshot {{ formatDateTime(asOf) }}</span
+                >
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              :disabled="busy || dirty"
+              class="min-h-11"
+              @click="apply()"
+              ><RefreshCw class="mr-2 h-4 w-4" />Refresh</Button
+            >
+          </div>
+          <p class="inbox-caption">
+            Only records you can currently read are shown. Older records may not
+            include identity, request or outcome context.
+          </p>
+          <div v-if="failure" role="alert" class="inbox-panel p-5 space-y-3">
+            <p>{{ failure }}</p>
+            <Button variant="outline" class="min-h-11" @click="retryResults"
+              >Retry page {{ attemptedTarget + 1 }}</Button
+            >
+          </div>
+          <template v-else>
+            <div class="inbox-panel hidden md:block">
+              <DataTable
+                :items="rows"
+                :columns="columns"
+                :is-loading="busy"
+                empty-title="No readable records match these filters"
+                empty-description="Try a wider date range or clear the filters. Missing events may not have been recorded."
+              >
+                <template #cell-activity="{ item: log }"
+                  ><RouterLink
+                    :to="`/settings/audit-logs/${log.id}`"
+                    class="font-medium underline underline-offset-4 break-words"
+                    >{{
+                      log.event
+                        ? formatLabel(log.event)
+                        : `${formatLabel(log.resource_type)} ${log.action}`
+                    }}</RouterLink
+                  >
+                  <p class="inbox-caption mt-1">
+                    {{ formatLabel(log.resource_type) }} ·
+                    {{ formatLabel(log.action) }}
+                  </p></template
+                >
+                <template #cell-user_name="{ item: log }"
+                  ><span>{{ log.user_name }}</span>
+                  <p v-if="log.actor_masked" class="inbox-caption">
+                    Identity restricted
+                  </p></template
+                >
+                <template #cell-context="{ item: log }"
+                  ><span>{{
+                    log.context_available
+                      ? formatLabel(log.outcome || 'Not recorded')
+                      : 'Not recorded'
+                  }}</span>
+                  <p class="inbox-caption mt-1">
+                    {{ auditContextLabel(log) }}
+                  </p></template
+                >
+                <template #cell-created_at="{ item: log }"
+                  ><time :datetime="log.created_at" class="whitespace-nowrap">{{
+                    formatDateTime(log.created_at)
+                  }}</time></template
+                >
               </DataTable>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+            <div class="inbox-panel md:hidden">
+              <div v-if="busy" role="status" class="p-5">
+                Loading audit records…
+              </div>
+              <ul v-else-if="rows.length" class="inbox-list">
+                <li v-for="log in rows" :key="log.id" class="p-4 space-y-2">
+                  <RouterLink
+                    :to="`/settings/audit-logs/${log.id}`"
+                    class="flex min-h-[44px] items-center font-medium underline underline-offset-4 break-words"
+                    >{{
+                      log.event
+                        ? formatLabel(log.event)
+                        : `${formatLabel(log.resource_type)} ${log.action}`
+                    }}</RouterLink
+                  >
+                  <p>
+                    {{ log.user_name }} ·
+                    {{
+                      log.context_available
+                        ? formatLabel(log.outcome || 'Not recorded')
+                        : 'Outcome not recorded'
+                    }}
+                  </p>
+                  <p class="inbox-caption">{{ auditContextLabel(log) }}</p>
+                  <time :datetime="log.created_at" class="inbox-caption">{{
+                    formatDateTime(log.created_at)
+                  }}</time>
+                </li>
+              </ul>
+              <div v-else class="p-5 space-y-2">
+                <h3 class="font-medium">
+                  No readable records match these filters
+                </h3>
+                <p class="inbox-caption">
+                  Try a wider date range or clear the filters. Missing events
+                  may not have been recorded.
+                </p>
+              </div>
+            </div>
+            <nav
+              aria-label="Audit pages"
+              class="flex items-center gap-3 flex-wrap"
+            >
+              <Button
+                variant="outline"
+                :disabled="busy || position === 0 || dirty"
+                class="min-h-11"
+                @click="move(position - 1)"
+                >Previous</Button
+              ><span role="status">Page {{ position + 1 }}</span
+              ><Button
+                variant="outline"
+                :disabled="busy || !hasMore || dirty"
+                class="min-h-11"
+                @click="move(position + 1)"
+                >Next</Button
+              >
+            </nav>
+          </template>
+        </section>
+
+        <section
+          v-if="canExport"
+          aria-labelledby="audit-export"
+          class="inbox-panel p-4 sm:p-5 space-y-3"
+        >
+          <h2 id="audit-export" class="font-semibold">
+            Export readable records
+          </h2>
+          <p class="inbox-caption max-w-prose">
+            CSV files may contain personal data. Store and share them securely.
+            Exports use the applied filters and record server-side generation.
+            Each part contains up to the selected number of rows; further parts
+            use the same snapshot.
+          </p>
+          <div class="flex items-end gap-3 flex-wrap">
+            <label class="space-y-1.5 text-sm font-medium"
+              >Rows per CSV part<Select
+                v-model="exportSize"
+                :disabled="exporting || !!exportCursor"
+                ><SelectTrigger
+                  class="w-36 min-h-11"
+                  aria-label="Rows per CSV part"
+                  ><SelectValue /></SelectTrigger
+                ><SelectContent
+                  ><SelectItem
+                    v-for="size in ['100', '250', '1000']"
+                    :key="size"
+                    :value="size"
+                    >{{ size }}</SelectItem
+                  ></SelectContent
+                ></Select
+              ></label
+            ><Button
+              :disabled="exporting || busy || dirty"
+              class="min-h-11"
+              @click="download(false)"
+              ><Download class="h-4 w-4 mr-2" />{{
+                exporting
+                  ? 'Preparing CSV…'
+                  : exportParts || exportCursor || retryExportAvailable
+                    ? 'Start new CSV export'
+                    : 'Export CSV'
+              }}</Button
+            ><Button
+              v-if="exportCursor"
+              variant="outline"
+              :disabled="exporting || busy || dirty"
+              class="min-h-11"
+              @click="download(true)"
+              >Download next CSV part</Button
+            >
+          </div>
+          <p v-if="exporting" role="status">Preparing readable records…</p>
+          <p v-if="exportNotice" role="status">{{ exportNotice }}</p>
+          <div v-if="exportError" role="alert" class="space-y-2">
+            <p>{{ exportError }}</p>
+            <Button
+              v-if="retryExportAvailable"
+              variant="outline"
+              :disabled="exporting || busy || dirty"
+              class="min-h-11"
+              @click="exporter.retry()"
+              >Retry CSV part {{ exportParts + 1 }}</Button
+            >
+          </div>
+        </section>
       </div>
-    </ScrollArea>
+    </div>
   </div>
 </template>
+
+<style scoped>
+:deep(.inbox-input::placeholder) {
+  color: var(--inbox-muted);
+  opacity: 1;
+}
+</style>
