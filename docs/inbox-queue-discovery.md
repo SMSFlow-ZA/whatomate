@@ -1,9 +1,9 @@
 # Queue ordering and date discovery
 
 The queue-discovery API extends existing inbox filters without changing workflow
-conditions. Sort and date controls are implemented in the existing queue surface;
-their local qualification and combined managed-release acceptance are separate
-gates. Legacy clients without discovery retain their current offset behaviour.
+conditions. Sort and date controls belong to the existing queue and can be saved
+with personal or team views. Legacy clients without discovery retain their
+current offset behaviour.
 
 ## Using queues and dates
 

@@ -55,6 +55,8 @@ point, and keep outbound work held while performing the release's tested paired
 restore and reconciliation procedure. Do not resume exception-enabled cases on
 a binary that ignores their calendar.
 
-This documents the calendar API foundation. Named conditional selection, its
-editor and internal escalation are separate work in progress; this API does
-not enable a rule, customer reply or notification.
+Calendars are part of the immutable versions used by
+[conditional response policies](inbox-response-policies.md). Configure named
+policies and optional internal escalation in the response-policy editor.
+Saving calendar targets does not enable a workflow rule, customer reply or
+internal notification; escalation has its own explicit activation controls.

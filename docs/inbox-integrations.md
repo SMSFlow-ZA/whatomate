@@ -1,6 +1,6 @@
 # Inbox integration contract
 
-This extension is under development. Approved endpoint configuration, definition APIs, durable execution, atomic result application, ordered macro/rule processing, scoped history, explicit idempotent retry, manual outcome/output review, remaining-work cancellation and chained-input review APIs are implemented. Definition/action editing, intent/history and original-operation retry/remaining-work stop reviews are locally qualified. Manual outcome/output review, remaining-sequence resume and feature-disabled emergency-stop screens and full feature acceptance remain outstanding. Do not treat this checkpoint as an accepted customer release or enable live integrations from it.
+Integration actions connect a reviewed inbox workflow to an operator-approved service. Administrators configure definitions; agents review the intended operation and its mapped inputs before execution. Durable history distinguishes success, failure and uncertain outcomes. Separate recovery reviews cover retrying an original operation, recording its outcome, applying returned fields, resuming a remaining sequence and stopping pending work. Availability depends on the instance's configured endpoints and dispatch controls; installing the extension does not activate an integration.
 
 ## Approval and access
 
