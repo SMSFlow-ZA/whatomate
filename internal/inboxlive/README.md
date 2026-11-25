@@ -86,3 +86,12 @@ lookup contexts. HTTP-server startup owns one reconnecting PostgreSQL listener;
 shutdown cancels and waits for it. No message or external action is dispatched by
 an invalidation. Clients must retain independent polling/manual refresh and must
 not overwrite drafts, reviews or selections when applying refresh hints.
+
+Contact/profile/note/message changes invalidate contact metadata without copying
+content. Capacity, assignment-rate, routing and availability changes invalidate
+stable agent/team/account workload resources. Availability covers all current or
+revoked membership scopes, so an old view can clear its stale rows. Role links,
+membership, account and session-authority changes emit generic access resets.
+All changes share the deferred commit boundary, including older SQL writers.
+Aggregate capacity invalidations do not grant the underlying case: team readers
+receive a generic reset, and loads include the same agent's cases across teams.

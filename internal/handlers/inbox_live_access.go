@@ -157,17 +157,77 @@ func inboxLiveScopeMatches(scope inboxlive.WatchScope, hint *inboxlive.Scope) bo
 	return true
 }
 
+func inboxLiveTeamMember(db *gorm.DB, org, team, user uuid.UUID) (bool, error) {
+	var count int64
+	err := db.Model(&models.TeamMember{}).Joins("JOIN teams t ON t.id=team_members.team_id AND t.organization_id=? AND t.deleted_at IS NULL", org).
+		Where("team_members.team_id=? AND team_members.user_id=?", team, user).Count(&count).Error
+	return count > 0, err
+}
+
+func inboxLiveWorkloadMatches(db *gorm.DB, viewer auditViewer, scope inboxlive.WatchScope, hint *inboxlive.Scope) (bool, error) {
+	if hint == nil || (scope.AccountID != nil && (hint.AccountID == nil || *scope.AccountID != *hint.AccountID)) {
+		return false, nil
+	}
+	if scope.TeamID != nil {
+		if hint.AssigneeID != nil {
+			member, err := inboxLiveTeamMember(db, viewer.Org, *scope.TeamID, *hint.AssigneeID)
+			if err != nil || !member {
+				return false, err
+			}
+		} else if hint.TeamID == nil || *hint.TeamID != *scope.TeamID {
+			return false, nil
+		}
+	}
+	if !viewer.has(models.ResourceTeams, models.ActionRead) {
+		if hint.AssigneeID != nil {
+			return *hint.AssigneeID == viewer.User, nil
+		}
+		if hint.TeamID == nil {
+			return false, nil
+		}
+		return inboxLiveTeamMember(db, viewer.Org, *hint.TeamID, viewer.User)
+	}
+	return true, nil
+}
+
 func inboxLiveEventVisible(db *gorm.DB, viewer auditViewer, scope inboxlive.WatchScope, event *inboxlive.Event) (bool, bool, error) {
 	full := viewer.has(models.ResourceContacts, models.ActionRead)
+	if scope.Kind == "capacity" && event.Kind == "case" {
+		// Team-read permits aggregate capacity across the agent's teams, but
+		// never grants that viewer access to the underlying case identity.
+		var current models.InboxCase
+		err := db.Select("account_id,assignee_id").Where("id=? AND organization_id=?", event.ResourceID, viewer.Org).Limit(1).Find(&current).Error
+		if err != nil {
+			return false, false, err
+		}
+		hints := []*inboxlive.Scope{event.Before, event.After}
+		if current.AccountID != uuid.Nil {
+			hints = append(hints, &inboxlive.Scope{AccountID: &current.AccountID, AssigneeID: current.AssigneeID})
+		}
+		for _, hint := range hints {
+			matched, err := inboxLiveWorkloadMatches(db, viewer, scope, hint)
+			if err != nil {
+				return false, false, err
+			}
+			if matched && hint.AssigneeID != nil {
+				return true, true, nil
+			}
+		}
+		return false, false, nil
+	}
 	if event.Kind == "workload" {
 		if scope.Kind != "capacity" && scope.Kind != "workload" && scope.Kind != "supervisor" {
 			return false, false, nil
 		}
 		for _, hint := range []*inboxlive.Scope{event.Before, event.After} {
-			if !inboxLiveScopeMatches(scope, hint) || (!viewer.has(models.ResourceTeams, models.ActionRead) && (hint.AssigneeID == nil || *hint.AssigneeID != viewer.User)) {
+			matched, err := inboxLiveWorkloadMatches(db, viewer, scope, hint)
+			if err != nil {
+				return false, false, err
+			}
+			if !matched {
 				continue
 			}
-			if !full {
+			if !full && scope.Kind != "capacity" {
 				if hint.AccountID == nil {
 					continue // Unknown account cannot expand restricted workload scope.
 				}
@@ -188,6 +248,9 @@ func inboxLiveEventVisible(db *gorm.DB, viewer auditViewer, scope inboxlive.Watc
 	if event.Kind != "case" && event.Kind != "contact" {
 		return false, false, nil
 	}
+	if scope.Kind == "capacity" {
+		return false, false, nil
+	}
 	if scope.Kind == "contact" {
 		return event.Kind == "contact" && event.ResourceID == *scope.ContactID, false, nil
 	}
@@ -204,7 +267,11 @@ func inboxLiveEventVisible(db *gorm.DB, viewer auditViewer, scope inboxlive.Watc
 		q = q.Where("inbox_cases.account_id=?", *scope.AccountID)
 	}
 	if scope.TeamID != nil {
-		q = q.Where("inbox_cases.team_id=?", *scope.TeamID)
+		if scope.Kind == "workload" {
+			q = q.Where("EXISTS (SELECT 1 FROM team_members lm JOIN teams lt ON lt.id=lm.team_id AND lt.organization_id=inbox_cases.organization_id AND lt.deleted_at IS NULL WHERE lm.team_id=? AND lm.user_id=inbox_cases.assignee_id AND lm.deleted_at IS NULL)", *scope.TeamID)
+		} else {
+			q = q.Where("inbox_cases.team_id=?", *scope.TeamID)
+		}
 	}
 	if scope.ContactID != nil {
 		q = q.Where("inbox_cases.contact_id=?", *scope.ContactID)
@@ -219,9 +286,25 @@ func inboxLiveEventVisible(db *gorm.DB, viewer auditViewer, scope inboxlive.Watc
 	if count > 0 {
 		return true, false, nil
 	}
+	if event.Kind == "contact" && scope.CaseID == nil &&
+		(scope.ContactID == nil || *scope.ContactID == event.ResourceID) &&
+		(full || (event.Before != nil && event.Before.AssigneeID != nil && *event.Before.AssigneeID == viewer.User)) {
+		// Contact ownership is an existing contact-level grant, spanning owned
+		// accounts. Clear stale rows after its removal without identifying which
+		// previously visible case moved out of scope.
+		return true, true, nil
+	}
 	// A previously visible assignment moving out of a queue needs a generic
 	// reset. Never send its opaque resource/version or its new destination.
-	if event.Kind == "case" && scope.CaseID == nil && inboxLiveScopeMatches(scope, event.Before) &&
+	beforeMatches := inboxLiveScopeMatches(scope, event.Before)
+	if scope.Kind == "workload" {
+		var err error
+		beforeMatches, err = inboxLiveWorkloadMatches(db, viewer, scope, event.Before)
+		if err != nil {
+			return false, false, err
+		}
+	}
+	if event.Kind == "case" && scope.CaseID == nil && beforeMatches &&
 		(full || (event.Before.AssigneeID != nil && *event.Before.AssigneeID == viewer.User)) {
 		if scope.Kind != "workload" || viewer.has(models.ResourceTeams, models.ActionRead) || (event.Before.AssigneeID != nil && *event.Before.AssigneeID == viewer.User) {
 			return true, true, nil

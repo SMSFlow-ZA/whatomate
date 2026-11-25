@@ -182,6 +182,6 @@ END; $$`).Error; err != nil {
 				return err
 			}
 		}
-		return nil
+		return installContextRevisions(tx)
 	})
 }
