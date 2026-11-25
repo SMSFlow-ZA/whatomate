@@ -41,3 +41,22 @@ concurrency, no-op writes, old SQL writers, listener restart, field privacy,
 transaction coalescing and interleaved case/deadline writes. It also verifies that
 the staging table is empty after commit and internal models serialize without
 routing data.
+
+## Listener lifecycle
+
+`Listen` owns one notification source and a128-update internal queue. Connection
+success, notification loss, invalid payloads and overflow reset its epoch so a
+consumer can resynchronise. A full queue discards obsolete hints and retains a
+reset instead of blocking database reads. Retry delay is bounded; cancellation
+closes the source and output. `PostgresConnector` copies an explicitly supplied
+connection configuration and reports credential-safe categories.
+
+An available connection does not prove a screen is current or authorised. The
+application transport must validate each watch and delivery, detect sequence gaps,
+refresh through scoped APIs and protect drafts/selections. Expose independently
+constructed public frames; the internal `Update` serializes without its fields.
+
+Fake-source tests cover retries, reset ordering, restored lower revisions,
+overflow, invalid payloads and cancellation. The opt-in PostgreSQL test checks
+real commit-only delivery, reconnect after terminating its own uniquely named
+test connection and credential-redacted failures.
