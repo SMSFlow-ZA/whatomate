@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/plan"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -44,6 +46,9 @@ func (a *App) protectSupportUser(r *fastglue.Request, id uuid.UUID) (bool, error
 		return true, r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to verify support protection", nil, "")
 	}
 	if a.isSupportEmail(email) {
+		if org, actor, err := a.getOrgAndUserID(r); err == nil {
+			a.observePrivilegedDenial(r, org, actor, models.ResourceUsers, models.ActionWrite, audit.ProtectedResource)
+		}
 		return true, r.SendErrorEnvelope(fasthttp.StatusForbidden, "Support account is protected", nil, "support_protected")
 	}
 	return false, nil

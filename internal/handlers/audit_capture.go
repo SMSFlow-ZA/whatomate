@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/netip"
 	"time"
@@ -71,6 +72,10 @@ func (a *App) observeSignIn(r *fastglue.Request, orgID, targetID, actorID uuid.U
 }
 
 func (a *App) observeDenial(r *fastglue.Request, orgID, userID uuid.UUID, resource, action string) {
+	a.observePrivilegedDenial(r, orgID, userID, resource, action, audit.PermissionMissing)
+}
+
+func (a *App) observePrivilegedDenial(r *fastglue.Request, orgID, userID uuid.UUID, resource, action string, reason audit.Reason) {
 	// Reject stale session identity instead of attributing denied actions to an
 	// account whose session stamp or membership is no longer current.
 	if claims, ok := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims); ok {
@@ -79,9 +84,19 @@ func (a *App) observeDenial(r *fastglue.Request, orgID, userID uuid.UUID, resour
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if _, err := middleware.CurrentIdentity(a.DB.WithContext(ctx), claims); err != nil {
+		db := a.DB
+		if db != nil {
+			db = db.WithContext(ctx)
+		}
+		if _, err := middleware.CurrentIdentity(db, claims); err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, middleware.ErrSessionRevoked) {
+				if ctx.Err() != nil {
+					err = ctx.Err()
+				}
+				slog.Warn("Security audit identity unavailable", "code", audit.ErrorCode(err))
+			}
 			return
 		}
 	}
-	a.observeSecurity(r, audit.SecurityEvent{OrganizationID: orgID, ResourceID: orgID, ActorID: userID, ResourceType: "permission", Kind: audit.AuthorizationDenied, Outcome: audit.Denied, Reason: audit.PermissionMissing, Permission: resource + ":" + action})
+	a.observeSecurity(r, audit.SecurityEvent{OrganizationID: orgID, ResourceID: orgID, ActorID: userID, ResourceType: "permission", Kind: audit.AuthorizationDenied, Outcome: audit.Denied, Reason: reason, Permission: resource + ":" + action})
 }

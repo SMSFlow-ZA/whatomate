@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func TestSecurityUserUpdates_StaleSnapshotCannotRestoreSecurityState(t *testing.T) {
@@ -21,7 +22,7 @@ func TestSecurityUserUpdates_StaleSnapshotCannotRestoreSecurityState(t *testing.
 			var committed models.User
 			seen := false
 			const hook = "security_concurrent_user_update"
-			require.NoError(t, app.DB.Callback().Update().Before("gorm:update").Register(hook, func(tx *gorm.DB) {
+			commitConcurrent := func(tx *gorm.DB) {
 				if tx.Statement.Table != "users" || seen {
 					return
 				}
@@ -35,8 +36,23 @@ func TestSecurityUserUpdates_StaleSnapshotCannotRestoreSecurityState(t *testing.
 				require.Equal(t, 200, concurrent.RequestCtx.Response.StatusCode())
 				require.NoError(t, app.DB.First(&committed, user.ID).Error)
 				require.NotEmpty(t, committed.AuthStamp)
-			}))
-			defer func() { require.NoError(t, app.DB.Callback().Update().Remove(hook)) }()
+			}
+			if action == "admin-profile" || action == "admin-password" {
+				// These writes now lock the user before their atomic audit. The
+				// legitimate competing request must commit before that lock is
+				// acquired, after the outer credential snapshot was loaded. Calling
+				// it synchronously after the lock would deadlock the test harness.
+				require.NoError(t, app.DB.Callback().Query().Before("gorm:query").Register(hook, func(tx *gorm.DB) {
+					locking, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
+					if ok && locking.Strength == "UPDATE" {
+						commitConcurrent(tx)
+					}
+				}))
+				defer func() { require.NoError(t, app.DB.Callback().Query().Remove(hook)) }()
+			} else {
+				require.NoError(t, app.DB.Callback().Update().Before("gorm:update").Register(hook, commitConcurrent))
+				defer func() { require.NoError(t, app.DB.Callback().Update().Remove(hook)) }()
+			}
 
 			body := map[string]any{"email_notifications": true, "is_available": false, "full_name": "Updated name"}
 			switch action {

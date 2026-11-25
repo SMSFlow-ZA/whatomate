@@ -2,8 +2,9 @@
 
 The audit extension is under development. Current source includes safe diff
 handling, additive provenance, authentication observations, qualified request
-origins and atomic role-change events. Session-revocation/integration hooks,
-scoped investigation/export and their UI remain incomplete. Existing audit read
+origins and atomic role/user/membership events. Integration and initial-identity
+provisioning hooks, scoped
+investigation/export and their UI remain incomplete. Existing audit read
 permissions and response shape are unchanged at this stage; the complete feature
 must qualify resource/account/case scope before release.
 
@@ -67,6 +68,33 @@ commit with their security event in the same transaction. If capture fails, the
 role's fields, permission associations and default changes roll back. Configuration
 diffs remain separate. No existing role-edit permission or authoring semantics are
 expanded by this change.
+
+Administrative user creation/restoration, requested role or authority changes, credential/SSO/
+active-state changes and membership changes also commit with their security
+records. User/membership writes roll back together if their transactional capture
+fails. A no-op membership role update does not invent an authority transition.
+Deletion retains verified ownership evidence; membership removal affects the
+selected organisation, while a native user deletion invalidates that identity.
+An archived identity cannot be claimed from another organisation by reusing its
+email. Restoration compares the deleted state in the write, so a second request
+cannot overwrite credentials from a completed restoration. Native deletion also
+checks the user's organisation at the write boundary.
+
+Redis session fences cannot share a PostgreSQL transaction. The successful
+pre-update fence is a separate `auth.sessions_revoked` observation with reason
+`before_security_update`; it remains true even if the later database change rolls
+back. The committed credential/security change is `user.security_changed`, recorded
+in its database transaction. If the final Redis fence fails, the HTTP request can
+return 503 while the database security stamp and its successful change record
+remain committed. Outcomes describe the recorded operation, not a promise that
+every later step in the HTTP request succeeded. Old stamped sessions remain
+invalid after the committed database change.
+
+Reserved support-user mutation denials use a fixed protected-resource reason;
+they do not include the requested target's email or raw URL. Malformed user-update
+bodies are diagnosed with a fixed code, never by logging password-bearing input.
+Attribution refuses stale or unavailable identity rather than inventing a verified
+actor; genuine identity-storage failures emit a bounded safe diagnostic.
 
 `ResolveOrigin` defaults to the actual socket peer. Forwarding headers count only
 behind an explicitly configured trusted proxy; traversal ends at the first

@@ -19,6 +19,7 @@ const (
 	SignIn              EventKind = "auth.sign_in"
 	SignOut             EventKind = "auth.sign_out"
 	SessionsRevoked     EventKind = "auth.sessions_revoked"
+	UserSecurityChanged EventKind = "user.security_changed"
 	PermissionChanged   EventKind = "permissions.changed"
 	IntegrationChanged  EventKind = "integration.changed"
 	AuthorizationDenied EventKind = "authorization.denied"
@@ -56,6 +57,13 @@ const (
 	RoleDeleted               Reason = "role_deleted"
 	UserRoleChanged           Reason = "user_role_changed"
 	ManualRevocation          Reason = "manual_revocation"
+	BeforeSecurityUpdate      Reason = "before_security_update"
+	SecuritySettingsChanged   Reason = "security_settings_changed"
+	SSOIdentityChanged        Reason = "sso_identity_changed"
+	UserEnabled               Reason = "user_enabled"
+	MembershipAdded           Reason = "membership_added"
+	MembershipRemoved         Reason = "membership_removed"
+	UserAuthorityChanged      Reason = "user_authority_changed"
 	Created                   Reason = "created"
 	ConfigurationChanged      Reason = "configuration_changed"
 	CredentialRotated         Reason = "credential_rotated"
@@ -77,8 +85,9 @@ var ErrConflictingEvent = errors.New("conflicting security audit event")
 var eventReasons = map[EventKind][]Reason{
 	SignIn:              {Password, MicrosoftSSO, FederatedSSO, InvalidCredentials, DisabledAccount, SessionStorageUnavailable, SessionCreationFailed},
 	SignOut:             {SignedOut, AlreadySignedOut, SessionStorageUnavailable},
-	SessionsRevoked:     {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, RoleChanged, ManualRevocation},
-	PermissionChanged:   {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, UserRoleChanged},
+	SessionsRevoked:     {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, MembershipRemoved, RoleChanged, ManualRevocation, BeforeSecurityUpdate, SessionStorageUnavailable},
+	UserSecurityChanged: {PasswordChanged, PasswordReset, UserDisabled, UserEnabled, SSOIdentityChanged, SecuritySettingsChanged},
+	PermissionChanged:   {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, MembershipAdded, MembershipRemoved, UserRoleChanged, UserAuthorityChanged},
 	IntegrationChanged:  {Created, ConfigurationChanged, CredentialRotated, Disabled, Deleted},
 	AuthorizationDenied: {PermissionMissing, ProtectedResource},
 	Exported:            {ExportCompleted},
@@ -146,6 +155,12 @@ func eventAllowed(e SecurityEvent) bool {
 	if e.Kind == SignOut && (e.Outcome == Denied || (e.Outcome == Failed) != (e.Reason == SessionStorageUnavailable)) {
 		return false
 	}
+	if e.Kind == SessionsRevoked && ((e.Outcome == Failed) != (e.Reason == SessionStorageUnavailable)) {
+		return false
+	}
+	if e.Kind == UserSecurityChanged && (e.ResourceType != "user" || e.Outcome != Success) {
+		return false
+	}
 	if e.Kind == Exported && e.Outcome != Success {
 		return false
 	}
@@ -174,7 +189,7 @@ func eventAllowed(e SecurityEvent) bool {
 			if e.ResourceType != "role" {
 				return false
 			}
-		case MembershipChanged, UserRoleChanged:
+		case MembershipChanged, MembershipAdded, MembershipRemoved, UserRoleChanged, UserAuthorityChanged:
 			if e.ResourceType != "user" {
 				return false
 			}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // generalSettingsSnapshot extracts the fields shown on the General tab into a
@@ -627,31 +629,31 @@ func (a *App) AddOrganizationMember(r *fastglue.Request) error {
 		roleID = defaultRole.ID
 	}
 
-	if revive {
-		if err := a.DB.Unscoped().Model(&existing).Updates(map[string]any{
-			"deleted_at": nil,
-			"role_id":    roleID,
-		}).Error; err != nil {
-			if handled, responseErr := a.sendPlanError(r, err); handled {
-				return responseErr
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if revive {
+			result := tx.Unscoped().Model(&existing).Where("deleted_at IS NOT NULL").Updates(map[string]any{"deleted_at": nil, "role_id": roleID})
+			if result.Error != nil {
+				return result.Error
 			}
-			a.Log.Error("Failed to restore organization member", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add member", nil, "")
-		}
-	} else {
-		userOrg := models.UserOrganization{
-			UserID:         targetUser.ID,
-			OrganizationID: orgID,
-			RoleID:         &roleID,
-			IsDefault:      false,
-		}
-		if err := a.DB.Create(&userOrg).Error; err != nil {
-			if handled, responseErr := a.sendPlanError(r, err); handled {
-				return responseErr
+			if result.RowsAffected != 1 {
+				return errAuditUserChanged
 			}
-			a.Log.Error("Failed to add organization member", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add member", nil, "")
+		} else {
+			membership := models.UserOrganization{UserID: targetUser.ID, OrganizationID: orgID, RoleID: &roleID, IsDefault: false}
+			if err := tx.Create(&membership).Error; err != nil {
+				return err
+			}
 		}
+		return a.recordUserSecurity(r, tx, orgID, actorID, targetUser.ID, audit.PermissionChanged, audit.MembershipAdded)
+	}); err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
+		if errors.Is(err, errAuditUserChanged) {
+			return r.SendErrorEnvelope(409, "Membership changed; reload before adding", nil, "")
+		}
+		a.Log.Error("Failed to add organization member", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add member", nil, "")
 	}
 
 	// The member may have had a cached (empty or stale) permission set for this org.
@@ -683,17 +685,16 @@ func (a *App) RemoveOrganizationMember(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot remove yourself from the organization", nil, "")
 	}
 
-	result := a.DB.Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
-		Delete(&models.UserOrganization{})
-	if result.Error != nil {
-		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+	err = a.removeMembershipAuthority(r, orgID, userID, targetUserID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Member not found in this organization", nil, "")
+	}
+	if err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to remove organization member", "error", result.Error)
+		a.Log.Error("Failed to remove organization member", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
-	}
-	if result.RowsAffected == 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Member not found in this organization", nil, "")
 	}
 
 	// Invalidate removed user's permission cache
@@ -737,28 +738,20 @@ func (a *App) UpdateOrganizationMemberRole(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid role", nil, "")
 	}
 
-	var previousRoleID *uuid.UUID
-	var currentMembership models.UserOrganization
-	if err := a.DB.Where("user_id = ? AND organization_id = ?", targetUserID, orgID).First(&currentMembership).Error; err == nil {
-		previousRoleID = currentMembership.RoleID
-	}
-
 	// Update the user's role in this org
 	if handled, responseErr := a.protectSupportUser(r, targetUserID); handled {
 		return responseErr
 	}
-	result := a.DB.Model(&models.UserOrganization{}).
-		Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
-		Update("role_id", req.RoleID)
-	if result.Error != nil {
-		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+	previousRoleID, err := a.updateMembershipAuthority(r, orgID, actorID, targetUserID, req.RoleID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Member not found in this organization", nil, "")
+	}
+	if err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to update member role", "error", result.Error)
+		a.Log.Error("Failed to update member role", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update member role", nil, "")
-	}
-	if result.RowsAffected == 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Member not found in this organization", nil, "")
 	}
 
 	// Invalidate permission cache

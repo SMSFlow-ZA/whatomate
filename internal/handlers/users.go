@@ -2,15 +2,19 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/mail"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserRequest represents the request body for creating/updating a user.
@@ -250,6 +254,7 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 
 	// Validate required fields
 	if a.isSupportEmail(req.Email) {
+		a.observePrivilegedDenial(r, orgID, userID, models.ResourceUsers, models.ActionWrite, audit.ProtectedResource)
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Support account is protected", nil, "support_protected")
 	}
 	if req.Email == "" || req.Password == "" || req.FullName == "" {
@@ -302,40 +307,57 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 	// Check for soft-deleted user with same email and restore them
 	var softDeleted models.User
 	if err := a.DB.Unscoped().Where("email = ? AND deleted_at IS NOT NULL", req.Email).First(&softDeleted).Error; err == nil {
+		// An org administrator cannot take ownership of another org's archived
+		// identity (or revive its historical memberships) by reusing its email.
+		if softDeleted.OrganizationID != orgID {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This email is unavailable; contact your administrator", nil, "")
+		}
 		// Restore with a fresh stamp so previously issued sessions cannot revive.
 		softDeleted.AuthStamp = uuid.NewString()
-		if err := a.DB.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at":      nil,
-			"organization_id": orgID,
-			"password_hash":   string(hashedPassword),
-			"auth_stamp":      softDeleted.AuthStamp,
-			"full_name":       req.FullName,
-			"role_id":         roleID,
-			"is_active":       true,
-			"is_super_admin":  isSuperAdmin,
-		}).Error; err != nil {
+		if err := a.DB.Transaction(func(tx *gorm.DB) error {
+			restored := tx.Unscoped().Model(&softDeleted).Where("deleted_at IS NOT NULL").Updates(map[string]any{
+				"deleted_at":      nil,
+				"organization_id": orgID,
+				"password_hash":   string(hashedPassword),
+				"auth_stamp":      softDeleted.AuthStamp,
+				"full_name":       req.FullName,
+				"role_id":         roleID,
+				"is_active":       true,
+				"is_super_admin":  isSuperAdmin,
+			})
+			if restored.Error != nil {
+				return restored.Error
+			}
+			if restored.RowsAffected != 1 {
+				return errAuditUserChanged
+			}
+			var membership models.UserOrganization
+			lookup := tx.Unscoped().Where("user_id=? AND organization_id=?", softDeleted.ID, orgID).First(&membership).Error
+			if lookup == nil {
+				if err := tx.Unscoped().Model(&membership).Updates(map[string]any{"deleted_at": nil, "role_id": roleID, "is_default": true}).Error; err != nil {
+					return err
+				}
+			} else if errors.Is(lookup, gorm.ErrRecordNotFound) {
+				membership = models.UserOrganization{UserID: softDeleted.ID, OrganizationID: orgID, RoleID: roleID, IsDefault: true}
+				if err := tx.Create(&membership).Error; err != nil {
+					return err
+				}
+			} else {
+				return lookup
+			}
+			if err := a.recordUserSecurity(r, tx, orgID, userID, softDeleted.ID, audit.PermissionChanged, audit.MembershipAdded); err != nil {
+				return err
+			}
+			return a.recordUserSecurity(r, tx, orgID, userID, softDeleted.ID, audit.UserSecurityChanged, audit.SecuritySettingsChanged)
+		}); err != nil {
+			if errors.Is(err, errAuditUserChanged) {
+				return r.SendErrorEnvelope(fasthttp.StatusConflict, "User state changed; reload before restoring", nil, "")
+			}
 			if handled, responseErr := a.sendPlanError(r, err); handled {
 				return responseErr
 			}
-			a.Log.Error("Failed to restore user", "error", err)
+			a.Log.Error("Failed to restore user", "code", audit.ErrorCode(err))
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
-		}
-
-		// Restore or create UserOrganization entry
-		var existingOrg models.UserOrganization
-		if err := a.DB.Unscoped().Where("user_id = ? AND organization_id = ?", softDeleted.ID, orgID).First(&existingOrg).Error; err == nil {
-			a.DB.Unscoped().Model(&existingOrg).Updates(map[string]any{
-				"deleted_at": nil,
-				"role_id":    roleID,
-				"is_default": true,
-			})
-		} else {
-			a.DB.Create(&models.UserOrganization{
-				UserID:         softDeleted.ID,
-				OrganizationID: orgID,
-				RoleID:         roleID,
-				IsDefault:      true,
-			})
 		}
 
 		// Load role for response
@@ -368,27 +390,21 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		IsSuperAdmin:   isSuperAdmin,
 	}
 
-	if err := a.DB.Create(&user).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+		membership := models.UserOrganization{UserID: user.ID, OrganizationID: orgID, RoleID: roleID, IsDefault: true}
+		if err := tx.Create(&membership).Error; err != nil {
+			return err
+		}
+		return a.recordUserSecurity(r, tx, orgID, userID, user.ID, audit.PermissionChanged, audit.MembershipAdded)
+	}); err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to create user", "error", err)
+		a.Log.Error("Failed to create user", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
-	}
-
-	// Create UserOrganization entry
-	userOrg := models.UserOrganization{
-		UserID:         user.ID,
-		OrganizationID: orgID,
-		RoleID:         roleID,
-		IsDefault:      true,
-	}
-	if err := a.DB.Create(&userOrg).Error; err != nil {
-		if handled, responseErr := a.sendPlanError(r, err); handled {
-			return responseErr
-		}
-		a.Log.Error("Failed to create user organization entry", "error", err)
-		// Non-fatal: user was already created
 	}
 
 	// Load role for response
@@ -419,6 +435,7 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		return responseErr
 	}
 	if currentUserID != id && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
+		a.observeDenial(r, orgID, currentUserID, models.ResourceUsers, models.ActionWrite)
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
@@ -452,15 +469,17 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 
 	var req UserRequest
 	if err := r.Decode(&req, "json"); err != nil {
-		a.Log.Error("UpdateUser: Failed to decode request", "error", err, "body", string(r.RequestCtx.PostBody()))
+		a.Log.Error("UpdateUser: Failed to decode request", "code", "invalid_request")
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
 
 	// Only users with users:write permission can change roles
 	if req.RoleID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
+		a.observeDenial(r, orgID, currentUserID, models.ResourceUsers, models.ActionWrite)
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to change roles", nil, "")
 	}
 	if req.SSOConfigID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
+		a.observeDenial(r, orgID, currentUserID, models.ResourceUsers, models.ActionWrite)
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to link SSO identities", nil, "")
 	}
 
@@ -475,10 +494,8 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid role", nil, "")
 		}
 		// Update role in user_organizations only
-		if err := a.DB.Model(&models.UserOrganization{}).
-			Where("user_id = ? AND organization_id = ?", id, orgID).
-			Update("role_id", req.RoleID).Error; err != nil {
-			a.Log.Error("Failed to update member role", "error", err)
+		if _, err := a.updateMembershipAuthority(r, orgID, currentUserID, id, *req.RoleID); err != nil {
+			a.Log.Error("Failed to update member role", "code", audit.ErrorCode(err))
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update member role", nil, "")
 		}
 		a.InvalidateUserPermissionsCache(user.ID)
@@ -539,7 +556,7 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		user.AuthStamp = uuid.NewString()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+		if err := a.fenceUserSecurityUpdate(r, ctx, orgID, currentUserID, user.ID); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
 		}
 	}
@@ -609,21 +626,54 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	if securityChanged {
 		fields = append(fields, "AuthStamp")
 	}
-	query := a.DB.Model(&user).Select(fields)
-	if securityChanged {
-		query = query.Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, oldActive)
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		var before models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&before, "id=? AND organization_id=?", user.ID, orgID).Error; err != nil {
+			return err
+		}
+		query := tx.Model(&user).Select(fields)
+		if securityChanged {
+			query = query.Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, oldActive)
+		}
+		result := query.Updates(&user)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errAuditUserChanged
+		}
+		roleChanged = req.RoleID != nil && !sameAuditRole(before.RoleID, user.RoleID)
+		if roleChanged {
+			if err := tx.Model(&models.UserOrganization{}).Where("user_id=? AND organization_id=?", user.ID, orgID).Update("role_id", user.RoleID).Error; err != nil {
+				return err
+			}
+		}
+		// Compare only authority fields requested by this update; unrelated
+		// profile edits must not invent a stale role/super-admin transition.
+		after := before
+		if req.RoleID != nil {
+			after.RoleID = user.RoleID
+		}
+		if parseSuperAdminField(r) != nil {
+			after.IsSuperAdmin = user.IsSuperAdmin
+		}
+		if err := a.recordUserAuthorityChange(r, tx, orgID, currentUserID, before, after); err != nil {
+			return err
+		}
+		if securityChanged {
+			return a.recordUserSecurity(r, tx, orgID, currentUserID, user.ID, audit.UserSecurityChanged, userSecurityUpdateReason(req, oldActive, currentUserID == user.ID))
+		}
+		return nil
+	})
+	if errors.Is(err, errAuditUserChanged) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
 	}
-	result := query.Updates(&user)
-	if err := result.Error; err != nil {
+	if err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to update user", "error", err)
+		a.Log.Error("Failed to update user", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
-	}
-
-	if securityChanged && result.RowsAffected != 1 {
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
 	}
 
 	// The database stamp remains authoritative even if this Redis write fails.
@@ -639,10 +689,6 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		a.InvalidateUserPermissionsCache(user.ID)
 	}
 	if roleChanged {
-		// Sync role change to UserOrganization for this org
-		a.DB.Model(&models.UserOrganization{}).
-			Where("user_id = ? AND organization_id = ?", user.ID, orgID).
-			Update("role_id", user.RoleID)
 		a.InvalidateUserPermissionsCache(user.ID)
 	}
 
@@ -664,6 +710,7 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 
 	currentUserID, _ := r.RequestCtx.UserValue("user_id").(uuid.UUID)
 	if !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionDelete, orgID) {
+		a.observeDenial(r, orgID, currentUserID, models.ResourceUsers, models.ActionDelete)
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
@@ -696,12 +743,12 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 
 	if isMember {
 		// Cross-org member: only remove from this organization
-		result := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Delete(&models.UserOrganization{})
-		if result.Error != nil {
-			if handled, responseErr := a.sendPlanError(r, result.Error); handled {
+		err := a.removeMembershipAuthority(r, orgID, currentUserID, id)
+		if err != nil {
+			if handled, responseErr := a.sendPlanError(r, err); handled {
 				return responseErr
 			}
-			a.Log.Error("Failed to remove member", "error", result.Error)
+			a.Log.Error("Failed to remove member", "code", audit.ErrorCode(err))
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
 		}
 		a.InvalidateUserPermissionsCache(id)
@@ -729,20 +776,29 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 		}
 	}
 
-	result := a.DB.Where("id = ?", id).Delete(&models.User{})
-	if result.Error != nil {
-		if handled, responseErr := a.sendPlanError(r, result.Error); handled {
-			return responseErr
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id=? AND organization_id=?", id, orgID).Delete(&models.User{})
+		if result.Error != nil {
+			return result.Error
 		}
-		a.Log.Error("Failed to delete user", "error", result.Error)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete user", nil, "")
-	}
-	if result.RowsAffected == 0 {
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := tx.Where("user_id=?", id).Delete(&models.UserOrganization{}).Error; err != nil {
+			return err
+		}
+		return a.recordUserSecurity(r, tx, orgID, currentUserID, id, audit.SessionsRevoked, audit.UserDeleted)
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
 	}
-
-	// Delete all UserOrganization entries for this user
-	a.DB.Where("user_id = ?", id).Delete(&models.UserOrganization{})
+	if err != nil {
+		if handled, responseErr := a.sendPlanError(r, err); handled {
+			return responseErr
+		}
+		a.Log.Error("Failed to delete user", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete user", nil, "")
+	}
 
 	a.logAudit(orgID, currentUserID,
 		"user", id, models.AuditActionDeleted, userAuditSnapshot(&user), nil)
@@ -922,26 +978,33 @@ func (a *App) ChangePassword(r *fastglue.Request) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
+	if err := a.fenceUserSecurityUpdate(r, ctx, user.OrganizationID, userID, user.ID); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Failed to revoke sessions", nil, "")
 	}
 	oldStamp, oldPasswordHash := user.AuthStamp, user.PasswordHash
 	user.PasswordHash = string(hashedPassword)
 	user.AuthStamp = uuid.NewString()
-	result := a.DB.Model(&user).
-		Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, true).
-		Select("PasswordHash", "AuthStamp").Updates(&user)
-	if err := result.Error; err != nil {
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&user).Where("COALESCE(auth_stamp, '') = ? AND password_hash = ? AND is_active = ?", oldStamp, oldPasswordHash, true).Select("PasswordHash", "AuthStamp").Updates(&user)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errAuditUserChanged
+		}
+		return a.recordUserSecurity(r, tx, user.OrganizationID, userID, user.ID, audit.UserSecurityChanged, audit.PasswordChanged)
+	})
+	if errors.Is(err, errAuditUserChanged) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
+	}
+	if err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to update password", "error", err)
+		a.Log.Error("Failed to update password", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change password", nil, "")
 	}
 
-	if result.RowsAffected != 1 {
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "User security state changed; retry the update", nil, "")
-	}
 	// Fence logins that raced between the pre-save revocation and DB update.
 	// AuthStamp already invalidates them if storage fails here.
 	if err := middleware.RevokeUserSessions(ctx, a.Redis, user.ID); err != nil {
