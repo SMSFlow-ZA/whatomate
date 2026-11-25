@@ -112,6 +112,13 @@ func createCustomSSOProvider(t *testing.T, app *handlers.App, orgID uuid.UUID, f
 
 func TestApp_GetPublicSSOProviders_DedupsByType(t *testing.T) {
 	app := newSSOApp(t)
+	// This endpoint intentionally discovers enabled provider types across all
+	// organisations. Isolate its global fixture from providers created by other
+	// callback/security tests, and roll back without changing their state.
+	app.DB = app.DB.Begin()
+	require.NoError(t, app.DB.Error)
+	t.Cleanup(func() { require.NoError(t, app.DB.Rollback().Error) })
+	require.NoError(t, app.DB.Model(&models.SSOProvider{}).Where("is_enabled", true).Update("is_enabled", false).Error)
 	org1 := testutil.CreateTestOrganization(t, app.DB)
 	org2 := testutil.CreateTestOrganization(t, app.DB)
 	// Two different orgs both have google enabled — should appear once.
