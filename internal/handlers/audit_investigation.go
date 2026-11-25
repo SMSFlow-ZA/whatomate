@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
 )
@@ -62,6 +63,10 @@ func auditResponse(row auditReadRow, v auditViewer) AuditLogResponse {
 	}
 	if entry.ResourceType == "inbox_case" && !v.has(models.ResourceContacts, models.ActionRead) {
 		response.Changes = models.JSONBArray{}
+	}
+	if v.MaskPhones {
+		response.UserName = utils.MaskIfPhoneNumber(response.UserName)
+		response.Changes = maskAuditPhones(response.Changes)
 	}
 	return response
 }
@@ -193,7 +198,7 @@ func (a *App) listScopedAuditLogs(r *fastglue.Request) error {
 		last := rows[len(rows)-1]
 		next = position.next(last.CreatedAt, last.ID)
 	}
-	return r.SendEnvelope(map[string]any{"audit_logs": response, "total": total, "page": filters.Page, "limit": filters.Limit, "total_pages": (total + int64(filters.Limit) - 1) / int64(filters.Limit), "has_more": more, "next_cursor": next, "as_of": position.AsOf, "capabilities": auditCapabilities(viewer)})
+	return r.SendEnvelope(map[string]any{"audit_logs": response, "total": total, "page": filters.Page, "limit": filters.Limit, "total_pages": (total + int64(filters.Limit) - 1) / int64(filters.Limit), "has_more": more, "next_cursor": next, "first_cursor": position.first(), "as_of": position.AsOf, "capabilities": auditCapabilities(viewer)})
 }
 
 func (a *App) getScopedAuditLog(r *fastglue.Request) error {
@@ -285,6 +290,9 @@ func (a *App) ListAuditLogFilters(r *fastglue.Request) error {
 		actors = actors[:100]
 	}
 	for i := range actors {
+		if viewer.MaskPhones {
+			actors[i].Name = utils.MaskIfPhoneNumber(actors[i].Name)
+		}
 		if actors[i].ID == uuid.Nil {
 			actors[i].Name = "System or unverified actor"
 		} else if !viewer.has(models.ResourceUsers, models.ActionRead) {

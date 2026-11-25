@@ -193,6 +193,7 @@ func (f auditFilters) apply(q *gorm.DB) *gorm.DB {
 }
 
 type auditCursor struct {
+	First  bool      `json:"first,omitempty"`
 	At     time.Time `json:"at"`
 	ID     uuid.UUID `json:"id"`
 	AsOf   time.Time `json:"as_of"`
@@ -223,7 +224,11 @@ func (f auditFilters) position(v auditViewer, now time.Time) (auditCursor, error
 	if decoder.Decode(&extra) != io.EOF {
 		return position, errAuditInput
 	}
-	if position.ID == uuid.Nil || position.At.IsZero() || position.AsOf.IsZero() || position.At.After(position.AsOf) || position.AsOf.After(now.Add(time.Second)) || position.Filter != f.signature(v) {
+	invalidBoundary := position.ID == uuid.Nil || position.At.IsZero() || position.At.After(position.AsOf)
+	if position.First {
+		invalidBoundary = position.ID != uuid.Nil || !position.At.IsZero()
+	}
+	if invalidBoundary || position.AsOf.IsZero() || position.AsOf.After(now.Add(time.Second)) || position.Filter != f.signature(v) {
 		return position, errAuditInput
 	}
 	return position, nil
@@ -231,6 +236,13 @@ func (f auditFilters) position(v auditViewer, now time.Time) (auditCursor, error
 
 func (p auditCursor) next(at time.Time, id uuid.UUID) string {
 	p.At, p.ID = at, id
+	p.First = false
+	b, _ := json.Marshal(p)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func (p auditCursor) first() string {
+	p.First, p.At, p.ID = true, time.Time{}, uuid.Nil
 	b, _ := json.Marshal(p)
 	return base64.RawURLEncoding.EncodeToString(b)
 }

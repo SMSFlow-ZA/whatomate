@@ -28,6 +28,7 @@ type auditViewer struct {
 	Role, Membership *uuid.UUID
 	Stamp            string
 	Super            bool
+	MaskPhones       bool
 	Permissions      map[string]bool
 }
 
@@ -40,7 +41,7 @@ func (v auditViewer) fingerprint() string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	b, _ := json.Marshal([]any{v.Org, v.User, v.Role, v.Membership, v.Stamp, v.Super, keys})
+	b, _ := json.Marshal([]any{v.Org, v.User, v.Role, v.Membership, v.Stamp, v.Super, v.MaskPhones, keys})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
@@ -69,12 +70,13 @@ func loadAuditViewer(db *gorm.DB, org, user uuid.UUID, claims *middleware.JWTCla
 		return v, errAuditUnauthenticated
 	}
 	var organization models.Organization
-	if err := db.Select("id").First(&organization, "id=?", org).Error; err != nil {
+	if err := db.Select("id,settings").First(&organization, "id=?", org).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return v, errAuditForbidden
 		}
 		return v, err
 	}
+	v.MaskPhones, _ = organization.Settings["mask_phone_numbers"].(bool)
 	v.Stamp, v.Super = person.AuthStamp, person.IsSuperAdmin
 	if v.Super {
 		return v, nil
@@ -122,6 +124,7 @@ type auditResourceSpec struct {
 // A missing target can use verified typed ownership, never a guessed legacy ID.
 var auditResourceSpecs = []auditResourceSpec{
 	{"user", models.ResourceUsers, models.ActionRead, "users", "user", []audit.EventKind{audit.SignIn, audit.SignOut, audit.SessionsRevoked, audit.UserSecurityChanged, audit.PermissionChanged, audit.IdentityProvisioned}},
+	{"api_key", models.ResourceAPIKeys, models.ActionRead, "api_keys", "", nil},
 	{"organization_member", models.ResourceUsers, models.ActionRead, "users", "user", nil},
 	{"role", models.ResourceRoles, models.ActionRead, "custom_roles", "", []audit.EventKind{audit.PermissionChanged}},
 	{"account", models.ResourceAccounts, models.ActionRead, "whatsapp_accounts", "", []audit.EventKind{audit.IntegrationChanged, audit.RegistrationUpdated}},
@@ -142,6 +145,8 @@ var auditResourceSpecs = []auditResourceSpec{
 	{"canned_response", models.ResourceCannedResponses, models.ActionRead, "canned_responses", "", nil},
 	{"ivr_flow", models.ResourceIVRFlows, models.ActionRead, "ivr_flows", "", nil},
 	{"organization", models.ResourceOrganizations, models.ActionRead, "organizations", "organization", nil},
+	{models.ResourceSettingsGeneral, models.ResourceSettingsGeneral, models.ActionRead, "organizations", "organization", nil},
+	{models.ResourceSettingsCalling, models.ResourceSettingsGeneral, models.ActionRead, "organizations", "organization", nil},
 	{models.ResourceSettingsNotification, models.ResourceSettingsNotification, models.ActionRead, "users", "self", nil},
 	{models.ResourceSettingsChatbot, models.ResourceSettingsChatbot, models.ActionRead, "chatbot_settings", "settings", nil},
 	{models.ResourceSettingsChatbotMessages, models.ResourceSettingsChatbot, models.ActionRead, "chatbot_settings", "settings", nil},

@@ -217,8 +217,12 @@ availability flags do not grant access to another API.
 
 Responses keep existing fields and add captured/legacy/unsupported context,
 masking and availability flags, capabilities, `as_of`, `has_more` and
-`next_cursor`. Zero-version rows never acquire an inferred IP, request ID, outcome
-or verified actor. Sensitive diffs are sanitized on every read. Oversized or
+`next_cursor` and `first_cursor`. Zero-version rows never acquire an inferred IP, request ID, outcome
+or verified actor. Sensitive diffs are sanitized on every read. The selected
+organisation's current phone-masking policy also applies to diff values and
+recorded phone-like labels, including CSV. Changing that policy invalidates an
+export's authority fingerprint; stored historical values are not rewritten.
+Oversized or
 invalid-shape historical diffs are replaced in the query result with an
 unavailable marker before decoding; stored history is unchanged.
 
@@ -235,7 +239,11 @@ Lists retain valid page/limit requests (50 by default, 100 maximum). Cursor pagi
 uses descending creation time/record ID, a fixed first-page time boundary and the
 same viewer/filter context. A cursor is only a position, never an access grant.
 Changing filters or viewer requires restarting paging; every request rechecks
-current access. `GET /api/audit-logs/filters` returns scoped choices, not a staff
+current access. The returned first-page cursor retains the snapshot when navigating
+back to the beginning; omitting a cursor explicitly starts a fresh snapshot.
+Failed page navigation retries the attempted page rather than moving back to a
+different successful page. Unknown counts are displayed as unavailable, never
+as zero. `GET /api/audit-logs/filters` returns scoped choices, not a staff
 directory. Actor choices are explicitly limited to 100, with a limit indicator.
 Storage failures produce a recoverable error and a server-owned support reference,
 not an empty successful result or a guessed not-found response.
@@ -260,3 +268,34 @@ read access receive it. Creation/grant is transactional. Later explicit removals
 survive startup, and custom roles/managers are not silently promoted. Additive
 organisation/time/ID and organisation/actor/time/ID indexes support investigation.
 No new retention period, entitlement or tamper-proof guarantee is introduced.
+
+### Using the investigation screens
+
+Open **Settings → Audit logs**. Choose a resource, action, outcome or recorded
+actor, and optionally a UTC date range. **More filters** accepts an event or exact
+request, account, case and resource IDs. Select **Apply filters** to replace the
+results. Unapplied edits never silently change an export. **Clear filters** starts
+again, and **Refresh** starts a fresh snapshot rather than rearranging a page.
+
+Results are newest first. **Previous** and **Next** retain the snapshot while
+current permissions are rechecked for each request. Open an activity to see
+recorded facts, old/new values and investigation references. Legacy context is
+explicitly unavailable. A retained resource reference does not mean its current
+screen is accessible; a resource link appears only for a supported, available
+target. Resource Activity log panels use the same scoped history and paging.
+
+Readers with the additional export permission see **Export readable records**.
+Choose 100, 250 or 1000 rows per CSV part, then **Export CSV**. If more records
+remain, use **Download next CSV part** until the completion notice appears.
+**Retry CSV part** repeats the failed continuation using the same cursor and
+page size. **Start new CSV export** deliberately starts from the beginning.
+Generation is recorded even if
+the browser cannot save the file. Keep downloaded personal data secure and follow
+your organisation's retention/access policy. Permission changes or an export
+that is too large require a fresh or narrower request; no partial successful
+export is substituted for an error.
+
+Filters, results and details have distinct loading/retry states. An unavailable
+database is not reported as no activity. Changing viewer or organisation clears
+the old records and export controls; a late response cannot restore them. The
+browser uses readable recorded actor choices rather than retrieving all users.

@@ -199,7 +199,8 @@ func TestInboxAuditCaptureDeadlineCancelsBlockedStorageWithoutPartialEvent(t *te
 
 func TestInboxAuditLegacyReadRedactsWithoutRewritingStoredHistory(t *testing.T) {
 	f := newInboxAuditFixture(t)
-	row := models.AuditLog{OrganizationID: f.org.ID, ResourceType: "account", ResourceID: uuid.New(), UserID: f.user.ID, UserName: "Synthetic operator", Action: models.AuditActionUpdated, Changes: models.JSONBArray{map[string]any{"field": "access_token", "old_value": "synthetic-old-secret", "new_value": "synthetic-new-secret"}, map[string]any{"field": "name", "old_value": "Old label", "new_value": "New label"}}}
+	account := testutil.CreateTestWhatsAppAccount(t, f.db, f.org.ID)
+	row := models.AuditLog{OrganizationID: f.org.ID, ResourceType: "account", ResourceID: account.ID, UserID: f.user.ID, UserName: "Synthetic operator", Action: models.AuditActionUpdated, Changes: models.JSONBArray{map[string]any{"field": "access_token", "old_value": "synthetic-old-secret", "new_value": "synthetic-new-secret"}, map[string]any{"field": "name", "old_value": "Old label", "new_value": "New label"}}}
 	require.NoError(t, f.db.Create(&row).Error)
 	for _, detail := range []bool{false, true} {
 		r := testutil.NewGETRequest(t)

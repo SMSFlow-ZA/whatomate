@@ -66,6 +66,65 @@ func auditPage(t *testing.T, f inboxAuditFixture, params map[string]string) (*fa
 	return r, response.Data.AuditLogs, response.Data.Total, response.Data.Next
 }
 
+func TestInboxAuditInvestigationPreservesExistingSettingsAndKeyActivityScopes(t *testing.T) {
+	f := auditReaderFixture(t, "audit_logs:read", "settings.general:read", "api_keys:read")
+	key := models.APIKey{OrganizationID: f.org.ID, UserID: f.user.ID, Name: "Synthetic key target", KeyPrefix: "fixture", KeyHash: "not-a-real-credential"}
+	require.NoError(t, f.db.Create(&key).Error)
+	for _, resource := range []struct {
+		kind string
+		id   uuid.UUID
+	}{{"api_key", key.ID}, {"settings.general", f.org.ID}, {"settings.calling", f.org.ID}} {
+		row := models.AuditLog{OrganizationID: f.org.ID, ResourceType: resource.kind, ResourceID: resource.id, UserID: f.user.ID, UserName: "Synthetic operator", Action: models.AuditActionUpdated}
+		require.NoError(t, f.db.Create(&row).Error)
+	}
+	_, rows, total, _ := auditPage(t, f, nil)
+	require.Len(t, rows, 3)
+	require.EqualValues(t, 3, total)
+	for _, row := range rows {
+		require.True(t, row.ResourceAvailable)
+	}
+	foreign := testutil.CreateTestOrganization(t, f.db)
+	for _, kind := range []string{"settings.general", "settings.calling"} {
+		row := models.AuditLog{OrganizationID: f.org.ID, ResourceType: kind, ResourceID: foreign.ID, UserID: f.user.ID, Action: models.AuditActionUpdated}
+		require.NoError(t, f.db.Create(&row).Error)
+	}
+	_, rows, total, _ = auditPage(t, f, nil)
+	require.Len(t, rows, 3)
+	require.EqualValues(t, 3, total, "an organisation field alone cannot make an unrelated settings target readable")
+}
+
+func TestInboxAuditInvestigationHonoursFreshPhoneMaskingOnReadsAndCSV(t *testing.T) {
+	f := auditReaderFixture(t, "audit_logs:read", "audit_logs:export", "contacts:read")
+	row := auditOwnedContactRow(t, f, time.Now().Add(-time.Hour))
+	const phone = "+27820001234"
+	require.NoError(t, f.db.Model(&row).Updates(map[string]any{"user_name": phone, "changes": models.JSONBArray{
+		map[string]any{"field": "phone_number", "old_value": phone, "new_value": "[redacted]"},
+		map[string]any{"field": "profile", "new_value": map[string]any{"phone_number": phone, "name": phone, "label": "Synthetic label"}},
+	}}).Error)
+	require.NoError(t, f.db.Model(&models.Organization{}).Where("id=?", f.org.ID).Update("settings", models.JSONB{"mask_phone_numbers": true}).Error)
+	r, rows, _, _ := auditPage(t, f, nil)
+	require.Len(t, rows, 1)
+	require.NotContains(t, string(r.RequestCtx.Response.Body()), phone)
+	require.Contains(t, string(r.RequestCtx.Response.Body()), "1234")
+	require.Contains(t, string(r.RequestCtx.Response.Body()), "[redacted]")
+	detail := auditInvestigationRequest(t, f, nil)
+	testutil.SetPathParam(detail, "id", row.ID.String())
+	require.NoError(t, f.app.GetAuditLog(detail))
+	require.NotContains(t, string(detail.RequestCtx.Response.Body()), phone)
+	export := auditInvestigationRequest(t, f, map[string]string{"resource_type": "contact"})
+	require.NoError(t, f.app.ExportAuditLogs(export))
+	require.Equal(t, 200, export.RequestCtx.Response.StatusCode())
+	require.NotContains(t, string(export.RequestCtx.Response.Body()), phone)
+	var stored models.AuditLog
+	require.NoError(t, f.db.First(&stored, "id=?", row.ID).Error)
+	bytes, err := json.Marshal(stored.Changes)
+	require.NoError(t, err)
+	require.Contains(t, string(bytes), phone)
+	require.NoError(t, f.db.Model(&models.Organization{}).Where("id=?", f.org.ID).Update("settings", models.JSONB{"mask_phone_numbers": false}).Error)
+	r, _, _, _ = auditPage(t, f, map[string]string{"resource_type": "contact"})
+	require.Contains(t, string(r.RequestCtx.Response.Body()), phone, "reads use current policy, not the previous cached setting")
+}
+
 func TestInboxAuditInvestigationUsesFreshRoleAndUnderlyingResourcePermission(t *testing.T) {
 	f := auditReaderFixture(t, "audit_logs:read", "contacts:read")
 	row := auditOwnedContactRow(t, f, time.Now().Add(-time.Minute))
@@ -260,6 +319,13 @@ func TestInboxAuditInvestigationStrictFiltersStablePagingAndCompleteDateBoundari
 	require.EqualValues(t, 3, total)
 	require.Len(t, rows, 2)
 	require.NotEmpty(t, cursor)
+	var start struct {
+		Data struct {
+			First string `json:"first_cursor"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(r.RequestCtx.Response.Body(), &start))
+	require.NotEmpty(t, start.Data.First)
 	seen := map[uuid.UUID]bool{}
 	for _, row := range rows {
 		seen[row.ID] = true
@@ -271,6 +337,13 @@ func TestInboxAuditInvestigationStrictFiltersStablePagingAndCompleteDateBoundari
 	require.EqualValues(t, 3, total)
 	require.Empty(t, next)
 	require.False(t, seen[rows[0].ID])
+	r, rows, total, _ = auditPage(t, f, map[string]string{"limit": "2", "cursor": start.Data.First})
+	require.Equal(t, 200, r.RequestCtx.Response.StatusCode())
+	require.EqualValues(t, 3, total, "returning to the first page keeps the original snapshot")
+	require.Len(t, rows, 2)
+	for _, row := range rows {
+		require.True(t, seen[row.ID], "a new arrival cannot move the first page during navigation")
+	}
 	r, _, _, _ = auditPage(t, f, map[string]string{"cursor": cursor, "resource_type": "contact"})
 	require.Equal(t, 400, r.RequestCtx.Response.StatusCode(), "cursor must bind filters")
 	duplicate := auditInvestigationRequest(t, f, nil)
@@ -367,7 +440,7 @@ func TestInboxAuditExportUsesSameScopeEscapesCSVAndPagesWithoutRepeats(t *testin
 }
 
 func TestInboxAuditExportRefusesMissingPermissionRevocationAndCaptureFailure(t *testing.T) {
-	for _, mode := range []string{"permission", "revoked_during_read", "case_reassigned", "capture_failure"} {
+	for _, mode := range []string{"permission", "revoked_during_read", "case_reassigned", "phone_policy_changed", "capture_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			keys := []string{"audit_logs:read", "contacts:read"}
 			if mode != "permission" {
@@ -389,11 +462,15 @@ func TestInboxAuditExportRefusesMissingPermissionRevocationAndCaptureFailure(t *
 			if mode == "capture_failure" {
 				failIntegrationCapture(t, f, audit.Exported)
 			}
-			if mode == "revoked_during_read" || mode == "case_reassigned" {
+			if mode == "revoked_during_read" || mode == "case_reassigned" || mode == "phone_policy_changed" {
 				var once atomic.Bool
 				name := "audit_export_revoke_" + uuid.NewString()
 				require.NoError(t, f.db.Callback().Row().After("gorm:row").Register(name, func(db *gorm.DB) {
 					if db.Statement.Table != "audit_logs" || once.Swap(true) {
+						return
+					}
+					if mode == "phone_policy_changed" {
+						require.NoError(t, f.db.Model(&models.Organization{}).Where("id=?", f.org.ID).Update("settings", models.JSONB{"mask_phone_numbers": true}).Error)
 						return
 					}
 					if mode == "case_reassigned" {
@@ -413,7 +490,7 @@ func TestInboxAuditExportRefusesMissingPermissionRevocationAndCaptureFailure(t *
 			if mode == "capture_failure" {
 				want = 503
 			}
-			if mode == "case_reassigned" {
+			if mode == "case_reassigned" || mode == "phone_policy_changed" {
 				want = 409
 			}
 			require.Equal(t, want, r.RequestCtx.Response.StatusCode())
