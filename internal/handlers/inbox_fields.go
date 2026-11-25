@@ -17,6 +17,7 @@ import (
 )
 
 var errRequiredInboxFields = errors.New("complete the required fields before resolving")
+var errInboxFieldRevision = errors.New("field definition changed; reload before saving")
 
 func (a *App) ListInboxFieldDefinitions(r *fastglue.Request) error {
 	org, user, ok := a.inboxFeatureAuth(r, models.ActionRead)
@@ -40,7 +41,12 @@ func (a *App) ListInboxFieldDefinitions(r *fastglue.Request) error {
 	if err := q.Order("archived_at NULLS FIRST, label, id").Find(&definitions).Error; err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"definitions": definitions})
+	response := make([]inboxFieldDefinitionResponse, len(definitions))
+	authoring := a.HasPermission(user, models.ResourceSettingsGeneral, models.ActionWrite, org)
+	for i, d := range definitions {
+		response[i] = inboxFieldDefinitionResult(d, authoring)
+	}
+	return r.SendEnvelope(map[string]any{"definitions": response})
 }
 
 func (a *App) CreateInboxFieldDefinition(r *fastglue.Request) error {
@@ -48,18 +54,24 @@ func (a *App) CreateInboxFieldDefinition(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	var input models.InboxFieldDefinition
+	var input struct {
+		models.InboxFieldDefinition
+		RequiredWhen *models.InboxFieldRequirement `json:"required_when"`
+	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
 	}
 	d := models.InboxFieldDefinition{BaseModel: models.BaseModel{ID: uuid.New()},
 		OrganizationID: org, Scope: input.Scope, Key: input.Key, Label: strings.TrimSpace(input.Label),
-		Description: strings.TrimSpace(input.Description), Kind: input.Kind, Options: input.Options, RequiredOnResolve: input.RequiredOnResolve}
+		Description: strings.TrimSpace(input.Description), Kind: input.Kind, Options: input.Options, RequiredOnResolve: input.RequiredOnResolve, RequiredWhen: input.RequiredWhen}
 	if err := d.Validate(); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		if err := lockInboxFieldDefinitions(tx, org); err != nil {
+			return err
+		}
+		if err := validateInboxFieldRequirement(tx, d); err != nil {
 			return err
 		}
 		var existing int64
@@ -75,7 +87,7 @@ func (a *App) CreateInboxFieldDefinition(r *fastglue.Request) error {
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"definition": d})
+	return r.SendEnvelope(map[string]any{"definition": inboxFieldDefinitionResult(d, true)})
 }
 
 func lockInboxFieldDefinitions(tx *gorm.DB, org uuid.UUID) error {
@@ -93,16 +105,18 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 		return nil
 	}
 	var input struct {
-		Description       *string `json:"description"`
-		Label             *string `json:"label"`
-		RequiredOnResolve *bool   `json:"required_on_resolve"`
-		Archive           bool    `json:"archive"`
+		Revision          *int64          `json:"revision"`
+		Description       *string         `json:"description"`
+		Label             *string         `json:"label"`
+		RequiredOnResolve *bool           `json:"required_on_resolve"`
+		RequiredWhen      json.RawMessage `json:"required_when"`
+		Archive           bool            `json:"archive"`
 	}
 	if a.decodeRequest(r, &input) != nil {
 		return nil
 	}
 	var d models.InboxFieldDefinition
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		if err := lockInboxFieldDefinitions(tx, org); err != nil {
 			return err
 		}
@@ -111,6 +125,11 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 		}
 		if d.ArchivedAt != nil {
 			return errInboxConflict
+		}
+		// Legacy non-conditional updates remain compatible. New conditional
+		// editors must identify the exact definition they reviewed.
+		if (input.Revision != nil && *input.Revision != d.Revision) || (len(input.RequiredWhen) > 0 && input.Revision == nil) {
+			return errInboxFieldRevision
 		}
 		if input.Archive {
 			now := time.Now().UTC()
@@ -125,15 +144,24 @@ func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
 		if input.RequiredOnResolve != nil {
 			d.RequiredOnResolve = *input.RequiredOnResolve
 		}
+		if len(input.RequiredWhen) > 0 {
+			if json.Unmarshal(input.RequiredWhen, &d.RequiredWhen) != nil {
+				return errInboxTransition
+			}
+			if err := validateInboxFieldRequirement(tx, d); err != nil {
+				return err
+			}
+		}
 		if err := d.Validate(); err != nil {
 			return errInboxTransition
 		}
+		d.Revision++
 		return tx.Save(&d).Error
 	})
 	if err != nil {
 		return a.inboxError(r, err)
 	}
-	return r.SendEnvelope(map[string]any{"definition": d})
+	return r.SendEnvelope(map[string]any{"definition": inboxFieldDefinitionResult(d, true)})
 }
 
 type inboxFieldSubject struct {
@@ -293,12 +321,11 @@ func emptyInboxField(value json.RawMessage) bool {
 }
 
 func checkInboxRequiredFields(tx *gorm.DB, c models.InboxCase) error {
-	var missing int64
-	err := inboxMissingDefinitions(tx, c).Count(&missing).Error
+	missing, err := inboxMissingDefinitions(tx, c)
 	if err != nil {
 		return err
 	}
-	if missing != 0 {
+	if len(missing) != 0 {
 		return errRequiredInboxFields
 	}
 	return nil
@@ -321,9 +348,4 @@ func validateInboxFieldMatchers(db *gorm.DB, org uuid.UUID, matches []models.Inb
 		}
 	}
 	return nil
-}
-
-func inboxMissingDefinitions(db *gorm.DB, c models.InboxCase) *gorm.DB {
-	return db.Model(&models.InboxFieldDefinition{}).Where("organization_id=? AND required_on_resolve AND archived_at IS NULL", c.OrganizationID).
-		Where("NOT EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id=inbox_field_definitions.organization_id AND v.definition_id=inbox_field_definitions.id AND v.subject_id=CASE WHEN inbox_field_definitions.scope='case' THEN ?::uuid ELSE ?::uuid END AND v.value IS NOT NULL AND v.value <> 'null'::jsonb AND (jsonb_typeof(v.value) <> 'string' OR btrim(v.value #>> '{}') <> ''))", c.ID, c.ContactID)
 }

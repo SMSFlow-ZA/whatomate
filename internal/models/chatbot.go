@@ -219,6 +219,7 @@ type ChatbotSession struct {
 	Channel                 string        `gorm:"size:20;not null;default:'whatsapp';index" json:"channel"`
 	ChannelConnectionID     *uuid.UUID    `gorm:"type:uuid;index" json:"channel_connection_id,omitempty"`
 	ChannelInboundMessageID *uuid.UUID    `gorm:"type:uuid" json:"-"`
+	IntakeReplyToWAMID      string        `gorm:"-" json:"-"`
 	SMSConsentConfirmed     bool          `gorm:"not null;default:false" json:"-"`
 	OrganizationID          uuid.UUID     `gorm:"type:uuid;index;not null" json:"organization_id"`
 	ContactID               uuid.UUID     `gorm:"type:uuid;index;not null" json:"contact_id"`
@@ -302,19 +303,20 @@ type SLATracking struct {
 // AgentTransfer tracks when conversations are transferred to human agents
 type AgentTransfer struct {
 	BaseModel
-	OrganizationID      uuid.UUID      `gorm:"type:uuid;index;not null" json:"organization_id"`
-	ContactID           uuid.UUID      `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppAccount     string         `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	PhoneNumber         string         `gorm:"size:50;not null" json:"phone_number"`
-	Status              TransferStatus `gorm:"size:20;default:'active'" json:"status"` // active, resumed
-	Source              TransferSource `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword, chatbot_disabled
-	AgentID             *uuid.UUID     `gorm:"type:uuid" json:"agent_id,omitempty"`
-	TeamID              *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
-	TransferredByUserID *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
-	Notes               string         `gorm:"type:text" json:"notes"`
-	TransferredAt       time.Time      `gorm:"autoCreateTime" json:"transferred_at"`
-	ResumedAt           *time.Time     `json:"resumed_at,omitempty"`
-	ResumedBy           *uuid.UUID     `gorm:"type:uuid" json:"resumed_by,omitempty"`
+	InboxIntakeSessionID *uuid.UUID     `gorm:"type:uuid" json:"-"`
+	OrganizationID       uuid.UUID      `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ContactID            uuid.UUID      `gorm:"type:uuid;index;not null" json:"contact_id"`
+	WhatsAppAccount      string         `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	PhoneNumber          string         `gorm:"size:50;not null" json:"phone_number"`
+	Status               TransferStatus `gorm:"size:20;default:'active'" json:"status"` // active, resumed
+	Source               TransferSource `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword, chatbot_disabled
+	AgentID              *uuid.UUID     `gorm:"type:uuid" json:"agent_id,omitempty"`
+	TeamID               *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
+	TransferredByUserID  *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
+	Notes                string         `gorm:"type:text" json:"notes"`
+	TransferredAt        time.Time      `gorm:"autoCreateTime" json:"transferred_at"`
+	ResumedAt            *time.Time     `json:"resumed_at,omitempty"`
+	ResumedBy            *uuid.UUID     `gorm:"type:uuid" json:"resumed_by,omitempty"`
 
 	// SLA Tracking (embedded - all fields stored in same table)
 	SLA SLATracking `gorm:"embedded"`

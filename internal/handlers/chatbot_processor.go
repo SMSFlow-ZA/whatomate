@@ -200,7 +200,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	a.ClearContactChatbotTracking(contact.ID)
 
 	// Check for active agent transfer - skip chatbot processing if transferred
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID, account.Name) {
 		a.Log.Info("Contact has active agent transfer, skipping chatbot processing",
 			"contact_id", contact.ID,
 			"phone_number", contact.PhoneNumber)
@@ -245,7 +245,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
-	a.Log.Info("Processing message", "text", messageText, "buttonID", buttonID, "from", msg.From)
+	a.Log.Info("Processing chatbot message", "type", messageType, "contact_id", contact.ID)
 
 	// Get or create active session for this contact
 	session, isNewSession := a.getOrCreateSession(account.OrganizationID, contact.ID, account.Name, msg.From, settings.SessionTimeoutMins)
@@ -253,9 +253,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		inboundID := uuid.NewSHA1(account.OrganizationID, []byte("whatsapp:"+account.PhoneID+":"+msg.ID))
 		session.ChannelInboundMessageID = &inboundID
 	}
+	session.IntakeReplyToWAMID = replyToWAMID
 
 	// Log incoming message to session
-	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
+	if a.sessionHasIntakeStep(session) {
+		a.logSessionMessage(session.ID, models.DirectionIncoming, "Intake response received", "intake_response")
+	} else {
+		a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
+	}
 
 	// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
 	keywordResponse, keywordMatched := a.matchKeywordRules(account.OrganizationID, account.Name, messageText)
@@ -637,9 +642,9 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 // sendAndSaveFlowMessage sends a WhatsApp Flow message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) error {
+func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string, prepare ...func(*OutgoingMessageRequest) error) error {
 	ctx := context.Background()
-	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+	req := OutgoingMessageRequest{
 		Account:         account,
 		Contact:         contact,
 		Type:            models.MessageTypeFlow,
@@ -649,7 +654,13 @@ func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *m
 		FlowCTA:         ctaText,
 		FlowToken:       flowToken,
 		FlowFirstScreen: firstScreen,
-	}, ChatbotSendOptions())
+	}
+	if len(prepare) > 0 {
+		if err := prepare[0](&req); err != nil {
+			return err
+		}
+	}
+	_, err := a.SendOutgoingMessage(ctx, req, ChatbotSendOptions())
 	return err
 }
 
@@ -1426,10 +1437,9 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 			if msg.Interactive.NFMReply.ResponseJSON != "" {
 				var responseData map[string]any
 				if err := json.Unmarshal([]byte(msg.Interactive.NFMReply.ResponseJSON), &responseData); err != nil {
-					a.Log.Error("Failed to parse flow response JSON", "error", err, "response_json", msg.Interactive.NFMReply.ResponseJSON)
+					a.Log.Error("Failed to parse WhatsApp Flow response", "code", "invalid_flow_response")
 				} else {
 					extracted.FlowResponseData = responseData
-					a.Log.Info("Parsed WhatsApp Flow response", "data", extracted.FlowResponseData)
 				}
 			}
 		}
@@ -1562,7 +1572,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	// Handle reply context - look up the original message by WhatsApp message ID
 	if replyToWAMID != "" {
 		var replyToMsg models.Message
-		if err := a.DB.Where("whats_app_message_id = ?", replyToWAMID).First(&replyToMsg).Error; err == nil {
+		if err := a.DB.Where("whats_app_message_id = ? AND organization_id=? AND contact_id=? AND whats_app_account=?", replyToWAMID, account.OrganizationID, contact.ID, account.Name).First(&replyToMsg).Error; err == nil {
 			message.IsReply = true
 			message.ReplyToMessageID = &replyToMsg.ID
 		} else {

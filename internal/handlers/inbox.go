@@ -61,6 +61,7 @@ func appendInboxActivity(tx *gorm.DB, c models.InboxCase, event models.InboxCase
 	event.OrganizationID = c.OrganizationID
 	event.AccountID = c.AccountID
 	event.CaseID = c.ID
+	event.CaseVersion = c.Version
 	switch {
 	case event.Kind == "opened" && event.EventKey == nil, event.Kind == "reopened":
 		event.WorkflowTrigger = "case_opened"
@@ -340,7 +341,11 @@ func applyInboxTransition(tx *gorm.DB, c *models.InboxCase, input inboxCaseUpdat
 	event := models.InboxCaseActivity{ActorID: actor, OccurredAt: &now, Kind: kind, FromStatus: c.Status, FromPriority: c.Priority}
 	if input.Status != "" {
 		if input.Status == models.InboxCaseResolved && c.Status != models.InboxCaseResolved {
-			if err := checkInboxRequiredFields(tx, *c); err != nil {
+			proposed := *c
+			if input.Priority != "" {
+				proposed.Priority = input.Priority
+			}
+			if err := checkInboxRequiredFields(tx, proposed); err != nil {
 				return err
 			}
 		}
@@ -457,6 +462,8 @@ func (a *App) UpdateInboxConversation(r *fastglue.Request) error {
 
 func (a *App) inboxError(r *fastglue.Request, err error) error {
 	switch {
+	case errors.Is(err, errInboxFieldRevision):
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, errInboxFieldRevision.Error(), nil, "field_revision_conflict")
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Conversation not found", nil, "")
 	case errors.Is(err, errInboxDisabled):
@@ -502,6 +509,7 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 			return err
 		}
 		kind := "incoming_message"
+		beforeIntake := c
 		from := c.Status
 		if c.ID == uuid.Nil || c.Status == models.InboxCaseResolved {
 			// A previously unseen late delivery still belongs to the case
@@ -548,6 +556,11 @@ func (a *App) recordInboxEntry(account *models.WhatsAppAccount, contact *models.
 				return err
 			}
 		}
+		if transfer != nil && transfer.Source == models.TransferSourceFlow && transfer.InboxIntakeSessionID != nil && strings.HasPrefix(eventKey, "handoff:") {
+			if err := a.applyStagedInboxIntake(tx, c, beforeIntake, *transfer.InboxIntakeSessionID, entered); err != nil {
+				return err
+			}
+		}
 		return appendInboxActivity(tx, c, models.InboxCaseActivity{EventKey: &eventKey, OccurredAt: &received, Kind: kind, FromStatus: from, ToStatus: c.Status})
 	})
 	if err != nil {
@@ -578,6 +591,9 @@ func (a *App) RunInboxSnoozes(ctx context.Context, interval time.Duration) {
 	for {
 		if err := a.reopenDueInboxCases(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			a.Log.Error("Inbox snooze processing failed", "error", err)
+		}
+		if err := expireInboxIntake(a.DB.WithContext(ctx), time.Now().UTC()); err != nil && ctx.Err() == nil {
+			a.Log.Error("Intake expiry failed", "code", audit.ErrorCode(err))
 		}
 		select {
 		case <-ctx.Done():

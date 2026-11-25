@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -944,6 +945,14 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		}
 	}
 	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if graphUsesIntake(flow.Graph) {
+			if err := lockInboxFieldDefinitions(tx, orgID); err != nil {
+				return err
+			}
+		}
+		if err := validateChatIntakeGraph(privateInboxIntegrationDB(tx), orgID, userID, flow.Channel, flow.Graph); err != nil {
+			return err
+		}
 		// GORM replaces a false bool with the model's default:true on insert.
 		// Persist the requested state explicitly in the same transaction so
 		// workers can never observe an unintentionally enabled draft.
@@ -952,6 +961,10 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		}
 		return tx.Model(&flow).Update("is_enabled", req.Enabled).Error
 	}); err != nil {
+		var intakeProblem inboxIntakeProblem
+		if errors.As(err, &intakeProblem) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return a.intakeError(r, err)
+		}
 		a.Log.Error("Failed to create flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create flow", nil, "")
 	}
@@ -1076,7 +1089,21 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(422, err.Error(), nil, "")
 		}
 	}
-	if err := a.DB.Save(flow).Error; err != nil {
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if graphUsesIntake(flow.Graph) || graphUsesIntake(oldFlow.Graph) {
+			if err := lockInboxFieldDefinitions(tx, orgID); err != nil {
+				return err
+			}
+		}
+		if err := validateChatIntakeGraph(privateInboxIntegrationDB(tx), orgID, userID, flow.Channel, flow.Graph); err != nil {
+			return err
+		}
+		return tx.Save(flow).Error
+	}); err != nil {
+		var intakeProblem inboxIntakeProblem
+		if errors.As(err, &intakeProblem) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return a.intakeError(r, err)
+		}
 		a.Log.Error("Failed to update flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update flow", nil, "")
 	}

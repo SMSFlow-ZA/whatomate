@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,6 +67,12 @@ func (a *App) sendWhatsAppBotText(node *ChatNode, state *chatNodeCtx, text strin
 }
 
 func prepareBotDelivery(node *ChatNode, state *chatNodeCtx, req *OutgoingMessageRequest) error {
+	if state.intakeBindingID != uuid.Nil {
+		req.IdempotencyKey = state.intakeBindingID
+		if node.Type == ChatNodeButtons && strings.Contains(node.ID, ":part:") {
+			return errors.New("intake requires a single reply prompt")
+		}
+	}
 	raw, ok := node.Config["delivery_options"]
 	if !ok {
 		return nil

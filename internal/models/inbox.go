@@ -56,6 +56,7 @@ type InboxCase struct {
 
 type InboxCaseActivity struct {
 	BaseModel
+	CaseVersion         int64             `gorm:"not null;default:0" json:"-"`
 	OrganizationID      uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:1" json:"-"`
 	AccountID           uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_inbox_event,priority:2" json:"-"`
 	CaseID              uuid.UUID         `gorm:"type:uuid;not null;index" json:"case_id"`

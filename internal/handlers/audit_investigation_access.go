@@ -133,6 +133,7 @@ var auditResourceSpecs = []auditResourceSpec{
 	{"sso_provider", models.ResourceSettingsSSO, models.ActionRead, "sso_providers", "", []audit.EventKind{audit.IntegrationChanged}},
 	{"channel_connection", models.ResourceSettingsChannels, models.ActionRead, "channel_connections", "", []audit.EventKind{audit.IntegrationChanged, audit.IntegrationValidated}},
 	{"inbox_integration", models.ResourceSettingsGeneral, models.ActionWrite, "inbox_integrations", "", []audit.EventKind{audit.IntegrationChanged}},
+	{"inbox_intake_mapping", models.ResourceSettingsGeneral, models.ActionWrite, "inbox_intake_mappings", "", nil},
 	{"inbox_integration_settings", models.ResourceSettingsGeneral, models.ActionWrite, "organizations", "organization", []audit.EventKind{audit.IntegrationChanged}},
 	{"inbox_sla_escalation_settings", models.ResourceSettingsGeneral, models.ActionRead, "whatsapp_accounts", "", nil},
 	{"contact", models.ResourceContacts, models.ActionRead, "contacts", "", nil},

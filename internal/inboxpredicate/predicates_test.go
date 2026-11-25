@@ -38,6 +38,19 @@ func TestCompilePreservesAllowedStatusAndPriorityMeanings(t *testing.T) {
 	}
 }
 
+func TestCompileIntakeTextTypesAllowSearchFragmentsButNotNumericOperands(t *testing.T) {
+	for _, kind := range []string{"email", "url"} {
+		id := uuid.New()
+		definitions := map[uuid.UUID]models.InboxFieldDefinition{id: {BaseModel: models.BaseModel{ID: id}, Scope: "contact", Kind: kind}}
+		sql, args, err := Compile(models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: "contains", Value: json.RawMessage(`"example.invalid"`)}, definitions)
+		require.NoError(t, err)
+		require.Contains(t, sql, "inbox_cases.contact_id")
+		require.Contains(t, args, "example.invalid")
+		_, _, err = Compile(models.InboxPredicate{Field: "custom_field", DefinitionID: &id, Operator: "eq", Value: json.RawMessage(`0`)}, definitions)
+		require.ErrorIs(t, err, ErrInvalid)
+	}
+}
+
 func TestCompileTypedFalseAndZeroAreNotMissing(t *testing.T) {
 	for _, tc := range []struct{ kind, value string }{{"number", "0"}, {"boolean", "false"}} {
 		t.Run(tc.kind, func(t *testing.T) {

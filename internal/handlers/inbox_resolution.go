@@ -16,14 +16,15 @@ import (
 
 type inboxMissingField struct {
 	models.InboxFieldDefinition
-	CanEdit    bool   `json:"can_edit"`
-	EditorPath string `json:"editor_path,omitempty"`
-	Handoff    string `json:"handoff,omitempty"`
+	CanEdit             bool   `json:"can_edit"`
+	RequiredNow         bool   `json:"required_now"`
+	ConditionalRequired bool   `json:"conditional_required"`
+	EditorPath          string `json:"editor_path,omitempty"`
+	Handoff             string `json:"handoff,omitempty"`
 }
 
 func (a *App) missingInboxFields(db *gorm.DB, c models.InboxCase, user uuid.UUID) ([]inboxMissingField, error) {
-	definitions := []models.InboxFieldDefinition{}
-	err := inboxMissingDefinitions(db, c).Order("scope,label,id").Find(&definitions).Error
+	definitions, err := inboxMissingDefinitions(db, c)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +34,7 @@ func (a *App) missingInboxFields(db *gorm.DB, c models.InboxCase, user uuid.UUID
 		if d.Scope == "contact" {
 			editable = editable && a.HasPermission(user, models.ResourceContacts, models.ActionRead, c.OrganizationID) && a.HasPermission(user, models.ResourceContacts, models.ActionWrite, c.OrganizationID)
 		}
-		field := inboxMissingField{InboxFieldDefinition: d, CanEdit: editable}
+		field := inboxMissingField{InboxFieldDefinition: d, CanEdit: editable, RequiredNow: true, ConditionalRequired: d.RequiredWhen != nil}
 		if !editable {
 			field.Handoff = "Ask a supervisor with contact editing access to complete this detail, then retry resolution."
 			if a.HasPermission(user, models.ResourceContacts, models.ActionRead, c.OrganizationID) {

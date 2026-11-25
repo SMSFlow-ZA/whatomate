@@ -77,6 +77,11 @@ func Compile(p models.InboxPredicate, definitions map[uuid.UUID]models.InboxFiel
 		if !ok {
 			return "", nil, ErrInvalid
 		}
+		// A comparison operand is text, not a newly submitted email/link.
+		// Domain/path fragments remain valid contains operands.
+		if d.Kind == "email" || d.Kind == "url" {
+			d.Kind = "text"
+		}
 		base := "EXISTS (SELECT 1 FROM inbox_field_values v WHERE v.organization_id = inbox_cases.organization_id AND v.definition_id = ? AND v.subject_id = "
 		subject := "inbox_cases.id"
 		if d.Scope == "contact" {
@@ -84,7 +89,7 @@ func Compile(p models.InboxPredicate, definitions map[uuid.UUID]models.InboxFiel
 		}
 		base += subject
 		if op == "is_empty" || op == "not_empty" {
-			base += " AND v.value <> 'null'::jsonb AND v.value <> '\"\"'::jsonb)"
+			base += " AND v.value <> 'null'::jsonb AND (jsonb_typeof(v.value) <> 'string' OR btrim(v.value #>> '{}') <> ''))"
 			if op == "is_empty" {
 				base = "NOT " + base
 			}

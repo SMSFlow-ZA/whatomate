@@ -1112,11 +1112,15 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 }
 
 // hasActiveAgentTransfer checks if a contact has an active agent transfer
-func (a *App) hasActiveAgentTransfer(orgID, contactID uuid.UUID) bool {
+func (a *App) hasActiveAgentTransfer(orgID, contactID uuid.UUID, account ...string) bool {
 	var count int64
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND contact_id = ? AND status = ?", orgID, contactID, models.TransferStatusActive).
-		Count(&count)
+	query := a.DB.Model(&models.AgentTransfer{}).Where("organization_id = ? AND contact_id = ? AND status = ?", orgID, contactID, models.TransferStatusActive)
+	if len(account) == 1 {
+		query = query.Where("whats_app_account=?", account[0])
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return true
+	}
 	return count > 0
 }
 
@@ -1126,7 +1130,7 @@ func (a *App) hasActiveAgentTransfer(orgID, contactID uuid.UUID) bool {
 // so the agent's contact-list unread count doesn't flash for bot-handled
 // conversations.
 func (a *App) willChatbotHandle(account *models.WhatsAppAccount, contact *models.Contact) bool {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID, account.Name) {
 		return false
 	}
 	settings, err := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
@@ -1242,7 +1246,6 @@ func (a *App) dispatchTransferCreated(transfer *models.AgentTransfer, contact *m
 	})
 }
 
-
 // saveAndFinalizeTransfer handles the common post-creation steps for agent transfers:
 // sets SLA deadlines, saves to DB, updates contact assignment, optionally ends chatbot sessions, and broadcasts.
 func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings, endChatbotSession bool) error {
@@ -1286,8 +1289,8 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 }
 
 // createTransferToQueue creates an unassigned agent transfer that goes to the queue
-func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, intakeSession ...uuid.UUID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID, account.Name) {
 		a.Log.Debug("Contact already has active transfer, skipping", "contact_id", contact.ID, "source", source)
 		return
 	}
@@ -1318,6 +1321,9 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 		TransferredAt:   time.Now(),
 	}
 
+	if len(intakeSession) == 1 && intakeSession[0] != uuid.Nil && source == models.TransferSourceFlow {
+		transfer.InboxIntakeSessionID = &intakeSession[0]
+	}
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, false); err != nil {
 		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
 		return
@@ -1328,7 +1334,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 
 // createTransferFromKeyword creates an agent transfer triggered by a keyword rule
 func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact *models.Contact) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID, account.Name) {
 		a.Log.Info("Contact already has active transfer, skipping keyword transfer", "contact_id", contact.ID)
 		return
 	}
@@ -1384,8 +1390,8 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 }
 
 // createTransferToTeam creates an agent transfer to a specific team with appropriate assignment
-func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource, intakeSession ...uuid.UUID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID, account.Name) {
 		a.Log.Debug("Contact already has active transfer, skipping team transfer", "contact_id", contact.ID, "team_id", teamID)
 		return
 	}
@@ -1423,6 +1429,9 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 		TransferredAt:   time.Now(),
 	}
 
+	if len(intakeSession) == 1 && intakeSession[0] != uuid.Nil && source == models.TransferSourceFlow {
+		transfer.InboxIntakeSessionID = &intakeSession[0]
+	}
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
 		a.Log.Error("Failed to create team transfer", "error", err, "contact_id", contact.ID, "team_id", teamID)
 		return

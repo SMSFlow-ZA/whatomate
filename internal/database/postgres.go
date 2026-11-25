@@ -91,6 +91,9 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxSLANotice", &models.InboxSLANotice{}},
 		{"InboxFieldDefinition", &models.InboxFieldDefinition{}},
 		{"InboxFieldValue", &models.InboxFieldValue{}},
+		{"InboxFieldStamp", &models.InboxFieldStamp{}},
+		{"InboxIntakeMapping", &models.InboxIntakeMapping{}},
+		{"InboxIntakeBinding", &models.InboxIntakeBinding{}},
 		{"InboxAgentCapacity", &models.InboxAgentCapacity{}},
 		{"InboxCapacityPreset", &models.InboxCapacityPreset{}},
 		{"InboxWorkflow", &models.InboxWorkflow{}},
@@ -153,6 +156,9 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
+	if err := InstallInboxFieldStamps(db); err != nil {
+		return err
+	}
 	if err := MigrateInboxWorkflowAuthority(db); err != nil {
 		return err
 	}
@@ -201,6 +207,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	}
 
 	// Create indexes
+	if err := InstallInboxFieldStamps(silentDB); err != nil {
+		return err
+	}
 	if err := inboxquality.Backfill(silentDB); err != nil {
 		return err
 	}

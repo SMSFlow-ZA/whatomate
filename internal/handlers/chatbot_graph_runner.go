@@ -29,6 +29,8 @@ var errChatGraphRunaway = errors.New("chat graph: too many non-blocking nodes in
 // as its outcome, so a later blocking node in the same run doesn't see
 // stale input.
 type chatNodeCtx struct {
+	flow             *models.ChatbotFlow
+	intakeBindingID  uuid.UUID
 	account          *models.WhatsAppAccount
 	contact          *models.Contact
 	session          *models.ChatbotSession
@@ -81,6 +83,7 @@ func (a *App) runChatGraph(
 	}
 
 	ctx := &chatNodeCtx{
+		flow:             flow,
 		account:          account,
 		contact:          contact,
 		session:          session,
@@ -105,6 +108,7 @@ func (a *App) runChatGraph(
 		// double-count the trigger keyword as user input.
 		ctx.userInput = ""
 		ctx.buttonID = ""
+		ctx.flowResponseData = nil
 	}
 
 	for range maxChatGraphIterations {
@@ -135,10 +139,19 @@ func (a *App) runChatGraph(
 			}
 		}
 
+		if err := a.prepareChatIntake(node, ctx); err != nil {
+			return err
+		}
+		wasConsumed := ctx.consumed
 		res, err := a.executeChatNode(node, ctx)
 		if err != nil {
 			_ = a.persistChatSession(session)
 			return err
+		}
+		if !wasConsumed && ctx.consumed && !res.yield {
+			if err := a.captureChatIntake(node, ctx); err != nil {
+				return err
+			}
 		}
 
 		appendChatPath(session, node, res.outcome)
@@ -168,6 +181,7 @@ func (a *App) runChatGraph(
 				return fmt.Errorf("goto_flow: parse target graph: %w", err)
 			}
 			flow = newFlow
+			ctx.flow = newFlow
 			graph = newGraph
 			session.CurrentStep = newGraph.EntryNode
 			continue
@@ -799,14 +813,14 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 	teamIDStr := stringFromConfig(node.Config, "team_id")
 	if teamIDStr != "" && teamIDStr != "_general" {
 		if parsed, err := uuid.Parse(teamIDStr); err == nil {
-			a.createTransferToTeam(ctx.account, ctx.contact, parsed, notes, models.TransferSourceFlow)
+			a.createTransferToTeam(ctx.account, ctx.contact, parsed, notes, models.TransferSourceFlow, ctx.session.ID)
 		} else {
 			a.Log.Warn("transfer node has invalid team_id, falling back to queue",
 				"node", node.ID, "team_id", teamIDStr, "error", err)
-			a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
+			a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow, ctx.session.ID)
 		}
 	} else {
-		a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
+		a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow, ctx.session.ID)
 	}
 
 	ctx.session.Status = models.SessionStatusCompleted
@@ -944,7 +958,9 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 		if ctx.session.SessionData == nil {
 			ctx.session.SessionData = models.JSONB{}
 		}
-		maps.Copy(ctx.session.SessionData, ctx.flowResponseData)
+		if stringFromConfig(node.Config, "intake_mapping_id") == "" {
+			maps.Copy(ctx.session.SessionData, ctx.flowResponseData)
+		}
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
@@ -983,7 +999,15 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	}
 
 	flowToken := fmt.Sprintf("chatbot_%s_%s_%d", ctx.session.ID.String(), node.ID, time.Now().UnixNano())
-	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen); err != nil {
+	if ctx.intakeBindingID != uuid.Nil {
+		flowToken = ctx.intakeBindingID.String()
+	}
+	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen, func(req *OutgoingMessageRequest) error {
+		if ctx.intakeBindingID != uuid.Nil {
+			req.IdempotencyKey = ctx.intakeBindingID
+		}
+		return nil
+	}); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send whatsapp_flow: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
