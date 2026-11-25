@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/channelmigration"
+	"github.com/shridarpatil/whatomate/internal/inboxlive"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -121,6 +122,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.InboxAgentCapacity{},
 		&models.InboxCapacityPreset{},
 		&models.InboxRoutingPolicy{},
+		&models.InboxLiveResource{},
+		&models.InboxLiveChange{},
 		&models.InboxRoutingConfiguration{},
 		&models.InboxAgentAssignmentRate{},
 		&models.InboxAssignmentReceipt{},
@@ -169,7 +172,10 @@ func runMigrations(db *gorm.DB) error {
 			return err
 		}
 	}
-	return channelmigration.Run(db)
+	if err := channelmigration.Run(db); err != nil {
+		return err
+	}
+	return inboxlive.InstallRevisions(db)
 }
 
 // cleanupTables removes all data from tables (for PostgreSQL cleanup).
@@ -187,7 +193,7 @@ func cleanupTables(db *gorm.DB) {
 		"inbox_intake_bindings", "inbox_intake_mappings", "inbox_field_stamps",
 		"inbox_field_values", "inbox_field_definitions",
 		"inbox_agent_capacities",
-		"inbox_routing_policies", "inbox_routing_configurations", "inbox_agent_assignment_rates", "inbox_assignment_receipts",
+		"inbox_routing_policies", "inbox_routing_configurations", "inbox_agent_assignment_rates", "inbox_assignment_receipts", "inbox_live_resources", "inbox_live_changes",
 		"inbox_workflow_runs", "inbox_workflows",
 		"inbox_integration_recoveries", "inbox_integration_executions", "inbox_integrations",
 		// Dashboard tables

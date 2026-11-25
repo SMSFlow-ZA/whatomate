@@ -97,6 +97,8 @@ func GetMigrationModels() []MigrationModel {
 		{"InboxAgentCapacity", &models.InboxAgentCapacity{}},
 		{"InboxCapacityPreset", &models.InboxCapacityPreset{}},
 		{"InboxRoutingPolicy", &models.InboxRoutingPolicy{}},
+		{"InboxLiveResource", &models.InboxLiveResource{}},
+		{"InboxLiveChange", &models.InboxLiveChange{}},
 		{"InboxRoutingConfiguration", &models.InboxRoutingConfiguration{}},
 		{"InboxAgentAssignmentRate", &models.InboxAgentAssignmentRate{}},
 		{"InboxAssignmentReceipt", &models.InboxAssignmentReceipt{}},
@@ -172,6 +174,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := inboxquality.Backfill(db); err != nil {
 		return err
 	}
+	if err := InstallInboxLiveRevisions(db); err != nil {
+		return err
+	}
 	if err := CreateInboxDiscoveryIndexes(db); err != nil {
 		return err
 	}
@@ -221,6 +226,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		return err
 	}
 	if err := inboxquality.Backfill(silentDB); err != nil {
+		return err
+	}
+	if err := InstallInboxLiveRevisions(silentDB); err != nil {
 		return err
 	}
 	if err := channelmigration.Run(silentDB); err != nil {
