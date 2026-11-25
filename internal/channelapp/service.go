@@ -17,10 +17,12 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/channels"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 var ErrInvalid = errors.New("invalid channel configuration, consent or content")
 var ErrUnavailable = errors.New("channel unavailable or access denied")
+var ErrConnectionAudit = errors.New("connection audit unavailable")
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
 
 type Service struct {
@@ -38,7 +40,29 @@ func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(&models.ChannelConnection{}, &models.ChannelAttempt{}, &models.ChannelReceipt{}, &models.ChannelBotJob{}, &models.Contact{}, &models.Message{})
 }
 
-func (s *Service) CreateConnection(ctx context.Context, org uuid.UUID, name, providerID string, credentials channels.Credentials, maxSegments int) (*models.ChannelConnection, error) {
+type ConnectionPhase string
+
+const (
+	ConnectionCreated   ConnectionPhase = "created"
+	ConnectionValidated ConnectionPhase = "validated"
+)
+
+// ConnectionMutation intentionally carries no credential, provider response or
+// request payload. The optional compiled-in observer runs in the SQL transaction.
+type ConnectionMutation struct {
+	OrganizationID, ConnectionID uuid.UUID
+	Phase                        ConnectionPhase
+}
+type ConnectionObserver func(*gorm.DB, ConnectionMutation) error
+
+func (s *Service) CreateConnection(ctx context.Context, org uuid.UUID, name, providerID string, credentials channels.Credentials, maxSegments int, observers ...ConnectionObserver) (*models.ChannelConnection, error) {
+	if len(observers) > 1 {
+		return nil, ErrInvalid
+	}
+	var observe ConnectionObserver
+	if len(observers) == 1 {
+		observe = observers[0]
+	}
 	if org == uuid.Nil || strings.TrimSpace(name) == "" || len(name) > 100 || maxSegments < 1 || maxSegments > 10 || len(s.EncryptionKey) < 32 || s.Providers == nil {
 		return nil, ErrInvalid
 	}
@@ -55,10 +79,25 @@ func (s *Service) CreateConnection(ctx context.Context, org uuid.UUID, name, pro
 	if err != nil {
 		return nil, ErrUnavailable
 	}
+	db := s.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard})
 	// Persist the encrypted, disabled identity before remote validation can bind
 	// it. A lost validation response can then be recovered with the same ID.
-	if err = s.DB.WithContext(ctx).Create(&c).Error; err != nil {
+	if err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&c).Error; err != nil {
+			return err
+		}
+		if observe != nil {
+			if err := observe(tx, ConnectionMutation{org, c.ID, ConnectionCreated}); err != nil {
+				return errors.Join(ErrConnectionAudit, err)
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
+	}
+	// Use the stored timestamp precision for the post-network version fence.
+	if err = db.First(&c, "id=? AND organization_id=?", c.ID, org).Error; err != nil {
+		return &c, err
 	}
 	info, err := p.Validate(ctx, channels.Connection{ID: c.ID.String(), Credentials: credentials})
 	if err != nil {
@@ -71,18 +110,36 @@ func (s *Service) CreateConnection(ctx context.Context, org uuid.UUID, name, pro
 	if err = json.Unmarshal(caps, &c.Capabilities); err != nil {
 		return nil, ErrInvalid
 	}
-	c.Enabled = true
-	c.ErrorCode = ""
 	now := time.Now()
-	c.ValidatedAt = &now
-	c.BalanceThreshold = "100"
-	if err = s.DB.WithContext(ctx).Model(&c).Updates(map[string]any{"capabilities": c.Capabilities, "enabled": true, "error_code": "", "validated_at": now}).Error; err != nil {
-		return nil, err
+	updates := map[string]any{"capabilities": c.Capabilities, "enabled": true, "error_code": "", "validated_at": now}
+	for key, value := range BalanceUpdates(info.Balance, "100", now) {
+		updates[key] = value
 	}
-	if err = s.DB.WithContext(ctx).Model(&c).Updates(BalanceUpdates(info.Balance, c.BalanceThreshold, now)).Error; err != nil {
+	var committed models.ChannelConnection
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&committed, "id=? AND organization_id=?", c.ID, org).Error; err != nil {
+			return err
+		}
+		if !committed.UpdatedAt.Equal(c.UpdatedAt) || committed.Credentials != c.Credentials || committed.Provider != c.Provider {
+			return ErrUnavailable
+		}
+		if err := tx.Model(&committed).Updates(updates).Error; err != nil {
+			return err
+		}
+		if observe != nil {
+			if err := observe(tx, ConnectionMutation{org, c.ID, ConnectionValidated}); err != nil {
+				return errors.Join(ErrConnectionAudit, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		// The retained identity is authoritative; do not return an in-memory
+		// enabled result from a rolled-back validation phase.
+		_ = db.First(&c, "id=? AND organization_id=?", c.ID, org).Error
 		return &c, err
 	}
-	return &c, nil
+	return &committed, nil
 }
 
 func ValidCapabilities(_ string, c channels.Capabilities) bool {

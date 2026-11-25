@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -16,9 +17,11 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // CustomActionRequest represents the request body for creating/updating a custom action
@@ -140,12 +143,9 @@ func (a *App) GetCustomAction(r *fastglue.Request) error {
 
 // CreateCustomAction creates a new custom action
 func (a *App) CreateCustomAction(r *fastglue.Request) error {
-	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
-		return nil
-	}
-	orgID, err := a.getOrgID(r)
+	orgID, actorID, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	var req CustomActionRequest
@@ -179,8 +179,8 @@ func (a *App) CreateCustomAction(r *fastglue.Request) error {
 		DisplayOrder:   req.DisplayOrder,
 	}
 
-	if err := a.DB.Create(&action).Error; err != nil {
-		a.Log.Error("Failed to create custom action", "error", err)
+	if err := a.mutateAuditedIntegration(r, orgID, actorID, "custom_action", &action.ID, audit.Created, func(tx *gorm.DB) error { return tx.Create(&action).Error }); err != nil {
+		a.Log.Error("Failed to create custom action", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create custom action", nil, "")
 	}
 
@@ -190,12 +190,9 @@ func (a *App) CreateCustomAction(r *fastglue.Request) error {
 
 // UpdateCustomAction updates an existing custom action
 func (a *App) UpdateCustomAction(r *fastglue.Request) error {
-	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
-		return nil
-	}
-	orgID, err := a.getOrgID(r)
+	orgID, actorID, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	actionID, err := parsePathUUID(r, "id", "action")
@@ -241,8 +238,15 @@ func (a *App) UpdateCustomAction(r *fastglue.Request) error {
 	updates["is_active"] = req.IsActive
 	updates["display_order"] = req.DisplayOrder
 
-	if err := a.DB.Model(action).Updates(updates).Error; err != nil {
-		a.Log.Error("Failed to update custom action", "error", err)
+	reason := audit.ConfigurationChanged
+	if !req.IsActive {
+		reason = audit.Disabled
+	}
+	if err := a.mutateAuditedIntegration(r, orgID, actorID, "custom_action", &action.ID, reason, func(tx *gorm.DB) error { return tx.Model(action).Updates(updates).Error }, action.UpdatedAt); err != nil {
+		if handled, responseErr := sendIntegrationConflict(r, err); handled {
+			return responseErr
+		}
+		a.Log.Error("Failed to update custom action", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update custom action", nil, "")
 	}
 
@@ -255,12 +259,9 @@ func (a *App) UpdateCustomAction(r *fastglue.Request) error {
 
 // DeleteCustomAction deletes a custom action
 func (a *App) DeleteCustomAction(r *fastglue.Request) error {
-	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionDelete); err != nil {
-		return nil
-	}
-	orgID, err := a.getOrgID(r)
+	orgID, actorID, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionDelete)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	actionID, err := parsePathUUID(r, "id", "action")
@@ -268,13 +269,22 @@ func (a *App) DeleteCustomAction(r *fastglue.Request) error {
 		return nil
 	}
 
-	result := a.DB.Where("id = ? AND organization_id = ?", actionID, orgID).Delete(&models.CustomAction{})
-	if result.Error != nil {
-		a.Log.Error("Failed to delete custom action", "error", result.Error)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete custom action", nil, "")
-	}
-	if result.RowsAffected == 0 {
+	err = a.mutateAuditedIntegration(r, orgID, actorID, "custom_action", &actionID, audit.Deleted, func(tx *gorm.DB) error {
+		result := tx.Where("id=? AND organization_id=?", actionID, orgID).Delete(&models.CustomAction{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Custom action not found", nil, "")
+	}
+	if err != nil {
+		a.Log.Error("Failed to delete custom action", "code", audit.ErrorCode(err))
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete custom action", nil, "")
 	}
 
 	a.Log.Info("Custom action deleted", "action_id", actionID)

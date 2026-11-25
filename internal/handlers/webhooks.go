@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // validateWebhookURL performs structural validation of a webhook URL.
@@ -234,8 +236,8 @@ func (a *App) CreateWebhook(r *fastglue.Request) error {
 		IsActive:       true,
 	}
 
-	if err := a.DB.Create(&webhook).Error; err != nil {
-		a.Log.Error("Failed to create webhook", "error", err)
+	if err := a.mutateAuditedIntegration(r, orgID, userID, "webhook", &webhook.ID, audit.Created, func(tx *gorm.DB) error { return tx.Create(&webhook).Error }); err != nil {
+		a.Log.Error("Failed to create webhook", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create webhook", nil, "")
 	}
 
@@ -304,8 +306,18 @@ func (a *App) UpdateWebhook(r *fastglue.Request) error {
 
 	webhook.IsActive = req.IsActive
 
-	if err := a.DB.Save(webhook).Error; err != nil {
-		a.Log.Error("Failed to update webhook", "error", err)
+	reason := audit.ConfigurationChanged
+	if !req.IsActive {
+		reason = audit.Disabled
+	}
+	if req.Secret != "" {
+		reason = audit.CredentialRotated
+	}
+	if err := a.mutateAuditedIntegration(r, orgID, userID, "webhook", &webhook.ID, reason, func(tx *gorm.DB) error { return tx.Save(webhook).Error }, webhook.UpdatedAt); err != nil {
+		if handled, responseErr := sendIntegrationConflict(r, err); handled {
+			return responseErr
+		}
+		a.Log.Error("Failed to update webhook", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update webhook", nil, "")
 	}
 
@@ -338,8 +350,8 @@ func (a *App) DeleteWebhook(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Webhook not found", nil, "")
 	}
 
-	if err := a.DB.Delete(&webhook).Error; err != nil {
-		a.Log.Error("Failed to delete webhook", "error", err)
+	if err := a.mutateAuditedIntegration(r, orgID, userID, "webhook", &webhook.ID, audit.Deleted, func(tx *gorm.DB) error { return tx.Delete(&webhook).Error }); err != nil {
+		a.Log.Error("Failed to delete webhook", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete webhook", nil, "")
 	}
 

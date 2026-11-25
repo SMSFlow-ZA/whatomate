@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/channelapp"
 	"strings"
 	"time"
@@ -69,8 +70,23 @@ func (a *App) CreateChannelConnection(r *fastglue.Request) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c, err := a.Channels.CreateConnection(ctx, org, req.Name, req.Provider, req.Credentials, req.MaxSegments)
+	c, err := a.Channels.CreateConnection(ctx, org, req.Name, req.Provider, req.Credentials, req.MaxSegments, func(tx *gorm.DB, mutation channelapp.ConnectionMutation) error {
+		kind, reason := audit.IntegrationChanged, audit.Created
+		if mutation.Phase == channelapp.ConnectionValidated {
+			kind, reason = audit.IntegrationValidated, audit.Validated
+		}
+		return a.recordIntegrationSecurity(r, tx, mutation.OrganizationID, user, "channel_connection", mutation.ConnectionID, kind, reason)
+	})
 	if err != nil {
+		if errors.Is(err, channelapp.ErrConnectionAudit) {
+			return r.SendErrorEnvelope(503, "Connection change could not be recorded; reload before retrying", nil, "audit_unavailable")
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(409, "Connection was removed or changed; reload before retrying", nil, "connection_changed")
+		}
+		if c == nil {
+			return r.SendErrorEnvelope(422, "Connection could not be created; check configuration and credentials", nil, "channel_validation_failed")
+		}
 		return r.SendErrorEnvelope(422, "Connection validation failed; check credentials and API compatibility. A disabled connection is retained for revalidation.", nil, "channel_validation_failed")
 	}
 	a.logAudit(org, user, "channel_connection", c.ID, models.AuditActionCreated, nil, map[string]any{"provider": c.Provider, "name": c.Name})
@@ -188,7 +204,7 @@ func (a *App) UpdateChannelConnection(r *fastglue.Request) error {
 			updates[key] = value
 		}
 	}
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		var locked models.ChannelConnection
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ? AND organization_id = ?", id, org).Error; err != nil {
 			return err
@@ -200,11 +216,31 @@ func (a *App) UpdateChannelConnection(r *fastglue.Request) error {
 			return err
 		}
 		if !req.Enabled {
-			return channelapp.CancelPending(tx, id)
+			if err := channelapp.CancelPending(tx, id); err != nil {
+				return err
+			}
+		}
+		reason := audit.ConfigurationChanged
+		if !req.Enabled {
+			reason = audit.Disabled
+		}
+		if len(req.Credentials) > 0 {
+			reason = audit.CredentialRotated
+		}
+		if err := a.recordIntegrationSecurity(r, tx, org, user, "channel_connection", id, audit.IntegrationChanged, reason); err != nil {
+			return errors.Join(channelapp.ErrConnectionAudit, err)
+		}
+		if _, validated := updates["validated_at"]; validated {
+			if err := a.recordIntegrationSecurity(r, tx, org, user, "channel_connection", id, audit.IntegrationValidated, audit.Validated); err != nil {
+				return errors.Join(channelapp.ErrConnectionAudit, err)
+			}
 		}
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, channelapp.ErrConnectionAudit) {
+			return r.SendErrorEnvelope(503, "Connection change could not be recorded; reload before retrying", nil, "audit_unavailable")
+		}
 		return r.SendErrorEnvelope(409, "Connection changed; reload before saving", nil, "")
 	}
 	a.logAudit(org, user, "channel_connection", id, models.AuditActionUpdated, nil, map[string]any{"enabled": req.Enabled, "max_segments": req.MaxSegments, "credentials_rotated": len(req.Credentials) > 0})
@@ -222,7 +258,7 @@ func (a *App) DeleteChannelConnection(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		var c models.ChannelConnection
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND organization_id = ?", id, org).First(&c).Error; err != nil {
 			return err
@@ -237,9 +273,15 @@ func (a *App) DeleteChannelConnection(r *fastglue.Request) error {
 		if pending > 0 {
 			return errors.New("pending")
 		}
+		if err := a.recordIntegrationSecurity(r, tx, org, user, "channel_connection", id, audit.IntegrationChanged, audit.Deleted); err != nil {
+			return errors.Join(channelapp.ErrConnectionAudit, err)
+		}
 		return tx.Delete(&c).Error
 	})
 	if err != nil {
+		if errors.Is(err, channelapp.ErrConnectionAudit) {
+			return r.SendErrorEnvelope(503, "Connection change could not be recorded; reload before retrying", nil, "audit_unavailable")
+		}
 		return r.SendErrorEnvelope(409, "Disable the connection first; unresolved deliveries must remain available for reconciliation", nil, "channel_in_use")
 	}
 	a.logAudit(org, user, "channel_connection", id, models.AuditActionDeleted, nil, nil)

@@ -114,3 +114,38 @@ inferred end user. This does not change rate-limiter behaviour.
 `ErrorCode` returns bounded operational categories only. Callers must not log raw
 database/request/provider errors or pass them as event reasons. No new retention,
 tamper-proof guarantee or customer messaging operation is introduced.
+
+## Integration configuration capture
+
+WhatsApp account, outbound webhook, custom-action and SSO-provider creation,
+editing and deletion commit with typed `integration.changed` records. Workflow
+integration definitions and the organisation's integration switch use the same
+fixed metadata contract. Credential replacements have a fixed rotation reason;
+neither credential values, custom-action configuration nor mapped workflow input
+is copied into the typed event. Account records carry a verified account identity;
+other integration resources do not invent a conversation or account relationship.
+Sensitive configuration writes suppress SQL payload logging even when database
+debugging is enabled; operational diagnostics retain fixed error categories.
+
+Existing-target updates lock and verify organisation ownership. The account,
+webhook, custom-action and SSO-provider editors also compare their loaded version
+before writing, so a concurrent configuration change requires a reload. Account
+default switches and their capture share the same transaction. Verified deletion
+evidence is recorded before a hard deletion, in that deletion's transaction.
+
+Channel creation has two durable phases. First, an encrypted disabled identity and
+its creation event commit. Provider validation runs outside database locks and
+does not send a message. Successful activation, capabilities, balance metadata and
+`integration.validated` capture then commit together after a version check. A
+failed or lost validation leaves the created disabled identity available for
+review; it is not labelled as a successful validation. Concurrent changes/removal
+cannot be overwritten by the validation result. Updating/revalidating a channel
+records successful validation only when the corresponding configuration commits.
+Audit failure rolls back that configuration and any pending-work cancellation;
+uncertain submissions keep their existing reconciliation state.
+
+These records cover the named management handlers, not every possible bootstrap,
+embedded-signup or external provisioning path. Initial registration/SSO lifecycle
+provenance and scoped investigation/export remain separate unfinished work. The
+feature is not yet ready for a managed release. Existing dispatch holds and
+automation defaults are unchanged.

@@ -16,15 +16,16 @@ import (
 type EventKind string
 
 const (
-	SignIn              EventKind = "auth.sign_in"
-	SignOut             EventKind = "auth.sign_out"
-	SessionsRevoked     EventKind = "auth.sessions_revoked"
-	UserSecurityChanged EventKind = "user.security_changed"
-	PermissionChanged   EventKind = "permissions.changed"
-	IntegrationChanged  EventKind = "integration.changed"
-	AuthorizationDenied EventKind = "authorization.denied"
-	Exported            EventKind = "audit.exported"
-	CaseChanged         EventKind = "inbox.case_changed"
+	SignIn               EventKind = "auth.sign_in"
+	SignOut              EventKind = "auth.sign_out"
+	SessionsRevoked      EventKind = "auth.sessions_revoked"
+	UserSecurityChanged  EventKind = "user.security_changed"
+	PermissionChanged    EventKind = "permissions.changed"
+	IntegrationChanged   EventKind = "integration.changed"
+	IntegrationValidated EventKind = "integration.validated"
+	AuthorizationDenied  EventKind = "authorization.denied"
+	Exported             EventKind = "audit.exported"
+	CaseChanged          EventKind = "inbox.case_changed"
 )
 
 type Outcome string
@@ -67,6 +68,7 @@ const (
 	Created                   Reason = "created"
 	ConfigurationChanged      Reason = "configuration_changed"
 	CredentialRotated         Reason = "credential_rotated"
+	Validated                 Reason = "validated"
 	Disabled                  Reason = "disabled"
 	Deleted                   Reason = "deleted"
 	PermissionMissing         Reason = "permission_missing"
@@ -83,15 +85,16 @@ var ErrInvalidEvent = errors.New("invalid security audit event")
 var ErrConflictingEvent = errors.New("conflicting security audit event")
 
 var eventReasons = map[EventKind][]Reason{
-	SignIn:              {Password, MicrosoftSSO, FederatedSSO, InvalidCredentials, DisabledAccount, SessionStorageUnavailable, SessionCreationFailed},
-	SignOut:             {SignedOut, AlreadySignedOut, SessionStorageUnavailable},
-	SessionsRevoked:     {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, MembershipRemoved, RoleChanged, ManualRevocation, BeforeSecurityUpdate, SessionStorageUnavailable},
-	UserSecurityChanged: {PasswordChanged, PasswordReset, UserDisabled, UserEnabled, SSOIdentityChanged, SecuritySettingsChanged},
-	PermissionChanged:   {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, MembershipAdded, MembershipRemoved, UserRoleChanged, UserAuthorityChanged},
-	IntegrationChanged:  {Created, ConfigurationChanged, CredentialRotated, Disabled, Deleted},
-	AuthorizationDenied: {PermissionMissing, ProtectedResource},
-	Exported:            {ExportCompleted},
-	CaseChanged:         {StatusChanged, PriorityChanged, AssignmentChanged, FieldChanged, WorkflowAction},
+	SignIn:               {Password, MicrosoftSSO, FederatedSSO, InvalidCredentials, DisabledAccount, SessionStorageUnavailable, SessionCreationFailed},
+	SignOut:              {SignedOut, AlreadySignedOut, SessionStorageUnavailable},
+	SessionsRevoked:      {PasswordChanged, PasswordReset, UserDisabled, UserDeleted, MembershipChanged, MembershipRemoved, RoleChanged, ManualRevocation, BeforeSecurityUpdate, SessionStorageUnavailable},
+	UserSecurityChanged:  {PasswordChanged, PasswordReset, UserDisabled, UserEnabled, SSOIdentityChanged, SecuritySettingsChanged},
+	PermissionChanged:    {RoleCreated, RoleChanged, RoleDeleted, MembershipChanged, MembershipAdded, MembershipRemoved, UserRoleChanged, UserAuthorityChanged},
+	IntegrationChanged:   {Created, ConfigurationChanged, CredentialRotated, Disabled, Deleted},
+	IntegrationValidated: {Validated},
+	AuthorizationDenied:  {PermissionMissing, ProtectedResource},
+	Exported:             {ExportCompleted},
+	CaseChanged:          {StatusChanged, PriorityChanged, AssignmentChanged, FieldChanged, WorkflowAction},
 }
 var eventPermissions = func() map[string]bool {
 	result := map[string]bool{}
@@ -195,10 +198,16 @@ func eventAllowed(e SecurityEvent) bool {
 			}
 		}
 	}
-	if e.Kind == IntegrationChanged {
+	if e.Kind == IntegrationChanged || e.Kind == IntegrationValidated {
 		switch e.ResourceType {
-		case "account", "webhook", "custom_action", "channel_connection", "inbox_integration":
+		case "account", "webhook", "custom_action", "channel_connection", "inbox_integration", "inbox_integration_settings", "sso_provider":
 		default:
+			return false
+		}
+		if e.Outcome != Success || e.ResourceType == "inbox_integration_settings" && e.ResourceID != e.OrganizationID {
+			return false
+		}
+		if e.Kind == IntegrationValidated && e.ResourceType != "channel_connection" {
 			return false
 		}
 	}
@@ -270,14 +279,14 @@ func RecordSecurity(db *gorm.DB, e SecurityEvent) (captureErr error) {
 		if err := db.Unscoped().Model(&models.CustomRole{}).Where("id=? AND organization_id=?", e.ResourceID, e.OrganizationID).Count(&target).Error; err != nil {
 			return err
 		}
-	case "permission", "audit_logs":
+	case "permission", "audit_logs", "inbox_integration_settings":
 		target = 1
 	case "inbox_case":
 		if err := db.Model(&models.InboxCase{}).Where("id=? AND organization_id=? AND account_id=?", e.ResourceID, e.OrganizationID, e.Context.AccountID).Count(&target).Error; err != nil {
 			return err
 		}
 	default:
-		table := map[string]string{"account": "whatsapp_accounts", "webhook": "webhooks", "custom_action": "custom_actions", "channel_connection": "channel_connections", "inbox_integration": "inbox_integrations"}[e.ResourceType]
+		table := map[string]string{"account": "whatsapp_accounts", "webhook": "webhooks", "custom_action": "custom_actions", "channel_connection": "channel_connections", "inbox_integration": "inbox_integrations", "sso_provider": "sso_providers"}[e.ResourceType]
 		if table == "" {
 			return ErrInvalidEvent
 		}

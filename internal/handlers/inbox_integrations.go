@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/inboxintegration"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -211,7 +212,7 @@ func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
 		}
 	}
 	var d models.InboxIntegration
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "inbox-integrations:"+org.String()).Error; err != nil {
 			return err
 		}
@@ -251,10 +252,24 @@ func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
 		if err := a.validateInboxIntegration(tx, d); err != nil {
 			return err
 		}
+		reason := audit.ConfigurationChanged
 		if create {
-			return tx.Create(&d).Error
+			if err := tx.Create(&d).Error; err != nil {
+				return err
+			}
+			reason = audit.Created
+		} else {
+			if err := tx.Save(&d).Error; err != nil {
+				return err
+			}
+			if !d.Enabled {
+				reason = audit.Disabled
+			}
+			if input.Credential != nil {
+				reason = audit.CredentialRotated
+			}
 		}
-		return tx.Save(&d).Error
+		return a.recordIntegrationSecurity(r, tx, org, actor, "inbox_integration", d.ID, audit.IntegrationChanged, reason)
 	})
 	if err != nil {
 		return a.inboxError(r, err)
@@ -278,7 +293,7 @@ func (a *App) DeleteInboxIntegration(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	err = a.DB.Transaction(func(tx *gorm.DB) error {
+	err = privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		var d models.InboxIntegration
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&d, "id=? AND organization_id=?", id, org).Error; err != nil {
 			return err
@@ -295,6 +310,9 @@ func (a *App) DeleteInboxIntegration(r *fastglue.Request) error {
 		}
 		if count != 0 {
 			return errInboxConflict
+		}
+		if err := a.recordIntegrationSecurity(r, tx, org, actor, "inbox_integration", d.ID, audit.IntegrationChanged, audit.Deleted); err != nil {
+			return err
 		}
 		return tx.Delete(&d).Error
 	})
@@ -332,9 +350,15 @@ func (a *App) UpdateInboxIntegrationSettings(r *fastglue.Request) error {
 	if input.Enabled == nil {
 		return a.inboxError(r, errInboxTransition)
 	}
-	result := a.DB.Model(&models.Organization{}).Where("id=?", org).Update("settings", gorm.Expr("jsonb_set(COALESCE(settings,'{}'::jsonb),'{inbox_integrations_enabled}',to_jsonb(?::boolean),true)", *input.Enabled))
-	if result.Error != nil {
-		return a.inboxError(r, result.Error)
+	reason := audit.ConfigurationChanged
+	if !*input.Enabled {
+		reason = audit.Disabled
+	}
+	err = a.mutateAuditedIntegration(r, org, actor, "inbox_integration_settings", &org, reason, func(tx *gorm.DB) error {
+		return tx.Model(&models.Organization{}).Where("id=?", org).Update("settings", gorm.Expr("jsonb_set(COALESCE(settings,'{}'::jsonb),'{inbox_integrations_enabled}',to_jsonb(?::boolean),true)", *input.Enabled)).Error
+	})
+	if err != nil {
+		return a.inboxError(r, err)
 	}
 	a.logAudit(org, actor, "inbox_integration_settings", org, models.AuditActionUpdated, nil, map[string]any{"enabled": *input.Enabled})
 	return r.SendEnvelope(map[string]bool{"enabled": *input.Enabled})

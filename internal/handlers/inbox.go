@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/inboxquality"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -469,7 +470,7 @@ func (a *App) inboxError(r *fastglue.Request, err error) error {
 	case errors.Is(err, errInboxTransition):
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errInboxTransition.Error(), nil, "")
 	default:
-		a.Log.Error("Inbox operation failed", "error", err)
+		a.Log.Error("Inbox operation failed", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Inbox operation failed", nil, "")
 	}
 }

@@ -11,12 +11,14 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AccountRequest represents the request body for creating/updating an account
@@ -144,7 +146,7 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 
 	// Reserve the number and change defaults atomically. A rejected creation
 	// must preserve the currently selected incoming and outgoing numbers.
-	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+	if err := privateInboxIntegrationDB(a.DB).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&account).Error; err != nil {
 			return err
 		}
@@ -162,12 +164,12 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 				return err
 			}
 		}
-		return nil
+		return a.recordIntegrationSecurity(r, tx, orgID, userID, "account", account.ID, audit.IntegrationChanged, audit.Created)
 	}); err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to create account", "error", err)
+		a.Log.Error("Failed to create account", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
 
@@ -276,26 +278,34 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
 	}
 
-	// Handle default flags
-	if req.IsDefaultIncoming && !account.IsDefaultIncoming {
-		a.DB.Model(&models.WhatsAppAccount{}).
-			Where("organization_id = ? AND is_default_incoming = ?", orgID, true).
-			Update("is_default_incoming", false)
-	}
-	if req.IsDefaultOutgoing && !account.IsDefaultOutgoing {
-		a.DB.Model(&models.WhatsAppAccount{}).
-			Where("organization_id = ? AND is_default_outgoing = ?", orgID, true).
-			Update("is_default_outgoing", false)
-	}
 	account.IsDefaultIncoming = req.IsDefaultIncoming
 	account.IsDefaultOutgoing = req.IsDefaultOutgoing
 	account.UpdatedByID = &userID
 
-	if err := a.DB.Save(account).Error; err != nil {
+	reason := audit.ConfigurationChanged
+	if tokenChanged || secretChanged || req.WebhookVerifyToken != "" {
+		reason = audit.CredentialRotated
+	}
+	if err := a.mutateAuditedIntegration(r, orgID, userID, "account", &account.ID, reason, func(tx *gorm.DB) error {
+		if req.IsDefaultIncoming && !oldAccount.IsDefaultIncoming {
+			if err := tx.Model(&models.WhatsAppAccount{}).Where("organization_id=? AND is_default_incoming AND id<>?", orgID, account.ID).Update("is_default_incoming", false).Error; err != nil {
+				return err
+			}
+		}
+		if req.IsDefaultOutgoing && !oldAccount.IsDefaultOutgoing {
+			if err := tx.Model(&models.WhatsAppAccount{}).Where("organization_id=? AND is_default_outgoing AND id<>?", orgID, account.ID).Update("is_default_outgoing", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Omit(clause.Associations).Save(account).Error
+	}, oldAccount.UpdatedAt); err != nil {
+		if handled, responseErr := sendIntegrationConflict(r, err); handled {
+			return responseErr
+		}
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to update account", "error", err)
+		a.Log.Error("Failed to update account", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
 	}
 
@@ -339,11 +349,11 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 		return nil
 	}
 
-	if err := a.DB.Delete(account).Error; err != nil {
+	if err := a.mutateAuditedIntegration(r, orgID, userID, "account", &account.ID, audit.Deleted, func(tx *gorm.DB) error { return tx.Delete(account).Error }); err != nil {
 		if handled, responseErr := a.sendPlanError(r, err); handled {
 			return responseErr
 		}
-		a.Log.Error("Failed to delete account", "error", err)
+		a.Log.Error("Failed to delete account", "code", audit.ErrorCode(err))
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete account", nil, "")
 	}
 

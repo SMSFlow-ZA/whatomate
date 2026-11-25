@@ -442,12 +442,9 @@ func (a *App) GetSSOSettings(r *fastglue.Request) error {
 
 // UpdateSSOProvider creates or updates an SSO provider config (admin only)
 func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
-	if _, _, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite); err != nil {
-		return nil
-	}
-	orgID, err := a.getOrgID(r)
+	orgID, actorID, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	provider := r.RequestCtx.UserValue("provider").(string)
@@ -481,7 +478,11 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 	var ssoConfig models.SSOProvider
 	err = a.DB.Where("organization_id = ? AND provider = ?", orgID, provider).First(&ssoConfig).Error
 
-	if err != nil {
+	created := errors.Is(err, gorm.ErrRecordNotFound)
+	if err != nil && !created {
+		return r.SendErrorEnvelope(500, "Failed to load SSO settings", nil, "")
+	}
+	if created {
 		// Create new
 		ssoConfig = models.SSOProvider{
 			OrganizationID: orgID,
@@ -510,8 +511,25 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 	ssoConfig.TokenURL = req.TokenURL
 	ssoConfig.UserInfoURL = req.UserInfoURL
 
-	if err := a.DB.Save(&ssoConfig).Error; err != nil {
-		a.Log.Error("Failed to save SSO provider", "error", err, "provider", provider)
+	reason := audit.ConfigurationChanged
+	if !req.IsEnabled {
+		reason = audit.Disabled
+	}
+	if req.ClientSecret != "" {
+		reason = audit.CredentialRotated
+	}
+	if created {
+		reason = audit.Created
+	}
+	var expected []time.Time
+	if !created {
+		expected = []time.Time{ssoConfig.UpdatedAt}
+	}
+	if err := a.mutateAuditedIntegration(r, orgID, actorID, "sso_provider", &ssoConfig.ID, reason, func(tx *gorm.DB) error { return tx.Save(&ssoConfig).Error }, expected...); err != nil {
+		if handled, responseErr := sendIntegrationConflict(r, err); handled {
+			return responseErr
+		}
+		a.Log.Error("Failed to save SSO provider", "code", audit.ErrorCode(err), "provider", provider)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save SSO settings", nil, "")
 	}
 
@@ -535,24 +553,36 @@ func (a *App) UpdateSSOProvider(r *fastglue.Request) error {
 // doesn't ignore deleted_at — a soft-deleted row would block re-creating the
 // same provider until the row is purged.
 func (a *App) DeleteSSOProvider(r *fastglue.Request) error {
-	if _, _, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite); err != nil {
-		return nil
-	}
-	orgID, err := a.getOrgID(r)
+	orgID, actorID, err := a.requireAuth(r, models.ResourceSettingsSSO, models.ActionWrite)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	provider := r.RequestCtx.UserValue("provider").(string)
 
-	result := a.DB.Unscoped().Where("organization_id = ? AND provider = ?", orgID, provider).Delete(&models.SSOProvider{})
-	if result.Error != nil {
-		a.Log.Error("Failed to delete SSO provider", "error", result.Error, "provider", provider)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete SSO provider", nil, "")
+	var target models.SSOProvider
+	if err := a.DB.First(&target, "organization_id=? AND provider=?", orgID, provider).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(404, "SSO provider not found", nil, "")
+		}
+		return r.SendErrorEnvelope(500, "Failed to load SSO provider", nil, "")
 	}
-
-	if result.RowsAffected == 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "SSO provider not found", nil, "")
+	err = a.mutateAuditedIntegration(r, orgID, actorID, "sso_provider", &target.ID, audit.Deleted, func(tx *gorm.DB) error {
+		result := tx.Unscoped().Where("id=? AND organization_id=?", target.ID, orgID).Delete(&models.SSOProvider{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.SendErrorEnvelope(404, "SSO provider not found", nil, "")
+	}
+	if err != nil {
+		a.Log.Error("Failed to delete SSO provider", "code", audit.ErrorCode(err), "provider", provider)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete SSO provider", nil, "")
 	}
 
 	return r.SendEnvelope(map[string]string{"message": "SSO provider deleted"})
