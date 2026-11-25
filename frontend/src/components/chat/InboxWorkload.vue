@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InboxAssignmentRate from './InboxAssignmentRate.vue'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
@@ -129,6 +130,7 @@ onUnmounted(() => {
               )
             }}
           </p>
+          <InboxAssignmentRate :row="row" />
         </div>
         <span class="inbox-badge tabular-nums"
           >{{ row.active }} /

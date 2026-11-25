@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import InboxAssignmentRate from './InboxAssignmentRate.vue'
 import {
   inboxService,
   type InboxCase,
@@ -103,6 +104,14 @@ async function assign(id: string | null) {
 }
 
 const restoreDialogFocus = useInboxDialogFocus(open)
+function blocked(row: InboxCapacity) {
+  if (row.assignment_reason === 'permission_required') return true
+  if (current.value?.assignee_id === row.agent_id) return false
+  const limited =
+    row.assignment_reason === 'rate_limited' ||
+    (row.max_active > 0 && row.active >= row.max_active)
+  return limited && (!canOverride.value || !reason.value.trim())
+}
 </script>
 <template>
   <Dialog
@@ -160,16 +169,10 @@ const restoreDialogFocus = useInboxDialogFocus(open)
         <li v-for="row in visible" :key="row.agent_id">
           <Button
             variant="ghost"
-            class="h-auto min-h-12 w-full justify-between gap-3 py-3"
-            :disabled="
-              busy ||
-              current?.status === 'resolved' ||
-              (row.max_active > 0 &&
-                row.active >= row.max_active &&
-                (!canOverride || !reason.trim()))
-            "
+            class="h-auto min-h-12 w-full justify-between gap-3 whitespace-normal py-3"
+            :disabled="busy || current?.status === 'resolved' || blocked(row)"
             @click="assign(row.agent_id)"
-            ><span class="text-left"
+            ><span class="min-w-0 flex-1 text-left"
               ><span class="block">{{ row.name }}</span
               ><span class="inbox-caption"
                 >{{
@@ -185,7 +188,7 @@ const restoreDialogFocus = useInboxDialogFocus(open)
                 v-if="row.max_active > 0 && row.active >= row.max_active"
                 class="inbox-caption block"
                 >{{ t('inboxQuality.atCapacity') }}</span
-              ></span
+              ><InboxAssignmentRate :row="row" /></span
             ><span
               v-if="current?.assignee_id === row.agent_id"
               class="inbox-badge"

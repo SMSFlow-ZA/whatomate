@@ -227,6 +227,17 @@ export interface InboxCapacity {
   active: number
   available: boolean
   inactive?: boolean
+  max_assignments?: number
+  window_seconds?: number
+  assignments?: number
+  rate_resumes_at?: string
+  rate_details_hidden?: boolean
+  assignment_reason?:
+    | 'capacity'
+    | 'unavailable'
+    | 'permission_required'
+    | 'rate_limited'
+    | 'invalid_config'
 }
 
 export interface InboxCase {

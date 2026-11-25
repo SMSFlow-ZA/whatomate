@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
 import { UsersRound } from 'lucide-vue-next'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { accountsService } from '@/services/api'
 import InboxCapacityPresets from './InboxCapacityPresets.vue'
+import InboxRoutingPolicies from './InboxRoutingPolicies.vue'
+import InboxAssignmentRate from '@/components/chat/InboxAssignmentRate.vue'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { inboxService, type InboxCapacity } from '@/services/inbox'
@@ -18,6 +20,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const presetEditor = ref<InstanceType<typeof InboxCapacityPresets>>()
+const routingEditor = ref<InstanceType<typeof InboxRoutingPolicies>>()
 const account = ref(props.account ?? '')
 const accounts = ref<{ id: string; name: string }[]>([])
 const rows = ref<InboxCapacity[]>([])
@@ -29,18 +32,18 @@ const settingsFailed = ref(false)
 const accountsFailed = ref(false)
 const lastUpdated = ref('')
 const originalLimits = new Map<string, number>()
+const unsavedLimits = computed(
+  () =>
+    !!props.canWrite &&
+    rows.value.some(
+      (row) =>
+        row.max_active !== (originalLimits.get(row.agent_id) ?? row.max_active),
+    ),
+)
 let timer: ReturnType<typeof setInterval> | undefined
 let sequence = 0
 const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
-  useInboxDraftGuard(
-    () =>
-      !!props.canWrite &&
-      rows.value.some(
-        (row) =>
-          row.max_active !==
-          (originalLimits.get(row.agent_id) ?? row.max_active),
-      ),
-  )
+  useInboxDraftGuard(() => unsavedLimits.value)
 function selectAccount(event: Event) {
   const control = event.target as HTMLSelectElement
   const value = control.value
@@ -49,8 +52,10 @@ function selectAccount(event: Event) {
     requestDiscard(() => {
       account.value = value
     })
-  if (presetEditor.value) presetEditor.value.confirmLeave(change)
-  else change()
+  const routingChange = () =>
+    routingEditor.value ? routingEditor.value.confirmLeave(change) : change()
+  if (presetEditor.value) presetEditor.value.confirmLeave(routingChange)
+  else routingChange()
 }
 
 async function load() {
@@ -264,6 +269,7 @@ function presetApplied() {
                     : 'inboxCapacity.unavailable',
                 )
               }}</span>
+              <InboxAssignmentRate :row="row" />
             </td>
             <td class="tabular-nums">{{ row.active }}</td>
             <td>
@@ -306,6 +312,16 @@ function presetApplied() {
       :team="team"
       :account="account"
       :agents="rows.map((row) => row.agent_id)"
+      @applied="presetApplied()"
+    />
+    <InboxRoutingPolicies
+      v-if="account"
+      ref="routingEditor"
+      :team="team"
+      :account="account"
+      :agents="rows"
+      :can-write="canWrite"
+      :blocked="unsavedLimits"
       @applied="presetApplied()"
     />
     <p v-if="account && rows.length" class="inbox-subsection inbox-caption">
