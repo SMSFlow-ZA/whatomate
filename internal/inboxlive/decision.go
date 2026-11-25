@@ -8,6 +8,7 @@ type Decision struct {
 	Allowed   bool
 	Match     bool
 	Reset     bool
+	Clear     bool
 	Authority string
 }
 

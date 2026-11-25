@@ -34,6 +34,7 @@ type ScopeChange struct {
 	Scope    string `json:"scope"`
 	Allowed  bool   `json:"allowed"`
 	Reset    bool   `json:"reset"`
+	Clear    bool   `json:"clear,omitempty"`
 	Resource string `json:"resource,omitempty"`
 	Version  int64  `json:"version,omitempty"`
 }
@@ -172,11 +173,12 @@ func (s *Subscription) Deliver(ctx context.Context, update Update, now time.Time
 	for _, item := range watch {
 		decision, err := s.authorize(ctx, item.scope, update.Event)
 		allowed := err == nil && decision.Allowed && ctx.Err() == nil
-		change := ScopeChange{Scope: item.scope.Key(), Allowed: allowed, Reset: true}
+		change := ScopeChange{Scope: item.scope.Key(), Allowed: allowed, Reset: true,
+			Clear: !allowed || decision.Clear || decision.Authority != item.authority}
 		if allowed {
 			kept = append(kept, watchedScope{scope: item.scope, authority: decision.Authority})
 		}
-		if !allowed || update.Reset || decision.Authority != item.authority || decision.Reset {
+		if !allowed || update.Reset || decision.Authority != item.authority || decision.Reset || decision.Clear {
 			changes = append(changes, change)
 		} else if decision.Match && update.Event != nil {
 			mac := hmac.New(sha256.New, s.secret)

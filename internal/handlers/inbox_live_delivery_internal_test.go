@@ -47,6 +47,7 @@ func TestInboxLiveDeliveryScopesCurrentVisibilityAndRevocation(t *testing.T) {
 	decision, err = auth(context.Background(), scope, &event)
 	require.NoError(t, err)
 	require.True(t, decision.Allowed && decision.Match && decision.Reset)
+	require.True(t, decision.Clear, "lost assignments clear old private queue rows")
 	decision, err = auth(context.Background(), inboxlive.WatchScope{Kind: "case", CaseID: &c.ID}, &event)
 	require.NoError(t, err)
 	require.False(t, decision.Allowed)

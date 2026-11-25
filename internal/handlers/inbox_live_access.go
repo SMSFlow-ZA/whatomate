@@ -125,6 +125,9 @@ func (a *App) inboxLiveAuthorizer(org, user uuid.UUID, claims *middleware.JWTCla
 		if err != nil {
 			return inboxlive.Decision{}, err
 		}
+		if err := a.reconcileInboxLivePermissionCache(ctx, viewer); err != nil {
+			return inboxlive.Decision{}, err
+		}
 		db := a.DB.WithContext(ctx)
 		allowed, err := inboxLiveScopeAllowed(db, viewer, scope)
 		decision := inboxlive.Decision{Allowed: allowed, Authority: viewer.fingerprint()}
@@ -141,6 +144,22 @@ func (a *App) inboxLiveAuthorizer(org, user uuid.UUID, claims *middleware.JWTCla
 			return decision, nil
 		}
 		decision.Match, decision.Reset, err = inboxLiveEventVisible(db, viewer, scope, event)
+		if err == nil && decision.Match && decision.Reset && scope.Kind == "queue" && !viewer.has(models.ResourceContacts, models.ActionRead) && (event.Kind == "case" || event.Kind == "contact") {
+			// A changed team filter alone is an ordinary staged refresh. Clear
+			// private rows only when actual read access in this account was lost.
+			q := scopeInboxCaseHistoryWithContactRead(db.Model(&models.InboxCase{}), viewer.User, org, false)
+			if event.Kind == "case" {
+				q = q.Where("inbox_cases.id=?", event.ResourceID)
+			} else {
+				q = q.Where("inbox_cases.contact_id=?", event.ResourceID)
+			}
+			if scope.AccountID != nil {
+				q = q.Where("inbox_cases.account_id=?", *scope.AccountID)
+			}
+			var count int64
+			err = q.Count(&count).Error
+			decision.Clear = count == 0
+		}
 		return decision, err
 	}
 }

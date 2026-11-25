@@ -48,6 +48,7 @@ func TestSubscriptionRechecksAuthorityAndPublishesOpaqueVersionsOnly(t *testing.
 	require.Len(t, frames, 4)
 	require.True(t, frames[3].Changes[0].Reset)
 	require.False(t, frames[3].Changes[0].Allowed)
+	require.True(t, frames[3].Changes[0].Clear)
 	require.Empty(t, frames[3].Changes[0].Resource)
 	require.EqualValues(t, 6, checks.Load())
 }
@@ -150,6 +151,7 @@ func TestSubscriptionBoundedRenewalAndChangedAuthorityReset(t *testing.T) {
 	s.Deliver(context.Background(), u, now.Add(time.Second))
 	last := frames[len(frames)-1]
 	require.True(t, last.Changes[0].Reset)
+	require.True(t, last.Changes[0].Clear, "changed authority cannot preserve old private rows")
 	require.Empty(t, last.Changes[0].Resource)
 	before := len(frames)
 	s.Replace(context.Background(), set, now.Add(time.Second))
