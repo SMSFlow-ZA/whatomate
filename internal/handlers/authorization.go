@@ -122,6 +122,14 @@ func (a *App) AuthorizeAPI() fastglue.FastMiddleware {
 			}
 		case "audit-logs":
 			resource = models.ResourceAuditLogs
+			if method == "GET" || (method == "POST" && path == "/api/audit-logs/export") {
+				// Audit routes do not trust the cached permission gate. Their
+				// handlers recheck within the scoped read/export transaction.
+				if !a.authorizeAuditRoute(r, method == "POST") {
+					return nil
+				}
+				return r
+			}
 		case "ivr-flows":
 			resource = models.ResourceIVRFlows
 		case "call-logs":

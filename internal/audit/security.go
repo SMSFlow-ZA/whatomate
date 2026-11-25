@@ -82,6 +82,7 @@ const (
 	PermissionMissing         Reason = "permission_missing"
 	ProtectedResource         Reason = "protected_resource"
 	ExportCompleted           Reason = "export_completed"
+	ExportPrepared            Reason = "export_prepared"
 	StatusChanged             Reason = "status_changed"
 	PriorityChanged           Reason = "priority_changed"
 	AssignmentChanged         Reason = "assignment_changed"
@@ -103,7 +104,7 @@ var eventReasons = map[EventKind][]Reason{
 	IntegrationValidated: {Validated},
 	RegistrationUpdated:  {RegistrationActive, RegistrationPending, RegistrationInactive},
 	AuthorizationDenied:  {PermissionMissing, ProtectedResource},
-	Exported:             {ExportCompleted},
+	Exported:             {ExportCompleted, ExportPrepared},
 	CaseChanged:          {StatusChanged, PriorityChanged, AssignmentChanged, FieldChanged, WorkflowAction},
 }
 var eventPermissions = func() map[string]bool {

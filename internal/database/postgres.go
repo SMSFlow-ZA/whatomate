@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -471,6 +472,15 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 	for _, perm := range defaultPerms {
 		var existing models.Permission
 		if err := db.Where("resource = ? AND action = ?", perm.Resource, perm.Action).First(&existing).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to inspect permission %s:%s: %w", perm.Resource, perm.Action, err)
+			}
+			if perm.Resource == models.ResourceAuditLogs && perm.Action == models.ActionExport {
+				if err := seedAuditExportPermission(db, perm); err != nil {
+					return err
+				}
+				continue
+			}
 			// Permission doesn't exist, create it
 			perm.ID = uuid.New()
 			if err := db.Create(&perm).Error; err != nil {

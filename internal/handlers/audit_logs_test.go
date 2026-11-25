@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,14 +16,21 @@ import (
 	"gorm.io/gorm"
 )
 
-// auditLogsRole creates a role with audit_logs:read permission.
+// Audit investigation also requires the underlying resource's read permission.
 func auditLogsRole(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.CustomRole {
 	t.Helper()
-	return testutil.CreateTestRoleWithKeys(t, db, orgID, "audit-reader", []string{"audit_logs:read"})
+	return testutil.CreateTestRoleWithKeys(t, db, orgID, "audit-reader", []string{"audit_logs:read", "contacts:read", "users:read"})
 }
 
 func makeAuditLog(t *testing.T, db *gorm.DB, orgID, userID, resourceID uuid.UUID, resType string, action models.AuditAction, when time.Time) *models.AuditLog {
 	t.Helper()
+	// Legacy ownership must be verifiable; a random ID is not a tenant scope.
+	switch resType {
+	case "contact":
+		require.NoError(t, db.Create(&models.Contact{BaseModel: models.BaseModel{ID: resourceID}, OrganizationID: orgID, ProfileName: "Synthetic audit contact", PhoneNumber: fmt.Sprintf("+278%09d", uuid.New().ID()%1000000000)}).Error)
+	case "user":
+		testutil.CreateTestUser(t, db, orgID, func(u *models.User) { u.ID = resourceID })
+	}
 	log := &models.AuditLog{
 		ID:             uuid.New(),
 		OrganizationID: orgID,
@@ -130,8 +138,8 @@ func TestApp_ListAuditLogs_DateRangeFilter(t *testing.T) {
 
 	now := time.Now()
 	old := now.Add(-72 * time.Hour)
-	makeAuditLog(t, app.DB, org.ID, user.ID, uuid.New(), "x", models.AuditActionCreated, old)
-	makeAuditLog(t, app.DB, org.ID, user.ID, uuid.New(), "x", models.AuditActionCreated, now)
+	makeAuditLog(t, app.DB, org.ID, user.ID, uuid.New(), "contact", models.AuditActionCreated, old)
+	makeAuditLog(t, app.DB, org.ID, user.ID, uuid.New(), "contact", models.AuditActionCreated, now)
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -156,8 +164,8 @@ func TestApp_ListAuditLogs_CrossOrgIsolation(t *testing.T) {
 	userA := testutil.CreateTestUser(t, app.DB, orgA.ID, testutil.WithRoleID(&roleA.ID))
 	userB := testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithRoleID(&roleB.ID))
 
-	makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "x", models.AuditActionCreated, time.Now())
-	makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "x", models.AuditActionUpdated, time.Now())
+	makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "contact", models.AuditActionCreated, time.Now())
+	makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "contact", models.AuditActionUpdated, time.Now())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, orgB.ID, userB.ID)
@@ -230,7 +238,7 @@ func TestApp_GetAuditLog_CrossOrgIsolation(t *testing.T) {
 	roleB := auditLogsRole(t, app.DB, orgB.ID)
 	userA := testutil.CreateTestUser(t, app.DB, orgA.ID)
 	userB := testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithRoleID(&roleB.ID))
-	log := makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "x", models.AuditActionCreated, time.Now())
+	log := makeAuditLog(t, app.DB, orgA.ID, userA.ID, uuid.New(), "contact", models.AuditActionCreated, time.Now())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, orgB.ID, userB.ID)

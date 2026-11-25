@@ -241,6 +241,7 @@ func DefaultPermissions() []Permission {
 
 		// Audit Logs
 		{Resource: ResourceAuditLogs, Action: ActionRead, Description: "View audit logs"},
+		{Resource: ResourceAuditLogs, Action: ActionExport, Description: "Export readable audit records"},
 	}
 }
 

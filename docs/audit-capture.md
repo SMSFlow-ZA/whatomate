@@ -145,9 +145,9 @@ Audit failure rolls back that configuration and any pending-work cancellation;
 uncertain submissions keep their existing reconciliation state.
 
 These records cover the named application handlers, not arbitrary direct database,
-bootstrap or external provisioning writes. Scoped investigation/export remains
-unfinished. The feature is not yet ready for a managed release. Existing dispatch
-holds and automation defaults are unchanged.
+bootstrap or external provisioning writes. Scoped investigation/export APIs are
+under local qualification; the updated audit interface and managed release remain
+unfinished. Existing dispatch holds and automation defaults are unchanged.
 
 ## Registration and onboarding provenance
 
@@ -187,3 +187,76 @@ remote replay is added. Provider error bodies, authorization codes, credentials
 and PINs are absent from audit/diagnostic payloads. Existing write-authorised
 setup responses may still show the webhook verification token and generated PIN
 needed for configuration; this does not grant audit readers access to them.
+
+## Investigation and paginated export
+
+The existing `GET /api/audit-logs` and `GET /api/audit-logs/{id}` now load the
+viewer's current user, selected-organisation membership, role and permissions
+from PostgreSQL. Cached role/superadmin flags cannot grant audit access. A removed,
+nil or foreign membership role cannot inherit the native role. Supported older
+native identities without a membership row retain their native role behavior.
+Stamped sessions must still match the current identity.
+
+`audit_logs:read` is required together with the underlying resource's current
+read access. Workflow-integration configuration follows its existing general
+settings write boundary; escalation settings also require full inbox access.
+The same scope applies before filters, count, paging, details, choices and export.
+Contact-only history cannot borrow an assigned case on another account. Explicit
+case context must satisfy the existing current case-history access rules. Former
+assignment is insufficient. Conversation activity and workflow run history retain
+their own scoped APIs; security investigation never infers conversation context
+from a contact or fabricates events from message history.
+
+Known soft-deleted configuration targets retain verifiable historical ownership.
+Verified typed ownership can retain a hard-deleted target's history, without a
+link to a current resource. Unknown legacy ownership is unavailable, including to
+administrators; a random ID/name is not proof. Staff identity and origin details
+are masked without directory access, apart from the viewer's own recorded actor
+label. Policy provisioning uses its fixed non-human label. Current resource/actor
+availability flags do not grant access to another API.
+
+Responses keep existing fields and add captured/legacy/unsupported context,
+masking and availability flags, capabilities, `as_of`, `has_more` and
+`next_cursor`. Zero-version rows never acquire an inferred IP, request ID, outcome
+or verified actor. Sensitive diffs are sanitized on every read. Oversized or
+invalid-shape historical diffs are replaced in the query result with an
+unavailable marker before decoding; stored history is unchanged.
+
+Supported filters are `resource_type`, `resource_id`, `user_id`, `action`, `from`,
+`to`, `category`, `event`, `outcome`, `request_id`, `account_id` and `case_id`.
+Malformed/unknown/repeated parameters fail rather than silently widening a query.
+Date-only bounds mean UTC days; the upper day includes every subsecond instant
+before the next UTC midnight. RFC3339 bounds include the exact supplied timestamp.
+Use `outcome=unavailable` for context that was not captured. Actor ID zero selects
+system/unverified observations, not a user. Phone/contact permissions remain in
+force regardless of these filters.
+
+Lists retain valid page/limit requests (50 by default, 100 maximum). Cursor paging
+uses descending creation time/record ID, a fixed first-page time boundary and the
+same viewer/filter context. A cursor is only a position, never an access grant.
+Changing filters or viewer requires restarting paging; every request rechecks
+current access. `GET /api/audit-logs/filters` returns scoped choices, not a staff
+directory. Actor choices are explicitly limited to 100, with a limit indicator.
+Storage failures produce a recoverable error and a server-owned support reference,
+not an empty successful result or a guessed not-found response.
+
+`POST /api/audit-logs/export` accepts the same filters with an optional cursor and
+a limit of 1–1000 (default 1000). It additionally requires `audit_logs:export`.
+One CSV page is bounded to 4 MiB; reduce the limit/range if it is too large.
+`X-Audit-Has-More` and `X-Audit-Next-Cursor` explicitly identify additional pages;
+no silently truncated complete-export claim is made. CSV contains readable,
+sanitized data only, uses UTF-8/CRLF, and escapes spreadsheet formula prefixes
+after whitespace, controls or a byte-order mark. Download responses are not cached.
+
+After generation, authority and the returned record IDs are checked again. A
+permission/assignment change stops the export. An `audit.exported` observation
+with reason `export_prepared` must commit before bytes are returned; failure
+returns no CSV. This records server-side generation, not receipt by the client.
+No filters, diff values, credentials or CSV body enter that observation.
+
+The new export permission is granted to default new Admin roles. When it is first
+introduced on upgrade, only existing system Admin roles that already have audit
+read access receive it. Creation/grant is transactional. Later explicit removals
+survive startup, and custom roles/managers are not silently promoted. Additive
+organisation/time/ID and organisation/actor/time/ID indexes support investigation.
+No new retention period, entitlement or tamper-proof guarantee is introduced.
