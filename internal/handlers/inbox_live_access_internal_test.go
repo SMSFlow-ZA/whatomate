@@ -3,14 +3,29 @@ package handlers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/inboxlive"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInboxLiveSessionStorageOutageDoesNotClaimRevocation(t *testing.T) {
+	f := newRoutingPolicyFixture(t)
+	f.enable(t)
+	f.a.Redis = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 50 * time.Millisecond})
+	t.Cleanup(func() { _ = f.a.Redis.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	claims := &middleware.JWTClaims{UserID: f.agent.ID, OrganizationID: f.org.ID, SessionID: "synthetic-session", SessionFamily: "synthetic-family"}
+	decision, err := f.a.inboxLiveAuthorizer(f.org.ID, f.agent.ID, claims)(ctx, inboxlive.WatchScope{Kind: "queue"}, nil)
+	require.ErrorIs(t, err, errAuditStorage)
+	require.False(t, decision.Allowed)
+}
 
 func TestInboxLiveWatchAuthorityUsesCurrentRolesAndAccountScopedAssignments(t *testing.T) {
 	f := newRoutingPolicyFixture(t)

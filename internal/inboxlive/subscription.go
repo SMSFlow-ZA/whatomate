@@ -63,6 +63,7 @@ type Subscription struct {
 	sequence    uint64
 	lastOrder   uint64
 	available   bool
+	unverified  bool
 	versions    map[string]int64
 }
 
@@ -103,6 +104,10 @@ func (s *Subscription) Replace(ctx context.Context, set WatchSet, now time.Time)
 	}
 	s.reservation++
 	reservation := s.reservation
+	previous := make(map[string]string, len(s.watched))
+	for _, item := range s.watched {
+		previous[item.scope.Key()] = item.authority
+	}
 	s.generation, s.watched, s.expires = set.Generation, nil, time.Time{}
 	s.epoch, s.sequence, s.lastOrder = uuid.New(), 0, 0
 	clear(s.versions)
@@ -116,13 +121,19 @@ func (s *Subscription) Replace(ctx context.Context, set WatchSet, now time.Time)
 
 	watch := make([]watchedScope, 0, len(set.Scopes))
 	changes := make([]ScopeChange, 0, len(set.Scopes))
+	unverified := false
 	for _, scope := range set.Scopes {
 		decision := Decision{}
 		var err error
 		if s.authorize != nil {
 			decision, err = s.authorize(ctx, scope, nil)
 		}
-		allowed := err == nil && decision.Allowed && ctx.Err() == nil
+		if err != nil || ctx.Err() != nil {
+			unverified = true
+			watch = append(watch, watchedScope{scope: scope, authority: previous[scope.Key()]})
+			continue
+		}
+		allowed := decision.Allowed
 		changes = append(changes, ScopeChange{Scope: scope.Key(), Allowed: allowed, Reset: true})
 		if allowed {
 			watch = append(watch, watchedScope{scope: scope, authority: decision.Authority})
@@ -134,6 +145,12 @@ func (s *Subscription) Replace(ctx context.Context, set WatchSet, now time.Time)
 		return
 	}
 	s.watched, s.expires = watch, now.Add(WatchLifetime)
+	s.unverified = unverified
+	if unverified {
+		s.available = false
+		s.emitLocked("unavailable", nil)
+		return
+	}
 	s.emitLocked("watching", changes)
 }
 
@@ -166,19 +183,26 @@ func (s *Subscription) Deliver(ctx context.Context, update Update, now time.Time
 	}
 	reservation := s.reservation
 	watch := append([]watchedScope(nil), s.watched...)
+	recovering := s.unverified
 	s.mu.Unlock()
 
 	changes := make([]ScopeChange, 0, len(watch))
 	kept := make([]watchedScope, 0, len(watch))
+	unverified := false
 	for _, item := range watch {
 		decision, err := s.authorize(ctx, item.scope, update.Event)
-		allowed := err == nil && decision.Allowed && ctx.Err() == nil
+		if err != nil || ctx.Err() != nil {
+			unverified = true
+			continue
+		}
+		allowed := decision.Allowed
+		authorityChanged := item.authority != "" && decision.Authority != item.authority
 		change := ScopeChange{Scope: item.scope.Key(), Allowed: allowed, Reset: true,
-			Clear: !allowed || decision.Clear || decision.Authority != item.authority}
+			Clear: !allowed || decision.Clear || authorityChanged}
 		if allowed {
 			kept = append(kept, watchedScope{scope: item.scope, authority: decision.Authority})
 		}
-		if !allowed || update.Reset || decision.Authority != item.authority || decision.Reset || decision.Clear {
+		if !allowed || recovering || update.Reset || authorityChanged || decision.Reset || decision.Clear {
 			changes = append(changes, change)
 		} else if decision.Match && update.Event != nil {
 			mac := hmac.New(sha256.New, s.secret)
@@ -195,8 +219,17 @@ func (s *Subscription) Deliver(ctx context.Context, update Update, now time.Time
 	if update.Order != 0 {
 		s.lastOrder = update.Order
 	}
+	if unverified {
+		// No hint from a partially verified batch is published. Retain only the
+		// already requested scopes, not any event data; a fresh check is required
+		// before the next resource hint or recovery reset can be emitted.
+		s.unverified, s.available = true, false
+		s.emitLocked("unavailable", nil)
+		return
+	}
+	s.unverified = false
 	s.watched = kept
-	reset := update.Reset || s.upstream != update.Epoch
+	reset := recovering || update.Reset || s.upstream != update.Epoch
 	if reset {
 		s.upstream, s.epoch, s.sequence = update.Epoch, uuid.New(), 0
 		clear(s.versions)

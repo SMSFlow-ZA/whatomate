@@ -61,7 +61,7 @@ func TestInboxLiveDeliveryScopesCurrentVisibilityAndRevocation(t *testing.T) {
 	require.NotEqual(t, originalAuthority, decision.Authority)
 	require.NoError(t, f.db.Where("organization_id=? AND user_id=?", f.org.ID, f.agent.ID).Delete(&models.UserOrganization{}).Error)
 	decision, err = auth(context.Background(), scope, &event)
-	require.Error(t, err)
+	require.NoError(t, err, "confirmed revocation is distinct from unavailable storage")
 	require.False(t, decision.Allowed)
 }
 

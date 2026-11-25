@@ -3,6 +3,7 @@ package inboxlive
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,44 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSubscriptionUnavailablePreservesRequestedScopesWithoutPublishingHints(t *testing.T) {
+	for _, initialOutage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "during-delivery", true: "during-subscription"}[initialOutage], func(t *testing.T) {
+			now := time.Now()
+			outage, allowed := initialOutage, true
+			frames := []Frame{}
+			s := NewSubscription(func(context.Context, WatchScope, *Event) (Decision, error) {
+				if outage {
+					return Decision{}, errors.New("synthetic unavailable storage")
+				}
+				return Decision{Allowed: allowed, Match: true, Authority: "verified-role"}, nil
+			}, func(frame Frame) bool { frames = append(frames, frame); return true })
+			s.Replace(context.Background(), WatchSet{Protocol: 1, Generation: 1, Scopes: []WatchScope{{Kind: "queue"}}}, now)
+			u := Update{Epoch: uuid.New(), Available: true, Event: &Event{Kind: "case", ResourceID: uuid.New(), Version: 4}}
+			outage = true
+			s.Deliver(context.Background(), u, now)
+			last := frames[len(frames)-1]
+			require.Equal(t, "unavailable", last.State)
+			require.False(t, last.Available)
+			require.Empty(t, last.Changes, "an outage cannot publish resource details or assert revocation")
+			require.Len(t, s.watched, 1)
+			outage = false
+			s.Deliver(context.Background(), u, now)
+			last = frames[len(frames)-1]
+			require.Equal(t, "update", last.State)
+			require.True(t, last.Available)
+			require.Len(t, last.Changes, 1)
+			require.True(t, last.Changes[0].Allowed && last.Changes[0].Reset)
+			require.False(t, last.Changes[0].Clear, "recovery must preserve drafts when authority is unchanged")
+			require.Empty(t, last.Changes[0].Resource)
+			allowed = false
+			s.Deliver(context.Background(), u, now)
+			require.True(t, frames[len(frames)-1].Changes[0].Clear)
+			require.Empty(t, s.watched)
+		})
+	}
+}
 
 func TestSubscriptionRechecksAuthorityAndPublishesOpaqueVersionsOnly(t *testing.T) {
 	now := time.Now()

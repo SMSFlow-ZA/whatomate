@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/inboxlive"
@@ -20,10 +21,24 @@ func (a *App) inboxLiveViewer(ctx context.Context, org, user uuid.UUID, claims *
 	}
 	if claims != nil && claims.SessionID != "" {
 		if err := middleware.ValidateSession(ctx, a.Redis, claims); err != nil {
+			// A transport failure cannot prove that a session was revoked. Fail
+			// closed without telling the client to discard its authored draft.
+			if a.Redis != nil {
+				if ctx.Err() != nil || a.Redis.Ping(ctx).Err() != nil {
+					return viewer, errAuditStorage
+				}
+				if middleware.ValidateSession(ctx, a.Redis, claims) == nil {
+					return a.inboxLiveEnabledViewer(db, viewer)
+				}
+			}
 			return viewer, errAuditUnauthenticated
 		}
 	}
-	enabled, err := inboxWorkflowEnabled(db, org, false)
+	return a.inboxLiveEnabledViewer(db, viewer)
+}
+
+func (a *App) inboxLiveEnabledViewer(db *gorm.DB, viewer auditViewer) (auditViewer, error) {
+	enabled, err := inboxWorkflowEnabled(db, viewer.Org, false)
 	if err != nil {
 		return viewer, err
 	}
@@ -123,6 +138,9 @@ func (a *App) inboxLiveAuthorizer(org, user uuid.UUID, claims *middleware.JWTCla
 	return func(ctx context.Context, scope inboxlive.WatchScope, event *inboxlive.Event) (inboxlive.Decision, error) {
 		viewer, err := a.inboxLiveViewer(ctx, org, user, claims)
 		if err != nil {
+			if errors.Is(err, errAuditUnauthenticated) || errors.Is(err, errAuditForbidden) || errors.Is(err, errInboxDisabled) {
+				return inboxlive.Decision{Allowed: false}, nil
+			}
 			return inboxlive.Decision{}, err
 		}
 		if err := a.reconcileInboxLivePermissionCache(ctx, viewer); err != nil {
