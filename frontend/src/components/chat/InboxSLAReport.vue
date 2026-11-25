@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import { Clock3, Settings2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -110,6 +112,37 @@ onUnmounted(() => {
   clearInterval(timer)
   document.removeEventListener('visibilitychange', refreshVisible)
 })
+const live = useInboxLive(
+  () => ({
+    kind: 'supervisor',
+    account_id: account.value || undefined,
+    team_id: team.value || undefined,
+  }),
+  {
+    active: () => available.value && section.value === 'live',
+    context: () => JSON.stringify([account.value, team.value]),
+    blocked: () => loading.value,
+    refresh: load,
+    clear: () => {
+      sequence++
+      rows.value = []
+      offset.value = 0
+      summary.value = { total: 0, breached: 0, at_risk: 0 }
+      lastUpdated.value = ''
+      hasMore.value = false
+      loading.value = false
+    },
+    denied: () => {
+      sequence++
+      rows.value = []
+      summary.value = { total: 0, breached: 0, at_risk: 0 }
+      lastUpdated.value = ''
+      hasMore.value = false
+      loading.value = false
+      failed.value = true
+    },
+  },
+)
 </script>
 
 <template>
@@ -123,6 +156,11 @@ onUnmounted(() => {
     <div class="inbox-toolbar">
       <div>
         <h2 class="inbox-section-heading">{{ t('inboxSla.report') }}</h2>
+        <InboxLiveStatus
+          :state="live.state.value"
+          :pending="live.pending.value"
+          class="mt-1"
+        />
         <p class="inbox-caption mt-1">{{ t('inboxUX.slaDescription') }}</p>
         <p v-if="lastUpdated" class="inbox-caption mt-1" role="status">
           {{ t('inboxQuality.lastUpdated', { time: lastUpdated }) }}

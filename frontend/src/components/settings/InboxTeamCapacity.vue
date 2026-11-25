@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import { UsersRound } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -167,6 +169,37 @@ function presetApplied() {
   originalLimits.clear()
   void load()
 }
+const live = useInboxLive(
+  () =>
+    account.value && props.team
+      ? { kind: 'capacity', account_id: account.value, team_id: props.team }
+      : null,
+  {
+    active: () => enabled.value,
+    context: () => JSON.stringify([props.team, account.value]),
+    blocked: () =>
+      loading.value || !!busy.value || unsavedLimits.value || discardOpen.value,
+    refresh: load,
+    clear: () => {
+      sequence++
+      rows.value = []
+      originalLimits.clear()
+      lastUpdated.value = ''
+      loading.value = false
+      busy.value = ''
+      cancelDiscard()
+    },
+    denied: () => {
+      sequence++
+      rows.value = []
+      originalLimits.clear()
+      lastUpdated.value = ''
+      loading.value = false
+      enabled.value = false
+      settingsFailed.value = true
+    },
+  },
+)
 </script>
 <template>
   <UnsavedChangesDialog
@@ -198,6 +231,10 @@ function presetApplied() {
     <div class="inbox-subsection">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h3 class="inbox-section-heading">{{ t('inboxCapacity.title') }}</h3>
+        <InboxLiveStatus
+          :state="live.state.value"
+          :pending="live.pending.value"
+        />
         <Button
           type="button"
           size="sm"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -28,12 +30,13 @@ const busy = ref('')
 const ready = ref(false)
 const failed = ref(false)
 const errors = ref<Record<string, string>>({})
+const dirty = computed(() =>
+  Object.keys(values.value).some(
+    (id) => (values.value[id] ?? null) !== (stored.value[id] ?? null),
+  ),
+)
 const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
-  useInboxDraftGuard(() =>
-    Object.keys(values.value).some(
-      (id) => (values.value[id] ?? null) !== (stored.value[id] ?? null),
-    ),
-  )
+  useInboxDraftGuard(() => dirty.value)
 let request = 0
 const visible = computed(() =>
   definitions.value.filter(
@@ -43,9 +46,10 @@ const visible = computed(() =>
   ),
 )
 
-async function load() {
+async function load(background = false) {
   const sequence = ++request
-  ready.value = false
+  const authored = JSON.stringify(values.value)
+  if (!background) ready.value = false
   failed.value = false
   const { account, contact } = props
   if (account && !props.caseId) return
@@ -64,6 +68,11 @@ async function load() {
       ),
     ])
     if (sequence !== request) return
+    if (
+      background &&
+      (dirty.value || busy.value || authored !== JSON.stringify(values.value))
+    )
+      return false
     if (account && props.caseId !== reply.data.data.subject_id)
       throw new Error('Case context changed')
     definitions.value = rules.data.data.definitions
@@ -75,11 +84,16 @@ async function load() {
     ready.value = true
   } catch {
     if (sequence === request) failed.value = true
+    return false
   }
 }
-watch(() => [props.contact, props.account, props.caseId], load, {
-  immediate: true,
-})
+watch(
+  () => [props.contact, props.account, props.caseId],
+  () => load(),
+  {
+    immediate: true,
+  },
+)
 function update(id: string, value: FieldValue) {
   values.value[id] = value
   delete errors.value[id]
@@ -113,7 +127,56 @@ function cancelField(id: string) {
   values.value[id] = stored.value[id] ?? null
   delete errors.value[id]
 }
-defineExpose({ requestLeave: requestDiscard })
+function clearPrivateFields() {
+  request++
+  definitions.value = []
+  values.value = {}
+  stored.value = {}
+  subjectId.value = ''
+  ready.value = false
+  failed.value = true
+  busy.value = ''
+  cancelDiscard()
+}
+const live = useInboxLive(
+  () =>
+    props.account
+      ? props.caseId
+        ? { kind: 'case', case_id: props.caseId }
+        : null
+      : { kind: 'contact', contact_id: props.contact },
+  {
+    context: () => JSON.stringify([props.contact, props.account, props.caseId]),
+    blocked: () => !!busy.value || dirty.value || discardOpen.value,
+    refresh: () => load(true),
+    denied: clearPrivateFields,
+    clear: clearPrivateFields,
+  },
+)
+function retryLoad() {
+  if (ready.value) live.requestRefresh()
+  else void load()
+}
+let livePoll: ReturnType<typeof setInterval> | undefined
+function pollVisible() {
+  if (
+    document.visibilityState === 'visible' &&
+    !busy.value &&
+    !dirty.value &&
+    !discardOpen.value
+  )
+    live.requestRefresh()
+}
+onMounted(() => {
+  livePoll = setInterval(pollVisible, 30000)
+  document.addEventListener('visibilitychange', pollVisible)
+})
+onUnmounted(() => {
+  request++
+  clearInterval(livePoll)
+  document.removeEventListener('visibilitychange', pollVisible)
+})
+defineExpose({ requestLeave: requestDiscard, hasDraft: () => dirty.value })
 </script>
 <template>
   <UnsavedChangesDialog
@@ -128,13 +191,21 @@ defineExpose({ requestLeave: requestDiscard })
     <h3 class="mb-2 font-medium">
       {{ t(account ? 'inboxUX.caseFieldTitle' : 'inboxUX.contactFieldTitle') }}
     </h3>
+    <InboxLiveStatus
+      :state="live.state.value"
+      :pending="live.pending.value"
+      class="mb-2"
+    />
     <div v-if="failed" role="alert">
-      {{ t('inboxFields.loadError') }}
-      <Button size="sm" variant="outline" @click="load">{{
+      {{ t(ready ? 'inboxLive.fieldRefreshError' : 'inboxFields.loadError') }}
+      <p v-if="ready && dirty" class="inbox-caption">
+        {{ t('inboxLive.finishFieldEdit') }}
+      </p>
+      <Button size="sm" variant="outline" @click="retryLoad">{{
         t('common.retry')
       }}</Button>
     </div>
-    <ul v-else class="grid gap-2">
+    <ul v-if="ready" class="grid gap-2">
       <li v-for="d in visible" :key="d.id" class="grid gap-1">
         <label
           >{{ d.label }}

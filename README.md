@@ -5,6 +5,13 @@
 SMSFlow managed fork: [plan enforcement and corresponding source](docs/managed-plans.md).
 Managed SMSFlow instances support one organization per instance.
 
+Inbox workflow documentation: [personalisation](docs/inbox-personalisation.md),
+[integration actions](docs/inbox-integrations.md),
+[response policies](docs/inbox-response-policies.md),
+[queue discovery](docs/inbox-queue-discovery.md), [audit capture](docs/audit-capture.md),
+[guided intake](docs/inbox-guided-intake.md), [routing](docs/inbox-routing-policies.md)
+and [live updates and draft recovery](docs/inbox-live-updates.md).
+
 Channel framework API 1 and the separately maintained SMSFlow adapter are under
 acceptance: [configuration, API and recovery](docs/channels.md).
 See the [SMSFlow customer setup guide](docs/smsflow-customer-guide.md) for

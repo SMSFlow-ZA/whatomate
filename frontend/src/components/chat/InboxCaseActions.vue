@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { inboxTextEntry } from '@/lib/inboxInteraction'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import { Button } from '@/components/ui/button'
 import {
   Check,
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   changed: [value: InboxCase]
   'needs-fields': []
   details: []
+  'access-lost': [value: { accountId: string; contactId: string }]
   context: [
     value: { readOnly: boolean; caseId?: string; currentCaseId?: string },
   ]
@@ -148,7 +151,7 @@ function refreshTargets() {
     !snoozing.value &&
     !resolving.value
   )
-    void load()
+    void load(false, true)
 }
 
 const priorities: CasePriority[] = ['low', 'normal', 'high', 'urgent']
@@ -168,7 +171,7 @@ const format = (value: string) =>
     timeStyle: 'short',
   }).format(new Date(value))
 
-async function load(reset = false) {
+async function load(reset = false, background = false) {
   const request = ++sequence
   loading.value = true
   failed.value = false
@@ -192,6 +195,15 @@ async function load(reset = false) {
       typeof route.query.case_id === 'string' ? route.query.case_id : undefined,
     )
     if (request !== sequence) return
+    if (
+      background &&
+      (busy.value ||
+        snoozing.value ||
+        resolving.value ||
+        olderBusy.value ||
+        fieldPanel.value?.hasDraft?.())
+    )
+      return false
     const selected =
       typeof route.query.case_id === 'string' ? route.query.case_id : undefined
     if (selected && data.data.case?.id !== selected)
@@ -243,7 +255,7 @@ watch(
       props.summary?.version !== current.value?.version ||
       props.summary?.id !== current.value?.id
     )
-      void load()
+      void load(false, true)
   },
 )
 
@@ -372,6 +384,50 @@ function resolvedCase(value: InboxCase) {
   emit('changed', value)
   void load()
 }
+function clearPrivateCase() {
+  sequence++
+  contextGeneration++
+  current.value = null
+  activity.value = []
+  activityCursor.value = ''
+  currentCaseId.value = ''
+  ready.value = false
+  loading.value = false
+  failed.value = true
+  readOnly.value = true
+  snoozing.value = resolving.value = false
+  emit('context', { readOnly: true })
+}
+const live = useInboxLive(
+  () =>
+    typeof route.query.case_id === 'string'
+      ? { kind: 'case', case_id: route.query.case_id }
+      : {
+          kind: 'conversation',
+          account_id: props.accountId,
+          contact_id: props.contactId,
+        },
+  {
+    context: () =>
+      JSON.stringify([props.accountId, props.contactId, route.query.case_id]),
+    blocked: () =>
+      loading.value ||
+      busy.value ||
+      snoozing.value ||
+      resolving.value ||
+      olderBusy.value ||
+      !!fieldPanel.value?.hasDraft?.(),
+    refresh: () => load(false, true),
+    denied: () => {
+      clearPrivateCase()
+      emit('access-lost', {
+        accountId: props.accountId,
+        contactId: props.contactId,
+      })
+    },
+    clear: clearPrivateCase,
+  },
+)
 </script>
 
 <template>
@@ -390,6 +446,11 @@ function resolvedCase(value: InboxCase) {
     :class="history ? 'inbox-case-details' : 'inbox-case-toolbar'"
     :aria-label="t('inboxWorkflow.title')"
   >
+    <InboxLiveStatus
+      :state="live.state.value"
+      :pending="live.pending.value"
+      class="mb-1"
+    />
     <div
       v-if="readOnly && !history && current"
       class="inbox-notice mb-3"

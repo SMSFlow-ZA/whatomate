@@ -101,6 +101,8 @@ export const useContactsStore = defineStore('contacts', () => {
   const selectedTags = ref<string[]>([])
   const replyingTo = ref<Message | null>(null)
   const accountFilter = ref<string | null>(null)
+  let selectionGeneration = 0
+  let messageGeneration = 0
 
   // Contacts pagination
   const contactsPage = ref(1)
@@ -180,11 +182,12 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   async function fetchContact(id: string, account?: string) {
+    const selection = selectionGeneration
     try {
       const response = await contactsService.get(id, account)
       // API returns { status: "success", data: { ... } }
       const data = response.data.data || response.data
-      currentContact.value = data
+      if (selection !== selectionGeneration) return null
       return data
     } catch (error) {
       console.error('Failed to fetch contact:', error)
@@ -193,6 +196,7 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   async function fetchMessages(contactId: string, params?: { page?: number; limit?: number; account?: string }) {
+    const request = ++messageGeneration, selection = selectionGeneration
     isLoadingMessages.value = true
     // Drop the previous contact's messages immediately so the list doesn't show
     // stale content under the new contact's header while the fetch is in flight.
@@ -201,12 +205,13 @@ export const useContactsStore = defineStore('contacts', () => {
       const response = await messagesService.list(contactId, params)
       // API returns { status: "success", data: { messages: [...], has_more: boolean } }
       const data = response.data.data || response.data
+      if (request !== messageGeneration || selection !== selectionGeneration) return
       messages.value = data.messages || []
       hasMoreMessages.value = data.has_more === true
     } catch (error) {
       console.error('Failed to fetch messages:', error)
     } finally {
-      isLoadingMessages.value = false
+      if (request === messageGeneration) isLoadingMessages.value = false
     }
   }
 
@@ -215,12 +220,14 @@ export const useContactsStore = defineStore('contacts', () => {
       return
     }
 
+    const request = messageGeneration, selection = selectionGeneration
     isLoadingOlderMessages.value = true
     try {
       // Get the oldest message ID for cursor-based pagination
       const oldestMessageId = messages.value[0].id
       const response = await messagesService.list(contactId, { before_id: oldestMessageId, account })
       const data = response.data.data || response.data
+      if (request !== messageGeneration || selection !== selectionGeneration) return
       const olderMessages = data.messages || []
 
       if (olderMessages.length > 0) {
@@ -231,7 +238,7 @@ export const useContactsStore = defineStore('contacts', () => {
     } catch (error) {
       console.error('Failed to fetch older messages:', error)
     } finally {
-      isLoadingOlderMessages.value = false
+      if (request === messageGeneration) isLoadingOlderMessages.value = false
     }
   }
 
@@ -384,6 +391,9 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   function setCurrentContact(contact: Contact | null) {
+    selectionGeneration++
+    messageGeneration++
+    isLoadingMessages.value = isLoadingOlderMessages.value = false
     currentContact.value = contact
     replyingTo.value = null // Clear reply state when switching contacts
     if (contact) {
@@ -396,6 +406,8 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   function clearMessages() {
+    messageGeneration++
+    isLoadingMessages.value = isLoadingOlderMessages.value = false
     messages.value = []
     hasMoreMessages.value = false
     accountFilter.value = null

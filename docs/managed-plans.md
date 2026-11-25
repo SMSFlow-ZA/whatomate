@@ -153,6 +153,15 @@ all `inbox-*.spec.ts` browser workflows and inspect both themes and mobile width
 
 ### Review release usage
 
+For scoped live inbox updates, cover duplicate consumers of one case, late
+responses after context changes, current permission checks before refresh,
+confirmed access loss, and unavailable authority/session storage. A transient
+field-read failure must retain the mounted draft and focus; retry stays staged
+until edits finish. Include native two-viewer reassignment and draft recovery,
+listener reconnect and lower restored revisions in a new epoch. See
+[live inbox protocol and recovery](inbox-live-updates.md). Restored invalidation
+state never authorises a read or replays outbound work.
+
 Run Go/PostgreSQL race tests, frontend checks and synthetic browser acceptance
 locally while iterating on managed review branches. The inbox follow-up branch
 uses manual managed-image dispatch for the final accepted source. A dispatched

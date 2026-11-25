@@ -7,6 +7,7 @@ import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
 import { inboxNoticesChanged } from '@/services/inboxNotices'
+import { inboxLive } from '@/services/inboxLive'
 
 // Notification sound
 let notificationSound: HTMLAudioElement | null = null
@@ -124,6 +125,7 @@ class WebSocketService {
       return
     }
     this.isConnecting = true
+    inboxLive.disconnected()
 
     this.intentionalClose = false
     this.installLifecycleListeners()
@@ -159,8 +161,10 @@ class WebSocketService {
 
     try {
       this.ws = new WebSocket(url)
+      const socket = this.ws
 
       this.ws.onopen = () => {
+        if (this.ws !== socket) return
         this.isConnecting = false
         // Send auth message as the first message (token not in URL for security)
         this.send({ type: WS_TYPE_AUTH, payload: { token } })
@@ -168,6 +172,7 @@ class WebSocketService {
         const isReconnection = this.hasConnectedBefore
         this.isConnected = true
         this.hasConnectedBefore = true
+        inboxLive.connected(payload => this.send({ type: 'inbox_watch', payload }))
         this.reconnectAttempts = 0
         this.startPing()
         window.dispatchEvent(new Event(inboxNoticesChanged))
@@ -179,12 +184,15 @@ class WebSocketService {
       }
 
       this.ws.onmessage = (event) => {
+        if (this.ws !== socket) return
         this.handleMessage(event.data)
       }
 
       this.ws.onclose = () => {
+        if (this.ws !== socket) return
         this.isConnecting = false
         this.isConnected = false
+        inboxLive.disconnected()
         this.stopPing()
         this.handleReconnect()
       }
@@ -199,6 +207,7 @@ class WebSocketService {
   }
 
   disconnect() {
+    inboxLive.disconnected()
     this.stopPing()
     this.removeLifecycleListeners() // Drop wake listeners; connect() reinstalls on next login.
     this.intentionalClose = true // Prevent reconnect (deliberate close, e.g. logout)
@@ -222,6 +231,9 @@ class WebSocketService {
       const store = useContactsStore()
 
       switch (message.type) {
+        case 'inbox_state':
+          inboxLive.receive(message.payload)
+          break
         case 'inbox_notice_available':
           // No payload content is displayed or used to grant access. The
           // visible notice list coalesces this hint into a scoped HTTP reload.
@@ -720,7 +732,7 @@ class WebSocketService {
 
     // Refresh transfers
     const transfersStore = useTransfersStore()
-    transfersStore.fetchTransfers()
+    if (useAuthStore().hasPermission('transfers', 'read')) transfersStore.fetchTransfers()
 
     // Show subtle notification
     toast.info('Connection restored', {

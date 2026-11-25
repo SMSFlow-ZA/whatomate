@@ -1,4 +1,14 @@
 {
+  "inboxLive": {
+    "fieldRefreshError": "We could not refresh these fields. Your current values are kept.",
+    "finishFieldEdit": "Save or cancel your edits to apply waiting updates.",
+    "live": "Live updates",
+    "connecting": "Connecting updates",
+    "polling": "Automatic refresh",
+    "denied": "Access changed",
+    "pending": "Changes waiting",
+    "help": "Updates use your current access. Edits and selections are preserved. You can still refresh manually."
+  },
   "inboxPolicy": {
     "title": "Conditional policies",
     "default": "Account default",

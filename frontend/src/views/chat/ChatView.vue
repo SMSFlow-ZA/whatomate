@@ -132,6 +132,7 @@ const { isDark } = useColorMode()
 const canWriteContacts = authStore.hasPermission('contacts', 'write')
 
 const messageInput = ref('')
+let contactSelectionGeneration = 0
 const messagesEndRef = ref<HTMLElement | null>(null)
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const isSending = ref(false)
@@ -204,6 +205,28 @@ const caseDetails=ref<InstanceType<typeof InboxCaseActions>>()
 function closeInfoPanel(){if(caseDetails.value)caseDetails.value.requestLeave(()=>{isInfoPanelOpen.value=false});else isInfoPanelOpen.value=false}
 function toggleInfoPanel(){if(isInfoPanelOpen.value)closeInfoPanel();else isInfoPanelOpen.value=true}
 function receiveInboxContext(value:{readOnly:boolean}){inboxReadOnly.value=value.readOnly}
+async function loseInboxAccess(value: { accountId: string; contactId: string }) {
+  if (value.accountId !== inboxAccountId.value || value.contactId !== contactsStore.currentContact?.id) return
+  contactSelectionGeneration++
+  // Confirmed revocation clears the selected private conversation immediately.
+  // Queue filters remain available; an old saved selection must not reopen it.
+  try { localStorage.removeItem(inboxNavigationKey.value) } catch { /* Optional browser storage. */ }
+  inboxReadOnly.value = true
+  wsService.setCurrentContact(null)
+  contactsStore.setCurrentContact(null)
+  contactsStore.clearMessages()
+  notesStore.clearNotes()
+  messageInput.value = ''
+  personalisedCanned.value = undefined
+  personaliseReply.value = false
+  isAssignDialogOpen.value = templateDialogOpen.value = false
+  isInfoPanelOpen.value = isNotesPanelOpen.value = false
+  delete inboxSummaries.value[inboxCaseKey(value.contactId, value.accountId)]
+  const query = { ...route.query }
+  delete query.case_id
+  await nextTick()
+  await router.replace({ path: '/chat', query })
+}
 watch(inboxEnabled,enabled=>{inboxReadOnly.value=enabled&&typeof route.query.case_id==='string'})
 watch(()=>[route.query.case_id,route.params.contactId,route.query.inbox_account_id],()=>{inboxReadOnly.value=inboxEnabled.value&&typeof route.query.case_id==='string';isAssignDialogOpen.value=false;templateDialogOpen.value=false},{immediate:false})
 const inboxSettingsFailed = ref(false)
@@ -415,11 +438,6 @@ const messagesScroll = useInfiniteScroll({
     await messagesScroll.preserveScrollPosition(async () => {
       await contactsStore.fetchOlderMessages(contactsStore.currentContact!.id, selectedAccount.value || undefined)
       await nextTick()
-      // Load media for any new messages
-      try {
-      } catch (e) {
-        console.error('Error loading media:', e)
-      }
     })
   },
   hasMore: computed(() => contactsStore.hasMoreMessages),
@@ -601,10 +619,10 @@ onMounted(async () => {
   contactsScroll.setup()
 
   // Fetch transfers to track active transfers
-  transfersStore.fetchTransfers({ status: 'active' })
+  if (authStore.hasPermission('transfers', 'read')) transfersStore.fetchTransfers({ status: 'active' })
 
   // Fetch users if can assign contacts
-  if (canAssignContacts.value) {
+  if (canAssignContacts.value && authStore.hasPermission('users', 'read')) {
     usersStore.fetchUsers().catch(() => {
       // Silently fail if user list can't be loaded
     })
@@ -624,7 +642,7 @@ onMounted(async () => {
   }
 
   // Fetch available tags for filtering (if not already loaded)
-  if (tagsStore.tags.length === 0) {
+  if (authStore.hasPermission('tags', 'read') && tagsStore.tags.length === 0) {
     tagsStore.fetchTags().catch(() => {})
   }
 
@@ -659,6 +677,7 @@ function onUserActive() {
 }
 
 onUnmounted(() => {
+  contactSelectionGeneration++
   clearInterval(inboxRefresh)
   inboxSettingsRequest++
   inboxSummaryRequest++
@@ -718,6 +737,7 @@ watch([contactId, queueAccount], async ([newId]) => {
     notesStore.hasMore = false
     await selectContact(newId)
   } else {
+    contactSelectionGeneration++
     wsService.setCurrentContact(null)
     contactsStore.setCurrentContact(null)
     contactsStore.clearMessages()
@@ -726,15 +746,18 @@ watch([contactId, queueAccount], async ([newId]) => {
 })
 
 async function selectContact(id: string) {
+  const selection = ++contactSelectionGeneration
   // Direct deep links to /chat/:id may target a contact that isn't in the
   // currently-loaded (paginated) list — fall back to fetching it directly.
   const preferredAccount = queueAccount.value
   let contact = preferredAccount
     ? await contactsStore.fetchContact(id, preferredAccount)
     : contactsStore.contacts.find(c => c.id === id) ?? await contactsStore.fetchContact(id)
+  if (selection !== contactSelectionGeneration) return
   if (contact && !preferredAccount && !authStore.hasPermission('contacts', 'read') && contact.whatsapp_account) {
     contact = await contactsStore.fetchContact(id, contact.whatsapp_account)
   }
+  if (selection !== contactSelectionGeneration) return
   if (contact) {
     // Reset unread pill — fetchMessages will mark everything read on the server
     newMessagesCount.value = 0
@@ -755,6 +778,7 @@ async function selectContact(id: string) {
       ? contact.whatsapp_account || orgAccounts.value[0]?.name : undefined)
     contactsStore.setAccountFilter(messageAccount || null)
     await contactsStore.fetchMessages(id, messageAccount ? { account: messageAccount } : undefined)
+    if (selection !== contactSelectionGeneration) return
 
     // Discover distinct accounts from the unfiltered message set
     const accounts = new Set<string>()
@@ -799,13 +823,10 @@ async function selectContact(id: string) {
     wsService.setCurrentContact(id)
     // Wait for DOM to render messages before scrolling
     await nextTick()
-    // Load media for messages after messages are fetched
-    try {
-    } catch (e) {
-      console.error('Error loading media:', e)
-    }
+    if (selection !== contactSelectionGeneration) return
     // Scroll after a brief delay to ensure content is rendered (instant on initial load)
     setTimeout(() => {
+      if (selection !== contactSelectionGeneration) return
       scrollToBottom(true)
       // Setup scroll listener for infinite scroll after initial scroll
       messagesScroll.setup()
@@ -816,6 +837,7 @@ async function selectContact(id: string) {
       notesStore.fetchNotes(id),
       contactsService.getSessionData(id, messageAccount || selectedAccount.value || undefined).catch(() => null)
     ])
+    if (selection !== contactSelectionGeneration) return
     if (sessionResult) {
       contactSessionData.value = sessionResult.data.data || sessionResult.data
       if (contactSessionData.value?.panel_config?.sections?.length > 0) {
@@ -858,13 +880,6 @@ watch(() => contactsStore.messages.length, (newLen, oldLen) => {
   }
 })
 
-// Watch for messages changes to load media
-watch(() => contactsStore.messages, () => {
-  try {
-  } catch (e) {
-    console.error('Error loading media:', e)
-  }
-}, { deep: true })
 
 async function switchAccount(accountName: string) {
   if (!contactsStore.currentContact || accountName === selectedAccount.value) return
@@ -872,10 +887,6 @@ async function switchAccount(accountName: string) {
   contactsStore.setAccountFilter(accountName)
   await contactsStore.fetchMessages(contactsStore.currentContact.id, { account: accountName })
   await nextTick()
-  try {
-  } catch (e) {
-    console.error('Error loading media:', e)
-  }
   scrollToBottom(true)
 }
 
@@ -2251,6 +2262,7 @@ async function sendMediaMessage() {
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
           :can-write="authStore.hasPermission('chat', 'write') && !inboxReadOnly"
           @context="receiveInboxContext"
+          @access-lost="loseInboxAccess"
           @details="isInfoPanelOpen=true"
           @changed="updateInboxSummary"
           @needs-fields="isInfoPanelOpen = true"
@@ -2846,6 +2858,7 @@ async function sendMediaMessage() {
           :summary="inboxSummaries[inboxCaseKey(contactsStore.currentContact.id, inboxAccountId)]"
           :can-write="authStore.hasPermission('chat', 'write') && !inboxReadOnly"
           history
+          @access-lost="loseInboxAccess"
         />
       </template>
     </ContactInfoPanel>

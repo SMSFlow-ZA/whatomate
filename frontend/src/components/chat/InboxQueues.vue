@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import InboxAgentSelect from '@/components/shared/InboxAgentSelect.vue'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import InboxFilterSummary from './InboxFilterSummary.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -291,6 +293,39 @@ function poll() {
   return pager.poll()
 }
 
+const live = useInboxLive(
+  () => ({
+    kind: 'queue',
+    account_id: filters.value.account_id || undefined,
+    team_id: filters.value.team_id || undefined,
+  }),
+  {
+    context: () => props.contextKey ?? '',
+    active: () => props.active,
+    blocked: () =>
+      loading.value ||
+      reviewing.value ||
+      saving.value ||
+      selected.value.length > 0,
+    refresh: async (hint) => {
+      await poll()
+      if (hint.reset) await refreshViews()
+    },
+    denied: () => {
+      pager.reset()
+      pager.denied.value = true
+    },
+    clear: () => {
+      pager.reset()
+      selected.value = []
+      results.value = {}
+      resultContacts.value = {}
+      resultRows.value = {}
+      reviewing.value = false
+    },
+  },
+)
+
 async function refreshViews() {
   const request = ++viewGeneration,
     context = props.contextKey
@@ -361,8 +396,12 @@ async function loadLookups() {
   const results = await Promise.allSettled([
     accountsService.list(),
     teamsStore.fetchTeams({ limit: 100 }),
-    usersService.list({ limit: 100 }),
-    tagsService.list({ limit: 100 }),
+    auth.hasPermission('users', 'read')
+      ? usersService.list({ limit: 100 })
+      : Promise.resolve({ data: { data: { users: [] } } }),
+    auth.hasPermission('tags', 'read')
+      ? tagsService.list({ limit: 100 })
+      : Promise.resolve({ data: { data: { tags: [] } } }),
   ])
   if (request !== lookupGeneration || context !== props.contextKey) return
   if (results[0].status === 'fulfilled')
@@ -453,6 +492,13 @@ watch(pager.denied, (denied) => {
   lookupGeneration++
 })
 const refreshTimer = setInterval(() => {
+  // Keep independent reconciliation if the live path silently loses hints,
+  // without repeating the old 20-second poll while fresh reads are arriving.
+  if (
+    live.state.value === 'live' &&
+    Date.now() - new Date(pager.updatedAt.value || 0).getTime() < 60_000
+  )
+    return
   void poll()
 }, 20_000)
 onUnmounted(() => {
@@ -631,6 +677,11 @@ async function applyBulk() {
     :aria-label="t('inboxQueue.title')"
   >
     <div class="inbox-queue-tools">
+      <InboxLiveStatus
+        :state="live.state.value"
+        :pending="live.pending.value"
+        class="mb-2"
+      />
       <label class="inbox-label mb-3"
         >{{ t('inboxFollowup.search') }}
         <input

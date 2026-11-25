@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import InboxAssignmentRate from './InboxAssignmentRate.vue'
+import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
+import { useInboxLive } from '@/composables/useInboxLive'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
@@ -41,6 +43,33 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
+const live = useInboxLive(
+  () => ({
+    kind: 'workload',
+    team_id: props.team || undefined,
+    account_id: props.account || undefined,
+  }),
+  {
+    blocked: () => loading.value,
+    refresh: load,
+    clear: () => {
+      generation++
+      rows.value = []
+      offset.value = 0
+      uniqueAgents.value = 0
+      updated.value = ''
+      loading.value = false
+    },
+    denied: () => {
+      generation++
+      rows.value = []
+      uniqueAgents.value = 0
+      updated.value = ''
+      loading.value = false
+      failed.value = true
+    },
+  },
+)
 watch(
   () => [props.team, props.account],
   () => {
@@ -74,6 +103,11 @@ onUnmounted(() => {
         <h3 class="inbox-section-heading">
           {{ t('inboxQuality.liveWorkload') }}
         </h3>
+        <InboxLiveStatus
+          :state="live.state.value"
+          :pending="live.pending.value"
+          class="mt-1"
+        />
         <p v-if="updated && !failed" class="inbox-caption mt-1">
           {{
             t(

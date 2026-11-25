@@ -196,6 +196,153 @@ it('shows a recoverable error if field values do not match the selected case', a
   expect(state.failed).toBe(true)
   expect(root.querySelector('[role=alert]')).toBeTruthy()
 })
+it('keeps a newly authored field draft when a background response arrives', async () => {
+  mock.fields.mockResolvedValue({
+    data: {
+      data: {
+        definitions: [
+          {
+            id: 'f',
+            scope: 'case',
+            key: 'reference',
+            label: 'Reference',
+            kind: 'text',
+          },
+        ],
+      },
+    },
+  })
+  mock.values.mockResolvedValue({
+    data: {
+      data: {
+        subject_id: 'past',
+        values: [{ definition_id: 'f', value: 'Stored value' }],
+      },
+    },
+  })
+  const state = await mount(InboxFieldPanel, {
+    account: 'a',
+    contact: 'c',
+    caseId: 'past',
+    canWrite: true,
+  })
+  let finish!: (value: unknown) => void
+  mock.values.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve
+    }),
+  )
+  const pending = state.load(true)
+  await settle()
+  state.values.f = 'New authored draft'
+  finish({
+    data: {
+      data: {
+        subject_id: 'past',
+        values: [{ definition_id: 'f', value: 'Remote update' }],
+      },
+    },
+  })
+  expect(await pending).toBe(false)
+  expect(state.values.f).toBe('New authored draft')
+  expect(state.stored.f).toBe('Stored value')
+  expect(state.ready).toBe(true)
+})
+
+it('keeps a focused field draft mounted through background failure, retry and recovery', async () => {
+  mock.fields.mockResolvedValue({
+    data: {
+      data: {
+        definitions: [
+          {
+            id: 'f',
+            scope: 'case',
+            key: 'reference',
+            label: 'Reference',
+            kind: 'text',
+          },
+        ],
+      },
+    },
+  })
+  mock.values.mockResolvedValue({
+    data: {
+      data: {
+        subject_id: 'past',
+        values: [{ definition_id: 'f', value: 'Stored value' }],
+      },
+    },
+  })
+  const state = await mount(InboxFieldPanel, {
+    account: 'a',
+    contact: 'c',
+    caseId: 'past',
+    canWrite: true,
+  })
+  const input = root.querySelector('input')!
+  input.focus()
+  let fail!: (error: Error) => void
+  mock.values.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    }),
+  )
+  const pending = state.load(true)
+  await settle()
+  state.values.f = 'Authored during request'
+  fail(new Error('Synthetic temporary outage'))
+  expect(await pending).toBe(false)
+  await settle()
+  expect(state.failed).toBe(true)
+  expect(root.querySelector('input')).toBe(input)
+  expect(document.activeElement).toBe(input)
+  expect(input.value).toBe('Authored during request')
+  expect(root.textContent).toContain('inboxLive.fieldRefreshError')
+  const calls = mock.values.mock.calls.length
+  const retry = [...root.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('common.retry'),
+  )!
+  retry.click()
+  await settle()
+  expect(mock.values).toHaveBeenCalledTimes(calls)
+  expect(state.live.pending.value).toBe(true)
+  expect(input.value).toBe('Authored during request')
+  mock.values.mockResolvedValue({
+    data: {
+      data: {
+        subject_id: 'past',
+        values: [{ definition_id: 'f', value: 'Recovered server value' }],
+      },
+    },
+  })
+  state.cancelField('f')
+  await settle()
+  expect(root.querySelector('input')).toBe(input)
+  expect(input.value).toBe('Recovered server value')
+  expect(state.failed).toBe(false)
+  expect(state.live.pending.value).toBe(false)
+})
+
+it('defers a case refresh if a resolution review opens during its lookup', async () => {
+  mock.conversation.mockResolvedValue(reply())
+  const state = await mount(InboxCaseActions, {
+    accountId: 'a',
+    contactId: 'c',
+    canWrite: true,
+  })
+  let finish!: (value: unknown) => void
+  mock.conversation.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve
+    }),
+  )
+  const pending = state.load(false, true)
+  state.resolving = true
+  finish(reply({ case: { ...state.current, id: 'replacement', version: 3 } }))
+  expect(await pending).toBe(false)
+  expect(state.current.id).toBe('past')
+  expect(state.resolving).toBe(true)
+})
 it('shows only the earliest actionable target with the server timezone', async () => {
   await mount(InboxNextTarget, {
     sla: {

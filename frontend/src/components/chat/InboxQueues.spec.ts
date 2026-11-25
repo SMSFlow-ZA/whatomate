@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   fields: vi.fn(),
   accounts: vi.fn().mockResolvedValue({ data: { data: { accounts: [] } } }),
   saveView: vi.fn(),
+  permission: vi.fn(() => true),
+  users: vi.fn().mockResolvedValue({ data: { data: { users: [] } } }),
+  tags: vi.fn().mockResolvedValue({ data: { data: { tags: [] } } }),
 }))
 vi.mock('@/services/inbox', () => ({
   inboxService: {
@@ -86,17 +89,17 @@ vi.mock('@/services/api', () => ({
     list: mocks.accounts,
   },
   usersService: {
-    list: vi.fn().mockResolvedValue({ data: { data: { users: [] } } }),
+    list: mocks.users,
   },
   tagsService: {
-    list: vi.fn().mockResolvedValue({ data: { data: { tags: [] } } }),
+    list: mocks.tags,
   },
 }))
 vi.mock('@/stores/teams', () => ({
   useTeamsStore: () => ({ fetchTeams: mocks.teams }),
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ hasPermission: () => true }),
+  useAuthStore: () => ({ hasPermission: mocks.permission }),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn() } }))
@@ -108,6 +111,23 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.clearAllMocks()
+  mocks.permission.mockImplementation(() => true)
+})
+
+it('does not request unavailable optional filter directories for restricted agents', async () => {
+  discoveryDefaults()
+  mocks.permission.mockImplementation(
+    (...args: unknown[]) => !['users', 'tags'].includes(String(args[0])),
+  )
+  const { root, close } = await discoveryHarness()
+  try {
+    expect(mocks.users).not.toHaveBeenCalled()
+    expect(mocks.tags).not.toHaveBeenCalled()
+    expect(root.textContent).not.toContain('inboxQuality.lookupError')
+    expect(root.querySelector('[role="alert"]')).toBeNull()
+  } finally {
+    close()
+  }
 })
 
 const discoveryCleanups: (() => void)[] = []
