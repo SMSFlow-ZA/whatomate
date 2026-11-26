@@ -11,6 +11,7 @@ Inbox workflow documentation: [personalisation](docs/inbox-personalisation.md),
 [queue discovery](docs/inbox-queue-discovery.md), [audit capture](docs/audit-capture.md),
 [guided intake](docs/inbox-guided-intake.md), [routing](docs/inbox-routing-policies.md)
 and [live updates and draft recovery](docs/inbox-live-updates.md).
+Shared presentation and accessibility conventions: [inbox interface](docs/inbox-interface.md).
 
 Channel framework API 1 and the separately maintained SMSFlow adapter are under
 acceptance: [configuration, API and recovery](docs/channels.md).

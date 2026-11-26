@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, useId, watch } from 'vue'
+import '@/assets/inbox.css'
 import { useI18n } from 'vue-i18n'
 import { Braces } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -22,8 +23,12 @@ const query = ref(''),
   selected = ref('')
 const variables = ref<InboxMessageVariable[]>([])
 const search = ref<HTMLInputElement>()
-const results = ref<HTMLSelectElement>()
+const results = ref<HTMLElement>()
+const listId = useId()
 const selectedToken = computed(() => '{{' + selected.value + '}}')
+const selectedId = computed(
+  () => `${listId}-${visible.value.findIndex((v) => v.key === selected.value)}`,
+)
 let generation = 0
 let inserted = false
 const visible = computed(() =>
@@ -101,6 +106,33 @@ function insert() {
   open.value = false
   emit('insert', token)
 }
+function navigate(event: KeyboardEvent) {
+  const options = visible.value
+  if (!options.length || busy.value) return
+  const index = options.findIndex((v) => v.key === selected.value)
+  let next = index
+  if (event.key === 'ArrowDown') next = Math.min(index + 1, options.length - 1)
+  else if (event.key === 'ArrowUp') next = Math.max(index - 1, 0)
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = options.length - 1
+  else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    insert()
+    return
+  } else return
+  event.preventDefault()
+  selected.value = options[next]!.key
+  void nextTick(() =>
+    document
+      .getElementById(selectedId.value)
+      ?.scrollIntoView({ block: 'nearest' }),
+  )
+}
+function selectVariable(key: string, confirm = false) {
+  selected.value = key
+  if (confirm) insert()
+  else results.value?.focus()
+}
 function restoreFocus(event: Event) {
   // Insertion restores the authoring selection, rather than the toolbar button.
   if (inserted) event.preventDefault()
@@ -113,10 +145,10 @@ function restoreFocus(event: Event) {
     <PopoverTrigger as-child>
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="sm"
         :disabled="disabled"
-        class="min-h-[44px] w-fit justify-self-start"
+        class="inbox-variable-trigger w-fit justify-self-start"
       >
         <Braces class="mr-2 h-4 w-4" aria-hidden="true" />{{
           t('inboxPersonalisation.insert')
@@ -125,18 +157,22 @@ function restoreFocus(event: Event) {
     </PopoverTrigger>
     <PopoverContent
       align="start"
-      class="inbox-ui grid w-80 max-w-[calc(100vw-2rem)] gap-3"
+      side="top"
+      :collision-padding="12"
+      class="inbox-ui inbox-variable-picker"
       @close-auto-focus="restoreFocus"
     >
-      <p class="text-sm font-medium">{{ t('inboxPersonalisation.choose') }}</p>
+      <p class="inbox-section-heading">
+        {{ t('inboxPersonalisation.choose') }}
+      </p>
       <label class="inbox-label"
         >{{ t('inboxPersonalisation.search') }}
         <input
           ref="search"
-          style="font-size: 16px"
           v-model="query"
           type="search"
           :readonly="busy"
+          :aria-controls="listId"
           @keydown.down.prevent="results?.focus()"
         />
       </label>
@@ -156,39 +192,40 @@ function restoreFocus(event: Event) {
         >
       </template>
       <template v-else>
-        <label v-if="visible.length" class="inbox-label"
-          >{{ t('inboxPersonalisation.available') }}
-          <select
-            ref="results"
-            style="font-size: 16px"
-            :aria-label="t('inboxPersonalisation.available')"
-            v-model="selected"
-            size="6"
-            class="min-h-40"
-            @keydown.enter.prevent="insert"
+        <div
+          v-if="visible.length"
+          class="inbox-variable-results"
+          :id="listId"
+          ref="results"
+          role="listbox"
+          tabindex="0"
+          :aria-label="t('inboxPersonalisation.available')"
+          :aria-activedescendant="selectedId"
+          @keydown="navigate"
+        >
+          <div
+            v-for="(variable, index) in visible"
+            :key="variable.key"
+            :id="`${listId}-${index}`"
+            role="option"
+            :aria-selected="selected === variable.key"
+            class="inbox-variable-option"
+            @click="selectVariable(variable.key)"
+            @dblclick="selectVariable(variable.key, true)"
           >
-            <option
-              v-for="variable in visible"
-              :key="variable.key"
-              :value="variable.key"
-            >
-              {{ variable.label }} · {{ variable.scope }}
-            </option>
-          </select>
-        </label>
+            <span class="font-medium">{{ variable.label }}</span>
+            <span class="inbox-caption">{{ variable.scope }}</span>
+          </div>
+        </div>
         <p v-else role="status" class="inbox-caption">
           {{ t('inboxPersonalisation.noResults') }}
         </p>
-        <p v-if="selected" class="inbox-caption break-all">
+        <p v-if="selected" class="inbox-caption break-all font-mono">
           {{ selectedToken }}
         </p>
-        <Button
-          type="button"
-          class="min-h-[44px]"
-          :disabled="!selected"
-          @click="insert"
-          >{{ t('inboxPersonalisation.insert') }}</Button
-        >
+        <Button type="button" size="sm" :disabled="!selected" @click="insert">{{
+          t('inboxPersonalisation.insert')
+        }}</Button>
       </template>
     </PopoverContent>
   </Popover>

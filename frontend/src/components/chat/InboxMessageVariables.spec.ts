@@ -42,6 +42,9 @@ function mount() {
         failed: boolean
         variables: { key: string }[]
         load: () => Promise<void>
+        selected: string
+        query: string
+        navigate: (event: KeyboardEvent) => void
       }
     }
   ).setupState
@@ -91,6 +94,44 @@ it('ignores a slow old response after closing and reopening the picker', async (
     'account_name',
   ])
   expect(state.busy).toBe(false)
+})
+it('keeps keyboard selection within the visible results and clears it on an empty search', async () => {
+  mocks.list.mockResolvedValueOnce({
+    data: {
+      data: {
+        variables: [
+          {
+            key: 'contact_name',
+            label: 'Customer name',
+            scope: 'contact',
+            kind: 'text',
+          },
+          {
+            key: 'case_id',
+            label: 'Case reference',
+            scope: 'case',
+            kind: 'text',
+          },
+        ],
+      },
+    },
+  })
+  const state = mount()
+  state.open = true
+  await settle()
+  expect(state.selected).toBe('contact_name')
+  state.navigate(new KeyboardEvent('keydown', { key: 'End' }))
+  await settle()
+  expect(state.selected).toBe('case_id')
+  state.navigate(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+  expect(state.selected).toBe('case_id')
+  state.navigate(new KeyboardEvent('keydown', { key: 'Home' }))
+  expect(state.selected).toBe('contact_name')
+  state.query = 'no matching field'
+  await settle()
+  expect(state.selected).toBe('')
+  state.navigate(new KeyboardEvent('keydown', { key: 'Enter' }))
+  expect(state.open).toBe(true)
 })
 it('shows a recoverable lookup failure and refuses old-organisation results', async () => {
   mocks.list.mockRejectedValueOnce(new Error('offline'))

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import '@/assets/inbox.css'
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
 import { useInboxLive } from '@/composables/useInboxLive'
 import { isInboxAccessFailure } from '@/lib/inboxAccess'
@@ -104,6 +104,8 @@ function update(id: string, value: FieldValue) {
 }
 async function save(d: FieldDefinition) {
   const sequence = request
+  const focused = document.activeElement
+  let saved = false
   const value = values.value[d.id] ?? null
   busy.value = d.id
   try {
@@ -116,6 +118,7 @@ async function save(d: FieldDefinition) {
     )
     if (sequence === request) {
       stored.value[d.id] = value
+      saved = true
       toast.success(t('settings.saved'))
     }
   } catch (error) {
@@ -130,10 +133,22 @@ async function save(d: FieldDefinition) {
   } finally {
     busy.value = ''
   }
+  if (saved && sequence === request) {
+    await nextTick()
+    if (
+      document.activeElement === document.body ||
+      document.activeElement === focused
+    )
+      document.getElementById('field-input-' + d.id)?.focus()
+  }
 }
-function cancelField(id: string) {
+async function cancelField(id: string) {
+  const sequence = request
   values.value[id] = stored.value[id] ?? null
   delete errors.value[id]
+  await nextTick()
+  if (sequence === request)
+    document.getElementById('field-input-' + id)?.focus()
 }
 function clearPrivateFields() {
   request++
@@ -196,14 +211,18 @@ defineExpose({ requestLeave: requestDiscard, hasDraft: () => dirty.value })
     v-if="failed || (ready && visible.length)"
     class="inbox-ui inbox-fields-panel"
   >
-    <h3 class="mb-2 font-medium">
-      {{ t(account ? 'inboxUX.caseFieldTitle' : 'inboxUX.contactFieldTitle') }}
-    </h3>
-    <InboxLiveStatus
-      :state="live.state.value"
-      :pending="live.pending.value"
-      class="mb-2"
-    />
+    <div class="inbox-field-heading">
+      <h3 class="inbox-section-heading">
+        {{
+          t(account ? 'inboxUX.caseFieldTitle' : 'inboxUX.contactFieldTitle')
+        }}
+      </h3>
+      <InboxLiveStatus
+        :state="live.state.value"
+        :pending="live.pending.value"
+        compact
+      />
+    </div>
     <div v-if="failed" role="alert">
       {{ t(ready ? 'inboxLive.fieldRefreshError' : 'inboxFields.loadError') }}
       <p v-if="ready && dirty" class="inbox-caption">
@@ -215,7 +234,7 @@ defineExpose({ requestLeave: requestDiscard, hasDraft: () => dirty.value })
     </div>
     <ul v-if="ready" class="grid gap-2">
       <li v-for="d in visible" :key="d.id" class="grid gap-1">
-        <label
+        <label class="inbox-field-label" :for="'field-input-' + d.id"
           >{{ d.label }}
           <small v-if="d.required_on_resolve && !d.archived_at">
             · {{ t('inboxFields.required') }}</small
@@ -223,43 +242,55 @@ defineExpose({ requestLeave: requestDiscard, hasDraft: () => dirty.value })
             · {{ t('inboxFields.archived') }}</small
           ></label
         >
-        <p :id="'field-help-' + d.id" class="inbox-caption">
+        <p
+          :id="'field-help-' + d.id"
+          class="inbox-caption"
+          v-if="d.description || (d.conditional_required && !d.archived_at)"
+        >
           {{ d.description }}
           <span v-if="d.conditional_required && !d.archived_at">{{
             t('inboxIntake.conditional')
           }}</span>
-          <span v-if="d.required_on_resolve && !d.archived_at">{{
-            t('inboxFields.required')
-          }}</span
-          ><span v-if="d.archived_at">{{ t('inboxFields.archived') }}</span>
         </p>
-        <form class="flex items-center gap-2" @submit.prevent="save(d)">
+        <form class="inbox-field-editor" @submit.prevent="save(d)">
           <InboxFieldInput
+            :id="'field-input-' + d.id"
             :definition="d"
-            :aria-describedby="'field-help-' + d.id"
+            :aria-describedby="
+              d.description || (d.conditional_required && !d.archived_at)
+                ? 'field-help-' + d.id
+                : undefined
+            "
             :model-value="values[d.id] ?? null"
             :disabled="!!d.archived_at || !canWrite || !!busy"
             @update:model-value="(value) => update(d.id, value)"
           />
-          <Button
-            v-if="canWrite && !d.archived_at"
-            size="sm"
-            variant="outline"
-            type="submit"
-            :disabled="
-              !!busy || (stored[d.id] ?? null) === (values[d.id] ?? null)
+          <div
+            v-if="
+              canWrite &&
+              !d.archived_at &&
+              (stored[d.id] ?? null) !== (values[d.id] ?? null)
             "
-            >{{ t('common.save') }}</Button
+            class="inbox-field-actions"
           >
-          <Button
-            v-if="canWrite && !d.archived_at"
-            type="button"
-            variant="ghost"
-            size="sm"
-            :disabled="!!busy"
-            @click="cancelField(d.id)"
-            >{{ t('common.cancel') }}</Button
-          >
+            <Button
+              size="sm"
+              variant="outline"
+              type="submit"
+              :disabled="
+                !!busy || (stored[d.id] ?? null) === (values[d.id] ?? null)
+              "
+              >{{ t('common.save') }}</Button
+            >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              :disabled="!!busy"
+              @click="cancelField(d.id)"
+              >{{ t('common.cancel') }}</Button
+            >
+          </div>
         </form>
         <p v-if="errors[d.id]" role="alert" class="text-sm text-destructive">
           {{ errors[d.id] }}

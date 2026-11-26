@@ -3262,6 +3262,7 @@
     "planUsage": "Plan usage",
     "inactiveAgent": "Inactive account — reassign outstanding work"
   },
+  "inboxVisual": { "selectPage": "Select page", "all": "All", "firstReply": "First reply", "views": "Views" },
   "inboxReview": {
     "searchAgents": "Search agents",
     "removeShift": "Remove {day} {from}–{to}",

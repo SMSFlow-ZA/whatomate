@@ -173,7 +173,7 @@ const restoreDialogFocus = useInboxDialogFocus(open)
     type="button"
     variant="ghost"
     size="sm"
-    class="mb-2 gap-1.5"
+    class="gap-1.5"
     aria-keyshortcuts="Control+Alt+M"
     @click="show"
     ><Zap class="h-4 w-4" aria-hidden="true" />{{

@@ -1,7 +1,8 @@
 .inbox-ui {
   color: hsl(var(--foreground));
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.5;
+  min-width: 0;
 }
 .inbox-response-targets {
   color-scheme: light;
@@ -74,7 +75,7 @@
     white-space: normal;
   }
 }
-.inbox-tabs button[aria-selected='true'] {
+.inbox-tabs button[aria-selected="true"] {
   color: hsl(var(--foreground));
   border-bottom-color: hsl(var(--primary));
 }
@@ -112,7 +113,7 @@
 }
 .inbox-caption {
   color: hsl(var(--muted-foreground));
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 .inbox-badge {
   display: inline-flex;
@@ -125,7 +126,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-.inbox-badge[data-state='active'] {
+.inbox-badge[data-state="active"] {
   color: hsl(var(--primary));
   background: hsl(var(--primary) / 0.1);
 }
@@ -164,6 +165,7 @@
 .inbox-form-section h2,
 .inbox-section-heading {
   font-size: 1rem;
+  line-height: 1.5;
   font-weight: 600;
 }
 .inbox-form-section > p {
@@ -182,11 +184,11 @@
   align-content: start;
   gap: 0.375rem;
   font-weight: 500;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 .inbox-control,
 .inbox-ui .inbox-input,
-.inbox-label > input:not([type='checkbox']),
+.inbox-label > input:not([type="checkbox"]),
 .inbox-label > select,
 .inbox-label > textarea {
   display: block;
@@ -195,17 +197,23 @@
   min-height: 2.5rem;
   border: 1px solid hsl(var(--input));
   border-radius: 0.5rem;
-  background: hsl(var(--background));
+  background: hsl(var(--muted) / 0.35);
   color: hsl(var(--foreground));
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   font-weight: 400;
+  line-height: 1.5;
+  color-scheme: dark;
 }
 
-.inbox-ui .inbox-input[type='date'] {
+.light .inbox-control,
+.light .inbox-label > input,
+.light .inbox-label > select,
+.light .inbox-label > textarea,
+.inbox-ui .inbox-input[type="date"] {
   color-scheme: light;
 }
-.dark .inbox-ui .inbox-input[type='date'] {
+.dark .inbox-ui .inbox-input[type="date"] {
   color-scheme: dark;
 }
 .inbox-label > textarea,
@@ -219,6 +227,7 @@
 .inbox-label > select:focus-visible,
 .inbox-label > textarea:focus-visible,
 .inbox-ui button:focus-visible,
+.inbox-ui a:focus-visible,
 .inbox-ui summary:focus-visible {
   outline: 2px solid hsl(var(--foreground) / 0.75);
   outline-offset: 2px;
@@ -380,6 +389,8 @@
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   flex-shrink: 0;
+  position: relative;
+  padding-right: 2.75rem;
 }
 .inbox-case-controls {
   display: flex;
@@ -399,7 +410,7 @@
 .inbox-case-select select {
   min-width: 0;
   background: transparent;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   max-width: 12rem;
 }
 .inbox-case-select:focus-within {
@@ -462,7 +473,7 @@
 .inbox-macro-option:hover {
   background: hsl(var(--muted) / 0.5);
 }
-.inbox-macro-option[aria-pressed='true'] {
+.inbox-macro-option[aria-pressed="true"] {
   background: hsl(var(--primary) / 0.1);
   box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.4);
 }
@@ -492,26 +503,87 @@
   min-height: 0;
 }
 .inbox-queue-tools {
-  padding: 0.875rem 0.75rem;
+  padding: 0.75rem;
   border-bottom: 1px solid hsl(var(--border));
+  max-height: 55%;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 .inbox-queue-shortcuts {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
 }
+.inbox-queue-search {
+  margin-bottom: 0.625rem;
+}
+.inbox-queue-search > input {
+  min-height: 2.5rem;
+}
+.inbox-queue-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.625rem;
+}
+.inbox-queue-alert-link {
+  min-height: 2rem;
+  min-width: 2rem;
+  font-size: 0.875rem;
+}
+.inbox-queue-order {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+.inbox-queue-order select {
+  min-height: 2rem;
+  padding-block: 0.25rem;
+}
+.inbox-queue-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.5rem;
+}
+.inbox-queue-meta .inbox-check {
+  align-items: center;
+  font-size: 0.875rem;
+  color: var(--inbox-muted);
+}
+.inbox-queue-meta .inbox-check input {
+  margin-top: 0;
+}
+.inbox-queue-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.25rem;
+  margin-left: 0.25rem;
+  padding-inline: 0.25rem;
+  border-radius: 0.25rem;
+  background: hsl(var(--muted));
+  font-size: 0.75rem;
+}
+.inbox-queue-name {
+  font-size: 1rem;
+  font-weight: 600;
+}
 .inbox-queue-shortcuts button {
   padding: 0.375rem 0.5rem;
   min-height: 2rem;
   border-radius: 0.375rem;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 500;
   color: hsl(var(--muted-foreground));
 }
 .inbox-queue-shortcuts button:hover {
   background: hsl(var(--muted));
 }
-.inbox-queue-shortcuts button[aria-pressed='true'] {
+.inbox-queue-shortcuts button[aria-pressed="true"] {
   background: hsl(var(--primary) / 0.12);
   color: hsl(var(--foreground));
   box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.35);
@@ -526,7 +598,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   padding: 0.875rem 0.75rem;
-  gap: 0.625rem;
+  gap: 0.375rem 0.625rem;
 }
 .inbox-queue-row:hover {
   background: hsl(var(--muted) / 0.3);
@@ -587,6 +659,7 @@
 .inbox-fields-panel {
   border-top: 1px solid hsl(var(--border));
   padding-top: 1rem;
+  container-type: inline-size;
 }
 .inbox-fields-panel li {
   padding-block: 0.375rem;
@@ -594,6 +667,159 @@
 .inbox-fields-panel input,
 .inbox-fields-panel select {
   flex: 1;
+}
+.inbox-field-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.inbox-field-editor {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.inbox-field-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.inbox-field-label small {
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--inbox-muted);
+}
+.inbox-field-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.inbox-case-live {
+  float: right;
+}
+.inbox-case-toolbar > .inbox-case-live[data-compact='true'] {
+  position: absolute;
+  top: 1.25rem;
+  right: 0.875rem;
+}
+.inbox-case-toolbar > .inbox-case-live:not([data-compact='true']) {
+  float: none;
+  display: flex;
+  margin-bottom: 0.5rem;
+}
+.inbox-case-secondary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  min-width: 0;
+}
+.inbox-case-secondary > details {
+  min-width: 0;
+}
+.inbox-case-secondary > details summary {
+  display: list-item;
+  min-height: 2rem;
+}
+.inbox-ui .inbox-next-target[data-state="breached"] {
+  color: hsl(var(--destructive));
+}
+.inbox-composer-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.375rem;
+}
+.inbox-composer-tools .inbox-check {
+  align-items: center;
+  font-size: 0.875rem;
+  color: var(--inbox-muted);
+}
+.inbox-composer-tools .inbox-check input {
+  margin-top: 0;
+}
+.inbox-variable-picker {
+  display: grid;
+  width: 24rem;
+  max-width: calc(100vw - 1.5rem);
+  max-height: min(38rem, var(--reka-popper-available-height, 80dvh));
+  overflow-y: auto;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+.inbox-variable-results {
+  max-height: 16rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+  scroll-padding: 0.25rem;
+}
+.inbox-variable-results:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.inbox-variable-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.inbox-variable-option > :first-child {
+  min-width: 0;
+}
+.inbox-variable-option > :last-child {
+  flex-shrink: 0;
+}
+.inbox-variable-option:hover,
+.inbox-variable-option[aria-selected="true"] {
+  background: hsl(var(--accent));
+}
+.inbox-variable-option[aria-selected="true"] {
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
+}
+@media (max-width: 640px), (pointer: coarse) {
+  .inbox-queue-alert-link {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .inbox-variable-option {
+    min-height: 44px;
+    align-items: center;
+  }
+  .inbox-variable-picker input {
+    /* Prevent mobile browsers zooming into the search field. */
+    font-size: 16px;
+  }
+  .inbox-case-secondary {
+    flex-wrap: wrap;
+  }
+  .inbox-case-controls > .inbox-case-select:first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .inbox-case-controls > .inbox-case-select:first-child select {
+    width: 100%;
+    max-width: 100%;
+  }
+  .inbox-case-toolbar {
+    padding-right: 2.75rem;
+  }
+  .inbox-case-toolbar > .inbox-case-live[data-compact='true'] {
+    top: 1.5rem;
+  }
+  .inbox-composer-tools > .inbox-caption {
+    flex-basis: 100%;
+  }
 }
 @media (max-width: 640px) {
   .inbox-action-controls button {
@@ -613,7 +839,7 @@
 .inbox-tabs {
   padding-block: 0.25rem;
 }
-.inbox-tabs button[aria-selected='true'] {
+.inbox-tabs button[aria-selected="true"] {
   font-weight: 600;
 }
 
@@ -622,7 +848,7 @@
   .inbox-ui button,
   .inbox-ui summary,
   .inbox-ui select,
-  .inbox-ui input:not([type='checkbox']):not([type='radio']) {
+  .inbox-ui input:not([type="checkbox"]):not([type="radio"]) {
     min-height: 44px;
   }
   .inbox-ui button {

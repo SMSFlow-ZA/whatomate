@@ -2745,12 +2745,14 @@ async function sendMediaMessage() {
         <p v-if="inboxReadOnly" class="inbox-ui inbox-notice m-3" role="status">{{t('inboxFollowup.historyReadOnly')}}</p>
         <!-- Message Input -->
         <div v-if="!inboxReadOnly" class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
-          <InboxMacroPicker v-if="inboxEnabled && inboxAccountId && authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
           <ChannelOptions v-model="deliveryOptions" :text="messageInput" :show-setup-hint="false" />
-          <div v-if="inboxEnabled && inboxAccountId && deliveryOptions.channel === 'whatsapp'" class="inbox-ui mb-2 flex flex-wrap items-center gap-3">
+          <div v-if="inboxEnabled && inboxAccountId" class="inbox-ui inbox-composer-tools">
+            <InboxMacroPicker v-if="authStore.hasPermission('chat', 'write')" :account="inboxAccountId" :contact="contactsStore.currentContact.id" :users="assignableUsers" @applied="refreshInboxSummaries" />
+            <template v-if="deliveryOptions.channel === 'whatsapp'">
             <InboxMessageVariables :disabled="isSending" @insert="insertReplyVariable" />
             <label class="inbox-check"><input v-model="personaliseReply" type="checkbox" :disabled="isSending" />{{ t('inboxPersonalisation.enabled') }}</label>
             <p v-if="personaliseReply" class="inbox-caption">{{ t('inboxPersonalisation.composerHelp') }}</p>
+            </template>
           </div>
           <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>

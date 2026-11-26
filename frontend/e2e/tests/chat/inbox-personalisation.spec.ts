@@ -133,7 +133,12 @@ test('reviews personalised replies and variable selection without sending', asyn
           .press('Enter')
         await expect(title).toHaveValue('{{case_priority}}')
         await expect(title).toBeFocused()
-        await expect(page.getByRole('searchbox', { name: 'Search variables', exact: true })).toHaveCount(0)
+        await expect(
+          page.getByRole('searchbox', {
+            name: 'Search variables',
+            exact: true,
+          }),
+        ).toHaveCount(0)
         await expect
           .poll(async () =>
             (await inboxContrast(page)).filter(
@@ -168,6 +173,35 @@ test('reviews personalised replies and variable selection without sending', asyn
           name: 'Search variables',
           exact: true,
         })
+        const picker = page.locator('.inbox-variable-picker')
+        await expect(
+          picker.getByRole('listbox', { name: 'Available variables' }),
+        ).toBeVisible()
+        const pickerLayout = await picker.evaluate((element) => {
+          const bounds = element.getBoundingClientRect()
+          return {
+            width: bounds.width,
+            viewport: innerWidth,
+            overflow: element.scrollWidth > element.clientWidth,
+            optionSize: parseFloat(
+              getComputedStyle(element.querySelector('[role=option]')!)
+                .fontSize,
+            ),
+          }
+        })
+        expect(pickerLayout.width).toBeLessThanOrEqual(
+          pickerLayout.viewport - 20,
+        )
+        expect(pickerLayout.overflow).toBe(false)
+        expect(pickerLayout.optionSize).toBeLessThanOrEqual(14)
+        if (process.env.INBOX_CAPTURE)
+          await page.screenshot({
+            path: testInfo.outputPath(
+              `variable-picker-${theme}-${viewport.width}.png`,
+            ),
+            animations: 'disabled',
+            fullPage: true,
+          })
         await search.fill('Customer name')
         await search.press('ArrowDown')
         await page
@@ -175,7 +209,12 @@ test('reviews personalised replies and variable selection without sending', asyn
           .press('Enter')
         await expect(composer).toHaveValue('Hello {{contact_name}}')
         await expect(composer).toBeFocused()
-        await expect(page.getByRole('searchbox', { name: 'Search variables', exact: true })).toHaveCount(0)
+        await expect(
+          page.getByRole('searchbox', {
+            name: 'Search variables',
+            exact: true,
+          }),
+        ).toHaveCount(0)
         await expect(
           page.getByRole('checkbox', {
             name: 'Personalise this reply',

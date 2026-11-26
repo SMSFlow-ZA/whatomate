@@ -43,8 +43,8 @@ const due = computed(() => {
 <template>
   <p
     v-if="next"
-    class="inbox-caption mt-2 flex flex-wrap gap-x-1"
-    :class="{ 'text-destructive': next[1].status === 'breached' }"
+    class="inbox-caption inbox-next-target mt-2 flex flex-wrap gap-x-1"
+    :data-state="next[1].status"
   >
     <strong class="font-medium"
       >{{ t('inboxSla.target.' + next[0]) }} ·

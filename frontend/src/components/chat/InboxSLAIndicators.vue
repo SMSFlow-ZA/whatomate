@@ -91,7 +91,7 @@ const targets = computed(() =>
     >
       {{ t('inboxPolicy.assigned', { name: sla.policy_name }) }}
     </p>
-    <p v-if="sla.legacy" class="inbox-caption">
+    <p v-if="sla.legacy && !compact" class="inbox-caption">
       {{ t('inboxQuality.legacy') }}
     </p>
     <ul class="flex flex-wrap gap-1" :aria-label="t('inboxSla.title')">
@@ -114,6 +114,7 @@ const targets = computed(() =>
             {{ t('inboxSla.target.' + target.kind) }} ·
             {{ t('inboxSla.state.' + target.status) }}
           </summary>
+          <p v-if="sla.legacy && compact" class="inbox-caption py-1">{{ t('inboxQuality.legacy') }}</p>
           <p v-if="target.countdown" class="py-1">
             {{ t('inboxQuality.workingTime') }}: {{ target.countdown }}
           </p>

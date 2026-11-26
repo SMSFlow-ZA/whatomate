@@ -449,7 +449,8 @@ const live = useInboxLive(
     <InboxLiveStatus
       :state="live.state.value"
       :pending="live.pending.value"
-      class="mb-1"
+      compact
+      class="inbox-case-live"
     />
     <div
       v-if="readOnly && !history && current"
@@ -663,7 +664,7 @@ const live = useInboxLive(
         v-if="!readOnly && current.sla && current.status !== 'resolved'"
         :sla="current.sla"
       />
-      <div class="mt-1 flex items-start gap-2">
+      <div class="inbox-case-secondary">
         <Button type="button" variant="ghost" size="sm" @click="emit('details')"
           ><History class="mr-1.5 h-4 w-4" aria-hidden="true" />{{
             t('inboxFollowup.caseDetails')

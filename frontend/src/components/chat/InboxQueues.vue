@@ -9,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { Filter, Bookmark, Inbox, RotateCw, Info } from 'lucide-vue-next'
+import { Bell, Filter, Bookmark, Inbox, RotateCw, Info } from 'lucide-vue-next'
 import '@/assets/inbox.css'
 import InboxFieldMatchers from './InboxFieldMatchers.vue'
 import InboxConditionBuilder from './InboxConditionBuilder.vue'
@@ -677,12 +677,7 @@ async function applyBulk() {
     :aria-label="t('inboxQueue.title')"
   >
     <div class="inbox-queue-tools">
-      <InboxLiveStatus
-        :state="live.state.value"
-        :pending="live.pending.value"
-        class="mb-2"
-      />
-      <label class="inbox-label mb-3"
+      <label class="inbox-label inbox-queue-search"
         >{{ t('inboxFollowup.search') }}
         <input
           v-model="filters.search"
@@ -700,15 +695,23 @@ async function applyBulk() {
           :aria-label="t('inboxQueue.queue.' + (queue || 'all'))"
           @click="filters.queue = queue"
         >
-          {{ t('inboxQueue.queue.' + (queue || 'all')) }}
+          {{
+            t(
+              queue === ''
+                ? 'inboxVisual.all'
+                : queue === 'awaiting_reply'
+                  ? 'inboxVisual.firstReply'
+                  : 'inboxQueue.queue.' + queue,
+            )
+          }}
           <span
             v-if="counts[queue || 'all'] !== undefined"
-            class="tabular-nums"
+            class="inbox-queue-count tabular-nums"
             >{{ counts[queue || 'all'] }}</span
           >
         </button>
       </nav>
-      <div class="mt-3 flex flex-wrap items-center gap-1">
+      <div class="inbox-queue-actions">
         <Popover
           ><PopoverTrigger as-child
             ><Button variant="outline" size="sm"
@@ -831,9 +834,13 @@ async function applyBulk() {
         >
         <Popover
           ><PopoverTrigger as-child
-            ><Button variant="ghost" size="sm"
+            ><Button
+              variant="ghost"
+              size="sm"
+              :aria-label="t('inboxQueue.savedViews')"
+              :title="t('inboxQueue.savedViews')"
               ><Bookmark class="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{{
-                t('inboxQueue.savedViews')
+                t('inboxVisual.views')
               }}</Button
             ></PopoverTrigger
           ><PopoverContent
@@ -918,8 +925,12 @@ async function applyBulk() {
         >
         <RouterLink
           :to="{ name: 'inbox-notices' }"
-          class="inline-flex min-h-[44px] items-center px-2 text-sm font-medium underline-offset-4 hover:underline"
-          >{{ t('inboxNotice.title') }}</RouterLink
+          class="inbox-queue-alert-link inline-flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+          :aria-label="t('inboxNotice.title')"
+          :title="t('inboxNotice.title')"
+          ><Bell class="h-4 w-4" aria-hidden="true" /><span class="sr-only">{{
+            t('inboxNotice.title')
+          }}</span></RouterLink
         >
         <Button
           variant="ghost"
@@ -932,9 +943,9 @@ async function applyBulk() {
           ><RotateCw class="h-3.5 w-3.5" aria-hidden="true"
         /></Button>
       </div>
-      <div class="mt-3 flex items-end gap-2">
+      <div class="inbox-queue-order">
         <label class="inbox-label min-w-0 flex-1" :for="queueID + '-sort'"
-          >{{ t('inboxDiscovery.sort') }}
+          ><span class="sr-only">{{ t('inboxDiscovery.sort') }}</span>
           <select
             :id="queueID + '-sort'"
             v-model="discovery.order"
@@ -955,7 +966,7 @@ async function applyBulk() {
             ><Button
               variant="ghost"
               size="icon"
-              class="min-h-[44px] min-w-[44px]"
+              class="h-8 w-8"
               :aria-label="t('inboxDiscovery.orderDetails')"
               ><Info
                 class="h-4 w-4"
@@ -997,17 +1008,31 @@ async function applyBulk() {
           >{{ t('inboxUX.resetFilters') }}</Button
         >
       </div>
-      <label v-if="canEdit && selectable.length" class="inbox-check mt-2"
-        ><input
-          type="checkbox"
-          :checked="pageSelected"
-          :disabled="saving || loading"
-          @change="selectPage"
-        />{{ t('inboxReview.selectPage') }}</label
-      >
-      <p v-if="updatedAt" class="inbox-caption mt-2" role="status">
-        {{ t('inboxQuality.lastUpdated', { time: updatedAt }) }}
-      </p>
+      <div class="inbox-queue-meta">
+        <label v-if="canEdit && selectable.length" class="inbox-check"
+          ><input
+            type="checkbox"
+            :aria-label="t('inboxReview.selectPage')"
+            :checked="pageSelected"
+            :disabled="saving || loading"
+            @change="selectPage"
+          /><span :title="t('inboxReview.selectPage')">{{
+            t('inboxVisual.selectPage')
+          }}</span></label
+        >
+        <InboxLiveStatus
+          :state="live.state.value"
+          :pending="live.pending.value"
+          :title="
+            updatedAt
+              ? t('inboxQuality.lastUpdated', { time: updatedAt })
+              : undefined
+          "
+        />
+        <span v-if="updatedAt" class="sr-only" role="status">{{
+          t('inboxQuality.lastUpdated', { time: updatedAt })
+        }}</span>
+      </div>
       <p v-if="activeView" class="inbox-caption mt-2">
         {{ views.find((v) => v.id === activeView)?.name }}
       </p>
@@ -1220,7 +1245,7 @@ async function applyBulk() {
             :aria-current="isCurrent(row) ? 'page' : undefined"
             @click="emit('open', row)"
           >
-            <strong class="block truncate">{{
+            <strong class="inbox-queue-name block truncate">{{
               row.contact_name || t('inboxQueue.unnamed')
             }}</strong
             ><span class="inbox-caption mt-1 block truncate">{{
@@ -1228,17 +1253,27 @@ async function applyBulk() {
             }}</span
             ><span
               v-if="row.message_preview"
-              class="mt-1 block truncate text-sm"
+              class="inbox-queue-preview mt-1 block truncate text-sm"
               >{{ row.message_preview }}</span
             ><span class="inbox-caption mt-1 block truncate"
               >{{ row.team_name || t('inboxQuality.noTeam') }} ·
               {{ row.assignee_name || t('inboxQueue.queue.unassigned') }}</span
-            ><span v-if="waitingAge(row)" class="inbox-caption mt-1 block">{{
-              waitingAge(row)
-            }}</span
-            ><span v-if="row.last_inbound_at" class="inbox-caption mt-1 block"
-              >{{ t('inboxQuality.waitingSince') }}
-              {{ new Date(row.last_inbound_at).toLocaleString() }}</span
+            ><span
+              v-if="row.last_inbound_at"
+              class="inbox-caption mt-1 block"
+              :title="
+                t('inboxQuality.waitingSince') +
+                ' ' +
+                new Date(row.last_inbound_at).toLocaleString()
+              "
+              ><span v-if="waitingAge(row)">{{ waitingAge(row) }}</span>
+              <time v-else :datetime="row.last_inbound_at">{{
+                new Date(row.last_inbound_at).toLocaleDateString()
+              }}</time>
+              <span class="sr-only"
+                >{{ t('inboxQuality.waitingSince') }}
+                {{ new Date(row.last_inbound_at).toLocaleString() }}</span
+              ></span
             ><span class="mt-2 flex flex-wrap gap-1.5"
               ><span class="inbox-badge">{{
                 t('inboxWorkflow.status.' + row.status)
