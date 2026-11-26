@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { createApp, h, nextTick, ref } from 'vue'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import InboxTabs from './InboxTabs.vue'
 
 it('moves selection and focus together using arrows and Home/End', async () => {
@@ -25,6 +25,11 @@ it('moves selection and focus together using arrows and Home/End', async () => {
   app.mount(root)
   try {
     const tabs = root.querySelectorAll<HTMLButtonElement>('[role=tab]')
+    const scrolls = Array.from(tabs, (tab) => {
+      const scroll = vi.fn()
+      tab.scrollIntoView = scroll
+      return scroll
+    })
     tabs[0].focus()
     tabs[0].dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
@@ -40,6 +45,11 @@ it('moves selection and focus together using arrows and Home/End', async () => {
     await nextTick()
     expect(model.value).toBe('history')
     expect(document.activeElement).toBe(tabs[2])
+    expect(scrolls[2]).toHaveBeenLastCalledWith({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'instant',
+    })
     tabs[2].dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
     )

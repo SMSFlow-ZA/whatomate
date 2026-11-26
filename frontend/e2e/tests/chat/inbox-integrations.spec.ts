@@ -113,12 +113,15 @@ test('configures approved integration actions with held dispatch and responsive 
         exact: true,
       })
       await expect(last).toBeFocused()
-      const bounds = await last.evaluate((element) => {
-        const b = element.getBoundingClientRect(),
-          p = element.parentElement!.getBoundingClientRect()
-        return b.left >= p.left - 1 && b.right <= p.right + 1
-      })
-      expect(bounds).toBe(true)
+      await expect
+        .poll(() =>
+          last.evaluate((element) => {
+            const b = element.getBoundingClientRect(),
+              p = element.parentElement!.getBoundingClientRect()
+            return b.left >= p.left - 1 && b.right <= p.right + 1
+          }),
+        )
+        .toBe(true)
       await tabs.getByRole('tab', { name: 'Integrations', exact: true }).click()
     }
     await page.setViewportSize({ width: 1366, height: 900 })
@@ -321,7 +324,7 @@ test('configures approved integration actions with held dispatch and responsive 
       .selectOption(integrationId)
     const mapping = page
       .locator('label')
-      .filter({ hasText: /^customer ·/ })
+      .filter({ hasText: /^customer Â·/ })
       .locator('textarea')
     await mapping.fill('{{contact_name}}')
     await page
@@ -416,7 +419,7 @@ test('configures approved integration actions with held dispatch and responsive 
     }
     await page
       .locator('label')
-      .filter({ hasText: /^client ·/ })
+      .filter({ hasText: /^client Â·/ })
       .locator('textarea')
       .fill('{{contact_name}}')
     await page

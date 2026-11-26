@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { nextTick } from 'vue'
 const model = defineModel<string>({ required: true })
 const props = defineProps<{
   items: { value: string; label: string }[]
   label: string
 }>()
-function navigate(event: KeyboardEvent, index: number) {
+async function navigate(event: KeyboardEvent, index: number) {
   let next = index
   if (event.key === 'ArrowRight') next = (index + 1) % props.items.length
   else if (event.key === 'ArrowLeft')
@@ -17,7 +18,14 @@ function navigate(event: KeyboardEvent, index: number) {
     event.currentTarget as HTMLElement
   ).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
   model.value = props.items[next].value
-  buttons?.[next]?.focus()
+  await nextTick()
+  const target = buttons?.[next]
+  target?.focus({ preventScroll: true })
+  target?.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest',
+    behavior: 'instant',
+  })
 }
 </script>
 <template>
