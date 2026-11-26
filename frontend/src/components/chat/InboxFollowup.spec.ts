@@ -64,6 +64,46 @@ afterEach(() => {
   route.query = {}
   vi.clearAllMocks()
 })
+it('removes loaded fields and authored values after a confirmed denied refresh', async () => {
+  mock.fields.mockResolvedValue({
+    data: {
+      data: {
+        definitions: [
+          {
+            id: 'private',
+            scope: 'case',
+            key: 'reference',
+            label: 'Private reference',
+            kind: 'text',
+          },
+        ],
+      },
+    },
+  })
+  mock.values.mockResolvedValue({
+    data: {
+      data: {
+        subject_id: 'past',
+        values: [{ definition_id: 'private', value: 'Private stored value' }],
+      },
+    },
+  })
+  const state = await mount(InboxFieldPanel, {
+    account: 'a',
+    contact: 'c',
+    caseId: 'past',
+    canWrite: true,
+  })
+  state.values.private = 'Private authored draft'
+  mock.values.mockRejectedValueOnce({ response: { status: 403 } })
+  await state.load(true)
+  await settle()
+  expect(state.ready).toBe(false)
+  expect(state.values).toEqual({})
+  expect(state.stored).toEqual({})
+  expect(root.textContent).not.toContain('Private stored value')
+  expect(root.querySelector('input')).toBeNull()
+})
 const activity = (id: string) => ({
   id,
   case_id: 'past',

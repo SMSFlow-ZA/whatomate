@@ -395,7 +395,7 @@ function actor(id: string) {
         >{{ t('inboxIntegrationHistory.older') }}</Button
       >
     </div>
-    <div class="grid gap-3">
+    <div v-if="ready && !failed" class="grid gap-3">
       <Button
         v-if="canReviewSequence"
         type="button"

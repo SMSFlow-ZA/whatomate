@@ -2,6 +2,7 @@
 import '@/assets/inbox.css'
 import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
 import { useInboxLive } from '@/composables/useInboxLive'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 import { UsersRound } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -44,6 +45,7 @@ const unsavedLimits = computed(
 )
 let timer: ReturnType<typeof setInterval> | undefined
 let sequence = 0
+let saveSequence = 0
 const { discardOpen, confirmDiscard, cancelDiscard, requestDiscard } =
   useInboxDraftGuard(() => unsavedLimits.value)
 function selectAccount(event: Event) {
@@ -86,28 +88,41 @@ async function load() {
       })
       lastUpdated.value = new Date().toLocaleTimeString()
     }
-  } catch {
-    if (now === sequence) loadFailed.value = true
+  } catch (error) {
+    if (now === sequence) {
+      loadFailed.value = true
+      if (isInboxAccessFailure(error)) clearPrivateCapacity()
+    }
   } finally {
     if (now === sequence) loading.value = false
   }
 }
 async function save(row: InboxCapacity) {
+  const action = ++saveSequence,
+    selectedTeam = props.team,
+    selectedAccount = account.value
+  const current = () =>
+    action === saveSequence &&
+    selectedTeam === props.team &&
+    selectedAccount === account.value
   busy.value = row.agent_id
   try {
     await inboxService.setTeamCapacity(
-      props.team,
-      account.value,
+      selectedTeam,
+      selectedAccount,
       row.agent_id,
       row.max_active,
     )
+    if (!current()) return
     toast.success(t('settings.saved'))
     originalLimits.delete(row.agent_id)
     await load()
-  } catch {
+  } catch (error) {
+    if (!current()) return
+    if (isInboxAccessFailure(error)) clearPrivateCapacity()
     toast.error(t('inboxCapacity.saveError'))
   } finally {
-    busy.value = ''
+    if (current()) busy.value = ''
   }
 }
 watch(
@@ -117,6 +132,8 @@ watch(
   },
 )
 watch([account, () => props.team], () => {
+  saveSequence++
+  busy.value = ''
   rows.value = []
   originalLimits.clear()
   void load()
@@ -161,6 +178,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   sequence++
+  saveSequence++
   clearInterval(timer)
   document.removeEventListener('visibilitychange', refreshVisible)
 })
@@ -168,6 +186,18 @@ function presetApplied() {
   rows.value = []
   originalLimits.clear()
   void load()
+}
+function clearPrivateCapacity() {
+  sequence++
+  saveSequence++
+  rows.value = []
+  originalLimits.clear()
+  lastUpdated.value = ''
+  loading.value = false
+  busy.value = ''
+  enabled.value = false
+  settingsFailed.value = true
+  cancelDiscard()
 }
 const live = useInboxLive(
   () =>
@@ -189,15 +219,7 @@ const live = useInboxLive(
       busy.value = ''
       cancelDiscard()
     },
-    denied: () => {
-      sequence++
-      rows.value = []
-      originalLimits.clear()
-      lastUpdated.value = ''
-      loading.value = false
-      enabled.value = false
-      settingsFailed.value = true
-    },
+    denied: clearPrivateCapacity,
   },
 )
 </script>

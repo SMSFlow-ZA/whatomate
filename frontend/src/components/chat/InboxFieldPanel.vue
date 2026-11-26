@@ -3,6 +3,7 @@ import '@/assets/inbox.css'
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
 import { useInboxLive } from '@/composables/useInboxLive'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -82,8 +83,11 @@ async function load(background = false) {
     )
     values.value = { ...stored.value }
     ready.value = true
-  } catch {
-    if (sequence === request) failed.value = true
+  } catch (error) {
+    if (sequence === request) {
+      if (isInboxAccessFailure(error)) clearPrivateFields()
+      else failed.value = true
+    }
     return false
   }
 }
@@ -114,8 +118,12 @@ async function save(d: FieldDefinition) {
       stored.value[d.id] = value
       toast.success(t('settings.saved'))
     }
-  } catch {
+  } catch (error) {
     if (sequence === request) {
+      if (isInboxAccessFailure(error)) {
+        clearPrivateFields()
+        return
+      }
       errors.value[d.id] = t('inboxFields.saveError')
       toast.error(errors.value[d.id])
     }

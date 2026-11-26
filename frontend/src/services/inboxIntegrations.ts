@@ -26,7 +26,7 @@ export interface IntegrationDefinition {
 export type IntegrationDefinitionInput = Omit<
   IntegrationDefinition,
   'id' | 'has_credential' | 'updated_at'
-> & { credential?: string }
+> & { credential?: string; updated_at?: string }
 export type IntegrationCatalogueItem = Pick<
   IntegrationDefinition,
   'id' | 'name' | 'description' | 'enabled' | 'inputs'

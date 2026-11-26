@@ -25,6 +25,11 @@ replies, channel dispatch and integration controls are unchanged.
 - A failed background field read keeps the loaded form and its current values
   visible. Retry stages the read while edits are active; Save or Cancel explicitly
   finishes those edits before waiting values can apply.
+- Confirmed HTTP401/403 access loss or HTTP404 loss of the selected resource
+  clears previously loaded private rows, values, history and related controls,
+  including while live transport is unavailable. This also discards a private
+  draft the viewer is no longer authorised to inspect. Transient network errors
+  and service outages retain the existing draft-recovery behaviour above.
 - Conversation history stays on the selected case, with its previous activity
   pages retained. A refresh does not switch a historical case to the current one.
 - Hidden tabs stop watching. Returning renews access and reloads through the

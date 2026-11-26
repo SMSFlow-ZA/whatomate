@@ -2,6 +2,7 @@
 import InboxAssignmentRate from './InboxAssignmentRate.vue'
 import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
 import { useInboxLive } from '@/composables/useInboxLive'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
@@ -37,8 +38,16 @@ async function load() {
     uniqueAgents.value = data.data.unique_agents ?? 0
     updated.value = new Date(data.data.updated_at).toLocaleTimeString()
     failed.value = false
-  } catch {
-    if (request === generation) failed.value = true
+  } catch (error) {
+    if (request === generation) {
+      failed.value = true
+      if (isInboxAccessFailure(error)) {
+        rows.value = []
+        uniqueAgents.value = 0
+        updated.value = ''
+        more.value = false
+      }
+    }
   } finally {
     if (request === generation) loading.value = false
   }
@@ -78,8 +87,8 @@ watch(
     uniqueAgents.value = 0
     updated.value = ''
     failed.value = false
-    offset.value = 0
-    void load()
+    if (offset.value !== 0) offset.value = 0
+    else void load()
   },
 )
 watch(offset, load)

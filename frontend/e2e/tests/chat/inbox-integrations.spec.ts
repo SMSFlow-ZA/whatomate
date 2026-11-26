@@ -75,6 +75,53 @@ test('configures approved integration actions with held dispatch and responsive 
     await expect(
       page.getByRole('heading', { name: 'Integrations', exact: true }),
     ).toBeVisible()
+    for (const width of [312, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 })
+      const tabs = page.getByRole('tablist', {
+        name: 'Inbox workflows',
+        exact: true,
+      })
+      expect(
+        await tabs
+          .locator('[role=tab]')
+          .evaluateAll((elements) =>
+            elements.every(
+              (element) => element.scrollWidth <= element.clientWidth + 1,
+            ),
+          ),
+      ).toBe(true)
+      const notice = page.locator('.inbox-integration-dispatch')
+      const geometry = await notice.evaluate((element) => {
+        const box = element.getBoundingClientRect()
+        const text = element.querySelector('div')!.getBoundingClientRect()
+        const action = element.querySelector('button')!.getBoundingClientRect()
+        return {
+          proseWidth: text.width,
+          noticeWidth: box.width,
+          actionTop: action.top,
+          proseBottom: text.bottom,
+        }
+      })
+      expect(geometry.proseWidth).toBeGreaterThan(geometry.noticeWidth - 85)
+      expect(geometry.actionTop).toBeGreaterThanOrEqual(
+        geometry.proseBottom - 1,
+      )
+      await tabs.getByRole('tab', { name: 'Integrations', exact: true }).focus()
+      await page.keyboard.press('End')
+      const last = tabs.getByRole('tab', {
+        name: 'Response targets',
+        exact: true,
+      })
+      await expect(last).toBeFocused()
+      const bounds = await last.evaluate((element) => {
+        const b = element.getBoundingClientRect(),
+          p = element.parentElement!.getBoundingClientRect()
+        return b.left >= p.left - 1 && b.right <= p.right + 1
+      })
+      expect(bounds).toBe(true)
+      await tabs.getByRole('tab', { name: 'Integrations', exact: true }).click()
+    }
+    await page.setViewportSize({ width: 1366, height: 900 })
     const newButton = page.getByRole('button', {
       name: 'New integration',
       exact: true,
@@ -309,6 +356,7 @@ test('configures approved integration actions with held dispatch and responsive 
     )
     expect(JSON.stringify(preview)).not.toContain('synthetic-browser-secret')
     const changed = await api.put('/api/inbox/integrations/' + integrationId, {
+      updated_at: metadata.updated_at,
       name: metadata.name,
       description: metadata.description,
       endpoint_key: metadata.endpoint_key,

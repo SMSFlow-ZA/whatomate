@@ -50,10 +50,29 @@
   margin-bottom: 1.5rem;
 }
 .inbox-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-height: 2.75rem;
   border-bottom: 2px solid transparent;
   color: hsl(var(--muted-foreground));
   font-weight: 500;
+}
+.inbox-integration-dispatch > div {
+  min-width: 0;
+}
+@media (max-width: 639px) {
+  .inbox-notice.inbox-integration-dispatch {
+    flex-wrap: wrap;
+  }
+  .inbox-integration-dispatch > div {
+    flex-basis: calc(100% - 2rem);
+  }
+  .inbox-integration-dispatch > button {
+    flex-basis: 100%;
+    min-height: 2.75rem;
+    height: auto;
+    white-space: normal;
+  }
 }
 .inbox-tabs button[aria-selected='true'] {
   color: hsl(var(--foreground));

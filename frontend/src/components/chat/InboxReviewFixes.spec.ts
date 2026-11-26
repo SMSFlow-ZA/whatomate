@@ -8,6 +8,8 @@ import InboxSLAReport from './InboxSLAReport.vue'
 import InboxFieldMatchers from './InboxFieldMatchers.vue'
 import InboxCapacityPresets from '@/components/settings/InboxCapacityPresets.vue'
 import InboxSLASettings from '@/components/settings/InboxSLASettings.vue'
+import InboxTeamCapacity from '@/components/settings/InboxTeamCapacity.vue'
+import InboxSLAHistory from './InboxSLAHistory.vue'
 
 const mocks = vi.hoisted(() => ({
   report: vi.fn(),
@@ -21,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   fields: vi.fn(),
   presets: vi.fn(),
   remove: vi.fn(),
+  capacity: vi.fn(),
+  setCapacity: vi.fn(),
+  history: vi.fn(),
 }))
 vi.mock('@/services/inbox', () => ({
   inboxService: {
@@ -34,7 +39,13 @@ vi.mock('@/services/inbox', () => ({
     deleteCapacityPreset: mocks.remove,
     slaPolicies: mocks.policies,
     setSlaPolicy: mocks.savePolicy,
+    teamCapacity: mocks.capacity,
+    setTeamCapacity: mocks.setCapacity,
+    slaHistory: mocks.history,
   },
+}))
+vi.mock('@/components/settings/InboxRoutingPolicies.vue', () => ({
+  default: { template: '<div />' },
 }))
 vi.mock('@/services/api', () => ({ accountsService: { list: mocks.accounts } }))
 vi.mock('@/stores/auth', () => ({
@@ -88,6 +99,129 @@ const emptyReport = {
     },
   },
 }
+
+it('clears capacity drafts on confirmed denial and ignores a denied save from an older account', async () => {
+  const account = ref('a')
+  const capacity = (name: string) => ({
+    data: {
+      data: {
+        agents: [
+          {
+            agent_id: 'private-agent',
+            name,
+            active: 1,
+            max_active: 4,
+            available: true,
+          },
+        ],
+      },
+    },
+  })
+  mocks.presets.mockResolvedValue({ data: { data: { presets: [] } } })
+  mocks.capacity.mockImplementation((_team, selected) =>
+    Promise.resolve(capacity(selected)),
+  )
+  mount({
+    render: () =>
+      h(InboxTeamCapacity, {
+        team: 'team',
+        account: account.value,
+        canWrite: true,
+      }),
+  })
+  await settle()
+  const state = mountedVm.$.subTree.component.setupState
+  let deny!: (error: unknown) => void
+  mocks.setCapacity.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      deny = reject
+    }),
+  )
+  const saving = state.save(state.rows[0])
+  account.value = 'b'
+  await settle()
+  deny({ response: { status: 403 } })
+  await saving
+  expect(state.enabled).toBe(true)
+  expect(state.rows[0].name).toBe('b')
+  state.rows[0].max_active = 9
+  mocks.capacity.mockRejectedValueOnce({ response: { status: 403 } })
+  await state.load()
+  await settle()
+  expect(state.rows).toEqual([])
+  expect(state.enabled).toBe(false)
+  expect(state.unsavedLimits).toBe(false)
+})
+
+it('clears historical result rows, summaries and filter identities on confirmed denial', async () => {
+  mocks.history.mockResolvedValue({
+    data: {
+      data: {
+        results: [],
+        summary: { total: 7, met: 6, breached: 1, unanswered: 0, legacy: 0 },
+        has_more: true,
+        filters: {
+          agents: [{ id: 'private', name: 'Private agent' }],
+          policy_versions: [],
+        },
+      },
+    },
+  })
+  const state = mount(InboxSLAHistory)
+  await settle()
+  expect(state.summary.total).toBe(7)
+  mocks.history.mockRejectedValueOnce({ response: { status: 403 } })
+  await state.load()
+  expect(state.summary.total).toBe(0)
+  expect(state.agents).toEqual([])
+  expect(state.rows).toEqual([])
+  expect(state.more).toBe(false)
+})
+it('issues one first-page report request when filters change from a later page', async () => {
+  mocks.accounts.mockResolvedValue({ data: { data: { accounts: [] } } })
+  mocks.teams.mockResolvedValue({ teams: [] })
+  mocks.report.mockResolvedValue(emptyReport)
+  const state = mount(InboxSLAReport)
+  await settle()
+  state.offset = 100
+  await settle()
+  mocks.report.mockClear()
+  state.account = 'another-account'
+  await settle()
+  expect(mocks.report).toHaveBeenCalledTimes(1)
+  expect(mocks.report).toHaveBeenLastCalledWith('another-account', '', 0, false)
+})
+
+it('issues one workload request on a context reset and clears denied private rows', async () => {
+  const account = ref('a')
+  mocks.workload.mockResolvedValue({
+    data: {
+      data: {
+        agents: [{ agent_id: 'private', name: 'Private agent' }],
+        unique_agents: 1,
+        has_more: true,
+        updated_at: new Date().toISOString(),
+      },
+    },
+  })
+  mount({ render: () => h(InboxWorkload, { account: account.value }) })
+  await settle()
+  const state = mountedVm.$.subTree.component.setupState
+  state.offset = 100
+  await settle()
+  mocks.workload.mockClear()
+  account.value = 'b'
+  await settle()
+  expect(mocks.workload).toHaveBeenCalledTimes(1)
+  expect(mocks.workload).toHaveBeenLastCalledWith(undefined, 'b', 0)
+  mocks.workload.mockRejectedValueOnce({ response: { status: 403 } })
+  await state.load()
+  await settle()
+  expect(state.rows).toHaveLength(0)
+  expect(state.uniqueAgents).toBe(0)
+  expect(state.more).toBe(false)
+  expect(root.textContent).not.toContain('Private agent')
+})
 
 it('hides old report results during a scope change and recovers failed lookups separately', async () => {
   mocks.accounts

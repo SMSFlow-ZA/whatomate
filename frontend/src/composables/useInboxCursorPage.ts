@@ -1,4 +1,5 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 
 export interface InboxCursorPage<T> {
   items: T[]
@@ -40,8 +41,18 @@ export function useInboxCursorPage<T>(
           : ''
       updatedAt.value = new Date().toISOString()
       ready.value = true
-    } catch {
-      if (request === generation && scope === context()) failed.value = true
+    } catch (error) {
+      if (request === generation && scope === context()) {
+        failed.value = true
+        if (isInboxAccessFailure(error)) {
+          items.value = []
+          ready.value = false
+          updatedAt.value = ''
+          position.value = 0
+          cursors.value = ['']
+          nextCursor.value = ''
+        }
+      }
     } finally {
       if (request === generation) busy.value = false
     }

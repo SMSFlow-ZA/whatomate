@@ -108,6 +108,7 @@ test('keeps one provider object through an in-flight crash, reviewed retry, rece
       await data(
         await api.put('/api/inbox/integrations/' + created.id, {
           ...authored,
+          updated_at: created.updated_at,
           enabled: true,
         }),
       )

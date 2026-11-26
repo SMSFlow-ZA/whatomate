@@ -199,6 +199,55 @@ it('replaces a credential explicitly, clears its input on success and preserves 
   expect(mock.setEnabled).not.toHaveBeenCalled()
 })
 
+it('binds updates to their loaded stamp and preserves drafts with actionable conflict recovery', async () => {
+  const message =
+    'This integration changed. Cancel, refresh the integration list, then reopen it to review the latest settings before saving.'
+  mock.update.mockRejectedValueOnce({
+    response: { status: 409, data: { message } },
+  })
+  const root = await mount()
+  button(root, 'common.edit').click()
+  await settle()
+  await input(root, 'common.description', 'Authored draft retained')
+  button(root, 'common.save').click()
+  await settle()
+  expect(mock.update.mock.calls[0]![1].updated_at).toBe(definition().updated_at)
+  expect(control(root, 'common.description').value).toBe(
+    'Authored draft retained',
+  )
+  expect(root.textContent).toContain(message)
+  button(root, 'common.cancel').click()
+  await settle()
+  const leave = [...document.querySelectorAll('button')].find(
+    (item) => item.textContent?.trim() === 'common.leave',
+  )!
+  expect(leave).toBeTruthy()
+  leave.click()
+  await settle()
+  const latest = {
+    ...definition(),
+    enabled: false,
+    auth_mode: 'api_key',
+    updated_at: '2026-02-01T00:00:00Z',
+  }
+  mock.list.mockResolvedValueOnce(
+    envelope({ integrations: [latest], endpoints: [endpoint] }),
+  )
+  button(root, 'inboxQuality.refresh').click()
+  await settle()
+  button(root, 'common.edit').click()
+  await settle()
+  await input(root, 'common.description', 'New reviewed draft')
+  mock.update.mockResolvedValueOnce(envelope({ integration: latest }))
+  button(root, 'common.save').click()
+  await settle()
+  expect(mock.update.mock.lastCall![1]).toMatchObject({
+    enabled: false,
+    auth_mode: 'api_key',
+    updated_at: latest.updated_at,
+  })
+})
+
 it('never enables new definitions or dispatch while saving configuration', async () => {
   mock.create.mockResolvedValue(
     envelope({

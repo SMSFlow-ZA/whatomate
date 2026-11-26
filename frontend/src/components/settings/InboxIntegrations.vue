@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { useInboxDraftGuard } from '@/composables/useInboxDraftGuard'
 import { useInboxViewerContext } from '@/composables/useInboxViewerContext'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 import { useAuthStore } from '@/stores/auth'
 import { inboxService, type FieldDefinition } from '@/services/inbox'
 import {
@@ -143,8 +144,11 @@ async function loadFields(request: number) {
     if (request !== generation) return
     fields.value = data.data.definitions
     fieldsFailed.value = false
-  } catch {
-    if (request === generation) fieldsFailed.value = true
+  } catch (failure) {
+    if (request === generation) {
+      if (isInboxAccessFailure(failure)) clearPrivateIntegration()
+      else fieldsFailed.value = true
+    }
   }
 }
 async function load() {
@@ -166,8 +170,11 @@ async function load() {
     endpoints.value = definitions.data.data.endpoints
     state.value = settings.data.data
     await loadFields(request)
-  } catch {
-    if (request === generation) failed.value = true
+  } catch (failure) {
+    if (request === generation) {
+      if (isInboxAccessFailure(failure)) clearPrivateIntegration()
+      else failed.value = true
+    }
   } finally {
     if (request === generation) loading.value = false
   }
@@ -184,6 +191,7 @@ function open(item?: IntegrationDefinition, event?: Event) {
     form.value = item
       ? {
           name: item.name,
+          updated_at: item.updated_at,
           description: item.description,
           endpoint_key: item.endpoint_key,
           auth_mode: item.auth_mode,
@@ -253,6 +261,7 @@ async function save() {
     selectedId.value = saved.id
     form.value = {
       name: saved.name,
+      updated_at: saved.updated_at,
       description: saved.description,
       endpoint_key: saved.endpoint_key,
       auth_mode: saved.auth_mode,
@@ -269,8 +278,22 @@ async function save() {
     notice.value = t(
       id ? 'inboxIntegrations.saved' : 'inboxIntegrations.createdDisabled',
     )
-  } catch {
-    if (request === generation) error.value = t('inboxIntegrations.saveError')
+  } catch (failure) {
+    if (request === generation) {
+      if (isInboxAccessFailure(failure)) {
+        clearPrivateIntegration()
+        return
+      }
+      const reply = (
+        failure as {
+          response?: { status?: number; data?: { message?: string } }
+        }
+      )?.response
+      error.value =
+        reply?.status === 409 && typeof reply.data?.message === 'string'
+          ? reply.data.message
+          : t('inboxIntegrations.saveError')
+    }
   } finally {
     if (request === generation) saving.value = false
   }
@@ -310,6 +333,25 @@ async function setEnabled(enabled: boolean) {
   } finally {
     if (requestedContext === context.value) settingBusy.value = false
   }
+}
+function clearPrivateIntegration() {
+  generation++
+  editing.value = false
+  saving.value = false
+  settingBusy.value = false
+  loading.value = false
+  failed.value = true
+  credential.value = ''
+  form.value = defaults()
+  baseline.value = ''
+  items.value = []
+  fields.value = []
+  endpoints.value = []
+  storedCredential.value = false
+  replaceCredential.value = false
+  enableRequested.value = false
+  removeRequested.value = false
+  cancelDiscard()
 }
 watch(
   [context, allowed],
@@ -416,7 +458,7 @@ onUnmounted(() => {
         <div v-for="line in 3" :key="line" class="h-12 rounded bg-muted" />
       </div>
       <template v-if="!loading && !failed && !editing">
-        <div class="inbox-notice">
+        <div class="inbox-notice inbox-integration-dispatch">
           <Plug class="h-5 w-5" aria-hidden="true" />
           <div class="flex-1">
             <strong>{{

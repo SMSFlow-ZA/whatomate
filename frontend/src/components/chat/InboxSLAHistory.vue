@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { inboxService, type InboxSLAHistoryRow } from '@/services/inbox'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 const props = defineProps<{ account?: string; team?: string }>()
 const { t } = useI18n()
 const today = new Date(),
@@ -90,8 +91,23 @@ async function load() {
     agents.value = data.data.filters?.agents ?? []
     versions.value = data.data.filters?.policy_versions ?? []
     failed.value = false
-  } catch {
-    if (request === generation) failed.value = true
+  } catch (error) {
+    if (request === generation) {
+      failed.value = true
+      if (isInboxAccessFailure(error)) {
+        rows.value = []
+        agents.value = []
+        versions.value = []
+        more.value = false
+        summary.value = {
+          total: 0,
+          met: 0,
+          breached: 0,
+          unanswered: 0,
+          legacy: 0,
+        }
+      }
+    }
   } finally {
     if (request === generation) busy.value = false
   }

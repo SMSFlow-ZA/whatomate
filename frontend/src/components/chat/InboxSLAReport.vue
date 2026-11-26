@@ -2,6 +2,7 @@
 import '@/assets/inbox.css'
 import InboxLiveStatus from '@/components/shared/InboxLiveStatus.vue'
 import { useInboxLive } from '@/composables/useInboxLive'
+import { isInboxAccessFailure } from '@/lib/inboxAccess'
 import { Clock3, Settings2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -58,8 +59,16 @@ async function load() {
     lastUpdated.value = new Date(
       data.data.updated_at || Date.now(),
     ).toLocaleTimeString()
-  } catch {
-    if (request === sequence) failed.value = true
+  } catch (error) {
+    if (request === sequence) {
+      failed.value = true
+      if (isInboxAccessFailure(error)) {
+        rows.value = []
+        summary.value = { total: 0, breached: 0, at_risk: 0 }
+        hasMore.value = false
+        lastUpdated.value = ''
+      }
+    }
   } finally {
     if (request === sequence) loading.value = false
   }
@@ -71,8 +80,8 @@ watch([team, account, all, section], () => {
   hasMore.value = false
   lastUpdated.value = ''
   loading.value = false
-  offset.value = 0
-  void load()
+  if (offset.value !== 0) offset.value = 0
+  else void load()
 })
 watch(offset, load)
 async function loadLookups() {
