@@ -45,11 +45,12 @@ func (a *App) responsePolicyError(r *fastglue.Request, err error) error {
 // Account-wide policy configuration requires the existing full inbox-read
 // permission as well as settings access; it never expands an agent's case scope.
 func (a *App) responsePolicyContext(r *fastglue.Request, action string) (uuid.UUID, uuid.UUID, uuid.UUID, bool) {
-	org, actor, err := a.requireAuth(r, models.ResourceSettingsGeneral, action)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, action)
+	if !ok {
 		return uuid.Nil, uuid.Nil, uuid.Nil, false
 	}
-	if !a.HasPermission(actor, models.ResourceChat, models.ActionRead, org) || !a.HasPermission(actor, models.ResourceContacts, models.ActionRead, org) {
+	org, actor := viewer.Org, viewer.User
+	if !viewer.has(models.ResourceChat, models.ActionRead) || !viewer.has(models.ResourceContacts, models.ActionRead) {
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Response policy configuration requires full inbox read access", nil, "")
 		return uuid.Nil, uuid.Nil, uuid.Nil, false
 	}

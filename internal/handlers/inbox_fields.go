@@ -50,7 +50,7 @@ func (a *App) ListInboxFieldDefinitions(r *fastglue.Request) error {
 }
 
 func (a *App) CreateInboxFieldDefinition(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -96,7 +96,7 @@ func lockInboxFieldDefinitions(tx *gorm.DB, org uuid.UUID) error {
 }
 
 func (a *App) UpdateInboxFieldDefinition(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -197,7 +197,7 @@ func (a *App) fieldSubject(r *fastglue.Request, action string, isCase bool) (inb
 			}
 		}
 	} else {
-		_, _, err = a.requireAuth(r, models.ResourceContacts, action)
+		_, _, err = a.requireInboxAuth(r, models.ResourceContacts, action)
 	}
 	return s, err
 }

@@ -155,7 +155,7 @@ func (a *App) PreviewInboxWorkflow(r *fastglue.Request) error {
 		return a.inboxError(r, err)
 	}
 	if workflow.Kind == "rule" {
-		if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+		if _, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
 			return nil
 		}
 	}

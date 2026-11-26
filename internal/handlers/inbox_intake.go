@@ -130,7 +130,7 @@ func (a *App) intakeError(r *fastglue.Request, err error) error {
 }
 
 func (a *App) intakeRequest(r *fastglue.Request) (uuid.UUID, uuid.UUID, bool) {
-	org, user, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, user, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return org, user, false
 	}

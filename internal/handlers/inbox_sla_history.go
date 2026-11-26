@@ -27,7 +27,7 @@ type inboxSLAHistoryRow struct {
 // Historical compliance only includes completed cycles. Live outstanding work
 // is reported separately and never counted as a completed success or failure.
 func (a *App) GetInboxSLAHistory(r *fastglue.Request) error {
-	org, user, err := a.requireAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
+	org, user, err := a.requireInboxAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
 	if err != nil {
 		return nil
 	}

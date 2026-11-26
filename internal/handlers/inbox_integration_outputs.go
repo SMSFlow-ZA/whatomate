@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/shridarpatil/whatomate/internal/crypto"
@@ -36,10 +37,17 @@ func (a *App) applyInboxIntegrationOutputs(tx *gorm.DB, execution models.InboxIn
 		return false, nil
 	}
 	var scoped models.InboxCase
-	if err := a.scopeInboxCases(tx.Model(&scoped), execution.ActorID, execution.OrganizationID).First(&scoped, "inbox_cases.id=?", c.ID).Error; err != nil {
+	viewer, err := loadAuditViewer(tx, execution.OrganizationID, execution.ActorID, nil)
+	if errors.Is(err, errAuditUnauthenticated) || errors.Is(err, errAuditForbidden) {
 		return false, nil
 	}
-	if !a.workflowActorActive(tx, execution.OrganizationID, execution.ActorID) || !a.HasPermission(execution.ActorID, models.ResourceChat, models.ActionWrite, execution.OrganizationID) || !a.HasPermission(execution.ActorID, models.ResourceCustomActions, models.ActionWrite, execution.OrganizationID) {
+	if err != nil {
+		return false, err
+	}
+	if !viewer.has(models.ResourceChat, models.ActionWrite) || !viewer.has(models.ResourceCustomActions, models.ActionWrite) {
+		return false, nil
+	}
+	if err := scopeInboxCasesWithContactRead(tx.Model(&scoped), execution.ActorID, execution.OrganizationID, viewer.has(models.ResourceContacts, models.ActionRead)).First(&scoped, "inbox_cases.id=?", c.ID).Error; err != nil {
 		return false, nil
 	}
 	digest, err := inboxSendCaseDigest(tx, c)
@@ -64,7 +72,7 @@ func (a *App) applyInboxIntegrationOutputs(tx *gorm.DB, execution models.InboxIn
 	if err := a.visibleInboxWorkflows(tx, execution.OrganizationID, execution.ActorID).First(&workflow, "id=?", run.WorkflowID).Error; err != nil {
 		return false, nil
 	}
-	if !workflow.UpdatedAt.Equal(run.WorkflowUpdatedAt) || (workflow.Kind == "rule" && (workflow.EnabledAt == nil || !a.HasPermission(execution.ActorID, models.ResourceSettingsGeneral, models.ActionWrite, execution.OrganizationID))) {
+	if !workflow.UpdatedAt.Equal(run.WorkflowUpdatedAt) || (workflow.Kind == "rule" && (workflow.EnabledAt == nil || !viewer.has(models.ResourceSettingsGeneral, models.ActionWrite))) {
 		return false, nil
 	}
 	var definition models.InboxIntegration

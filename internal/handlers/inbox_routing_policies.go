@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
@@ -18,12 +17,13 @@ var errInboxRoutingName = errors.New("an active routing policy already uses this
 // New routing interfaces recheck authority from PostgreSQL, rather than grant
 // settings access from a stale role cache or request-supplied administrator flag.
 func (a *App) inboxRoutingAuthority(r *fastglue.Request, db *gorm.DB, action string) (auditViewer, bool) {
-	org, user, err := a.requireAuth(r, models.ResourceTeams, action)
+	org, user, err := a.requireInboxAuth(r, models.ResourceTeams, action)
 	if err != nil {
 		return auditViewer{}, false
 	}
-	claims, _ := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
-	viewer, err := loadAuditViewer(db, org, user, claims)
+	// requireInboxAuth has verified the original bound identity and selected
+	// organisation, including its stamp; this second read checks current authority.
+	viewer, err := loadAuditViewer(db, org, user, nil)
 	if errors.Is(err, errAuditUnauthenticated) || errors.Is(err, errAuditForbidden) || err == nil && !viewer.has(models.ResourceTeams, action) {
 		_ = r.SendErrorEnvelope(403, "Routing settings permission is required", nil, "routing_permission_required")
 		return viewer, false

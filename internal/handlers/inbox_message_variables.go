@@ -116,7 +116,14 @@ func (a *App) inboxMessageValues(db *gorm.DB, c models.InboxCase, account models
 	}
 	definitions := []models.InboxFieldDefinition{}
 	q := db.Where("organization_id=? AND key IN ?", c.OrganizationID, fieldKeys)
-	if actor == uuid.Nil || !a.HasPermission(actor, models.ResourceContacts, models.ActionRead, c.OrganizationID) {
+	viewer := auditViewer{}
+	if actor != uuid.Nil {
+		viewer, err = loadAuditViewer(db, c.OrganizationID, actor, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !viewer.has(models.ResourceContacts, models.ActionRead) {
 		q = q.Where("scope='case'")
 	}
 	if err := q.Find(&definitions).Error; err != nil {

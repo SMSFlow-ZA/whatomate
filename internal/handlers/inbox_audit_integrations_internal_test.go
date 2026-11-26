@@ -62,6 +62,17 @@ func auditIntegrationCases() []auditIntegrationCase {
 
 func integrationAuditRequest(t *testing.T, f inboxAuditFixture, id uuid.UUID, body any) *fastglue.Request {
 	t.Helper()
+	if input, ok := body.(map[string]any); ok && id != uuid.Nil {
+		var definition models.InboxIntegration
+		if err := f.db.Select("updated_at").First(&definition, "id=? AND organization_id=?", id, f.org.ID).Error; err == nil {
+			copy := make(map[string]any, len(input)+1)
+			for key, value := range input {
+				copy[key] = value
+			}
+			copy["updated_at"] = definition.UpdatedAt
+			body = copy
+		}
+	}
 	r := auditUserRequest(t, f, id, body)
 	testutil.SetPathParam(r, "integration_id", id.String())
 	testutil.SetPathParam(r, "provider", "microsoft")

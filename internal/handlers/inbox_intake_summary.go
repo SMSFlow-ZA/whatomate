@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
@@ -32,8 +31,9 @@ func (a *App) GetInboxIntakeSummary(r *fastglue.Request) error {
 	}
 	db, cancel := boundedIntakeDB(a.DB)
 	defer cancel()
-	claims, _ := r.RequestCtx.UserValue(middleware.ContextKeyClaims).(*middleware.JWTClaims)
-	viewer, err := loadAuditViewer(db, thread.org, user, claims)
+	// inboxRequest has already verified the bound HTTP identity and any
+	// authorised organisation selection. Recheck current selected-org rights.
+	viewer, err := loadAuditViewer(db, thread.org, user, nil)
 	if err != nil {
 		if !errors.Is(err, errAuditUnauthenticated) && !errors.Is(err, errAuditForbidden) {
 			return a.intakeError(r, err)

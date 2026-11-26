@@ -100,6 +100,7 @@ func TestInboxIntegrationCRUDSecretsAndEmergencySettings(t *testing.T) {
 	require.True(t, crypto.IsEncrypted(stored.Credential))
 	previous := stored.Credential
 	delete(input, "credential")
+	input["updated_at"] = stored.UpdatedAt
 	r = testutil.NewJSONRequest(t, input)
 	testutil.SetAuthContext(r, f.c.OrganizationID, f.actor.ID)
 	r.RequestCtx.SetUserValue("integration_id", stored.ID.String())

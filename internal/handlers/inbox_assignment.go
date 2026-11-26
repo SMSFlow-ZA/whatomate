@@ -14,7 +14,7 @@ func (a *App) InboxAssignmentOptions(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if _, _, err := a.requireAuth(r, models.ResourceContacts, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, models.ResourceContacts, models.ActionWrite); err != nil {
 		return nil
 	}
 	enabled, err := inboxWorkflowEnabled(a.DB, t.org, false)
@@ -58,7 +58,7 @@ func (a *App) AssignInboxConversation(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if _, _, err := a.requireAuth(r, models.ResourceContacts, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, models.ResourceContacts, models.ActionWrite); err != nil {
 		return nil
 	}
 	var input struct {

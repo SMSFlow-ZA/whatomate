@@ -36,7 +36,7 @@ func (a *App) integrationOperatorAuth(r *fastglue.Request, allowDisabled bool) (
 	var ok bool
 	if allowDisabled {
 		var err error
-		org, actor, err = a.requireAuth(r, models.ResourceChat, models.ActionWrite)
+		org, actor, err = a.requireInboxAuth(r, models.ResourceChat, models.ActionWrite)
 		ok = err == nil
 	} else {
 		org, actor, ok = a.inboxFeatureAuth(r, models.ActionWrite)
@@ -44,10 +44,10 @@ func (a *App) integrationOperatorAuth(r *fastglue.Request, allowDisabled bool) (
 	if !ok {
 		return uuid.Nil, uuid.Nil, false
 	}
-	if _, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite); err != nil {
 		return uuid.Nil, uuid.Nil, false
 	}
-	if _, _, err := a.requireAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, models.ResourceCustomActions, models.ActionWrite); err != nil {
 		return uuid.Nil, uuid.Nil, false
 	}
 	return org, actor, true

@@ -59,9 +59,19 @@ func (a *App) integrationOutputFields(db *gorm.DB, d models.InboxIntegration, ac
 	if err := db.Where("organization_id=? AND id IN ? AND archived_at IS NULL", d.OrganizationID, ids).Find(&definitions).Error; err != nil {
 		return nil, err
 	}
+	var viewer *auditViewer
 	for _, field := range definitions {
-		if field.Scope == "contact" && (!a.HasPermission(actor, models.ResourceContacts, models.ActionRead, d.OrganizationID) || !a.HasPermission(actor, models.ResourceContacts, models.ActionWrite, d.OrganizationID)) {
-			return nil, inboxIntegrationProblem{"contact_field_permission_required"}
+		if field.Scope == "contact" {
+			if viewer == nil {
+				current, err := loadAuditViewer(db, d.OrganizationID, actor, nil)
+				if err != nil {
+					return nil, err
+				}
+				viewer = &current
+			}
+			if !viewer.has(models.ResourceContacts, models.ActionRead) || !viewer.has(models.ResourceContacts, models.ActionWrite) {
+				return nil, inboxIntegrationProblem{"contact_field_permission_required"}
+			}
 		}
 		fields[field.ID] = field
 	}
@@ -76,11 +86,15 @@ func (a *App) integrationOutputFields(db *gorm.DB, d models.InboxIntegration, ac
 func (a *App) prepareInboxIntegration(db *gorm.DB, c models.InboxCase, actor, id uuid.UUID, mappings map[string]string, deferred ...map[string]bool) (preparedInboxIntegration, error) {
 	var prepared preparedInboxIntegration
 	prepared.CaseID, prepared.AccountID, prepared.ContactID, prepared.ActorID = c.ID, c.AccountID, c.ContactID, actor
-	if !a.workflowActorActive(db, c.OrganizationID, actor) || !a.HasPermission(actor, models.ResourceChat, models.ActionWrite, c.OrganizationID) || !a.HasPermission(actor, models.ResourceCustomActions, models.ActionWrite, c.OrganizationID) {
+	viewer, authorityErr := loadAuditViewer(db, c.OrganizationID, actor, nil)
+	if authorityErr != nil && !errors.Is(authorityErr, errAuditUnauthenticated) && !errors.Is(authorityErr, errAuditForbidden) {
+		return prepared, authorityErr
+	}
+	if authorityErr != nil || !viewer.has(models.ResourceChat, models.ActionWrite) || !viewer.has(models.ResourceCustomActions, models.ActionWrite) {
 		return prepared, inboxIntegrationProblem{"permission_required"}
 	}
 	var scoped models.InboxCase
-	if err := a.scopeInboxCases(db.Model(&scoped), actor, c.OrganizationID).First(&scoped, "inbox_cases.id=?", c.ID).Error; err != nil {
+	if err := scopeInboxCasesWithContactRead(db.Model(&scoped), actor, c.OrganizationID, viewer.has(models.ResourceContacts, models.ActionRead)).First(&scoped, "inbox_cases.id=?", c.ID).Error; err != nil {
 		return prepared, err
 	}
 	if err := db.First(&prepared.Definition, "id=? AND organization_id=?", id, c.OrganizationID).Error; err != nil {

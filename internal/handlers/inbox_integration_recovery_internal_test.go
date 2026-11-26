@@ -216,7 +216,7 @@ func TestInboxIntegrationRecoveryRejectsStaleUnsafeAndHeldRetries(t *testing.T) 
 			r := retrySubmit(t, f, f.actor.ID, e.ID, uuid.New(), confirmation, "Review became stale")
 			expected := 409
 			if kind == "actor" {
-				expected = 403
+				expected = 401 // A disabled identity must authenticate again; no recovery is applied.
 			}
 			require.Equal(t, expected, testutil.GetResponseStatusCode(r), string(testutil.GetResponseBody(r)))
 			var stored models.InboxIntegrationExecution

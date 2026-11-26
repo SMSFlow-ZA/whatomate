@@ -12,9 +12,23 @@ Definitions start disabled. Host `integration_dispatch_enabled` and the workspac
 
 Managing definitions requires general-settings write permission. Preparing/executing an action also requires chat write, custom-action write, active membership and access to the exact case/account. Mapping an output to a contact field requires contact read and write permissions. Macro visibility will not grant additional execution rights.
 
+Inbox HTTP actions and integration workers verify current database permissions;
+they do not require a live browser connection to notice revoked access. If access
+changes while a provider call is in flight, its outcome is retained, but applying
+returned fields requires current authority and may be held for review.
+
 ## Configure a definition and workflow action
 
 Under **Settings → Inbox workflows → Integrations**, an administrator can create a definition, choose an approved destination and select bearer-token, `X-API-Key` or no authentication. The editor reports whether a credential is stored; it cannot reveal that value. Leave a stored credential unchanged or explicitly replace it. New definitions save disabled. Definition enablement, the workspace dispatch hold and the operator's host hold are independent controls.
+
+Updates must include the exact `updated_at` value returned when the definition
+was read. The editor supplies it automatically. A missing or changed marker
+returns HTTP409 with code `integration_changed`, before modifying any setting or
+credential. A conflict keeps the authored draft visible. Cancel with explicit
+discard confirmation, refresh the integration list and reopen the definition to
+review the current settings before editing again. Open editors and API clients
+from an older application release must refresh and include this marker; they
+cannot overwrite a newer disable or authentication change silently.
 
 Declare named text, number, boolean or date inputs. Names are unique lowercase identifiers, up to 64 characters, using letters, digits and underscores. Mark required inputs explicitly. Selected outputs map top-level JSON response properties to active case/contact fields. Each property and destination field must be unique. An optional reference property retains a bounded string reference without implicitly changing a field.
 

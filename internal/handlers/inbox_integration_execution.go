@@ -121,8 +121,14 @@ func (a *App) claimInboxIntegration(ctx context.Context, id uuid.UUID) (models.I
 		if !workflow.UpdatedAt.Equal(run.WorkflowUpdatedAt) || (workflow.Kind == "rule" && workflow.EnabledAt == nil) {
 			return blockIntegration(tx, &execution, "workflow_changed")
 		}
-		if workflow.Kind == "rule" && !a.HasPermission(run.ActorID, models.ResourceSettingsGeneral, models.ActionWrite, run.OrganizationID) {
-			return blockIntegration(tx, &execution, "permission_required")
+		if workflow.Kind == "rule" {
+			viewer, err := loadAuditViewer(tx, run.OrganizationID, run.ActorID, nil)
+			if err != nil && !errors.Is(err, errAuditForbidden) && !errors.Is(err, errAuditUnauthenticated) {
+				return err
+			}
+			if err != nil || !viewer.has(models.ResourceSettingsGeneral, models.ActionWrite) {
+				return blockIntegration(tx, &execution, "permission_required")
+			}
 		}
 		if execution.ActionIndex < 0 || execution.ActionIndex >= len(workflow.Actions) || workflow.Actions[execution.ActionIndex].Type != "integration" || workflow.Actions[execution.ActionIndex].Value != execution.IntegrationID.String() {
 			return blockIntegration(tx, &execution, "action_changed")

@@ -92,7 +92,7 @@ func inboxWorkflowEnabled(db *gorm.DB, orgID uuid.UUID, lock bool) (bool, error)
 }
 
 func (a *App) GetInboxWorkflowSettings(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	org, _, err := a.requireInboxAuth(r, models.ResourceChat, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -104,7 +104,7 @@ func (a *App) GetInboxWorkflowSettings(r *fastglue.Request) error {
 }
 
 func (a *App) UpdateInboxWorkflowSettings(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -146,7 +146,7 @@ func scopeInboxCasesWithContactRead(q *gorm.DB, user, org uuid.UUID, fullContact
 }
 
 func (a *App) ListInboxCaseSummaries(r *fastglue.Request) error {
-	org, user, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	org, user, err := a.requireInboxAuth(r, models.ResourceChat, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -199,7 +199,7 @@ func (a *App) inboxThreadAccess(db *gorm.DB, t inboxThread, user uuid.UUID) (mod
 }
 
 func (a *App) inboxRequest(r *fastglue.Request, action string) (inboxThread, uuid.UUID, error) {
-	org, user, err := a.requireAuth(r, models.ResourceChat, action)
+	org, user, err := a.requireInboxAuth(r, models.ResourceChat, action)
 	if err != nil {
 		return inboxThread{}, uuid.Nil, err
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func (a *App) GetInboxWorkload(r *fastglue.Request) error {
-	org, user, err := a.requireAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
+	org, user, err := a.requireInboxAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
 	if err != nil {
 		return nil
 	}

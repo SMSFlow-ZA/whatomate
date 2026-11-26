@@ -100,7 +100,7 @@ type InboxCapacityRow struct {
 }
 
 func (a *App) inboxTeamCapacityContext(r *fastglue.Request, action string) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
-	org, _, err := a.requireAuth(r, models.ResourceTeams, action)
+	org, _, err := a.requireInboxAuth(r, models.ResourceTeams, action)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}

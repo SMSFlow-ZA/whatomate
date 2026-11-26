@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -60,6 +61,7 @@ func integrationDefinitionDigest(d models.InboxIntegration, endpoint inboxintegr
 }
 
 type inboxIntegrationRequest struct {
+	UpdatedAt    *time.Time                      `json:"updated_at"`
 	Name         string                          `json:"name"`
 	Description  string                          `json:"description"`
 	EndpointKey  string                          `json:"endpoint_key"`
@@ -142,10 +144,11 @@ func (a *App) validateInboxWorkflowIntegrations(db *gorm.DB, org uuid.UUID, w mo
 }
 
 func (a *App) ListInboxIntegrations(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if !ok {
 		return nil
 	}
+	org := viewer.Org
 	definitions := []models.InboxIntegration{}
 	if err := a.DB.Where("organization_id=?", org).Order("name,id").Limit(101).Find(&definitions).Error; err != nil {
 		return a.inboxError(r, err)
@@ -192,10 +195,11 @@ func (a *App) UpdateInboxIntegration(r *fastglue.Request) error {
 }
 
 func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
-	org, actor, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if !ok {
 		return nil
 	}
+	org, actor := viewer.Org, viewer.User
 	key, err := a.integrationEncryptionKey()
 	if err != nil {
 		return r.SendErrorEnvelope(503, "Secure integration storage is unavailable. Contact your operator.", nil, "integration_storage_unavailable")
@@ -227,6 +231,9 @@ func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
 			d = models.InboxIntegration{BaseModel: models.BaseModel{ID: id}, OrganizationID: org, CreatedByID: actor}
 		} else if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&d, "id=? AND organization_id=?", id, org).Error; err != nil {
 			return err
+		}
+		if !create && (input.UpdatedAt == nil || !input.UpdatedAt.UTC().Truncate(time.Microsecond).Equal(d.UpdatedAt.UTC().Truncate(time.Microsecond))) {
+			return errInboxConflict
 		}
 		d.Name, d.Description, d.EndpointKey, d.AuthMode = strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), input.EndpointKey, input.AuthMode
 		d.Enabled = !create && input.Enabled // definitions start disabled
@@ -272,6 +279,9 @@ func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
 		return a.recordIntegrationSecurity(r, tx, org, actor, "inbox_integration", d.ID, audit.IntegrationChanged, reason)
 	})
 	if err != nil {
+		if errors.Is(err, errInboxConflict) {
+			return r.SendErrorEnvelope(409, "This integration changed. Cancel, refresh the integration list, then reopen it to review the latest settings before saving.", nil, "integration_changed")
+		}
 		return a.inboxError(r, err)
 	}
 	// Only safe metadata enters configuration audit; never the credential,
@@ -285,10 +295,11 @@ func (a *App) saveInboxIntegration(r *fastglue.Request, create bool) error {
 }
 
 func (a *App) DeleteInboxIntegration(r *fastglue.Request) error {
-	org, actor, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if !ok {
 		return nil
 	}
+	org, actor := viewer.Org, viewer.User
 	id, err := parsePathUUID(r, "integration_id", "Integration")
 	if err != nil {
 		return nil
@@ -324,10 +335,11 @@ func (a *App) DeleteInboxIntegration(r *fastglue.Request) error {
 }
 
 func (a *App) GetInboxIntegrationSettings(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if !ok {
 		return nil
 	}
+	org := viewer.Org
 	var organization models.Organization
 	if err := a.DB.Select("id,settings").First(&organization, "id=?", org).Error; err != nil {
 		return a.inboxError(r, err)
@@ -337,10 +349,11 @@ func (a *App) GetInboxIntegrationSettings(r *fastglue.Request) error {
 }
 
 func (a *App) UpdateInboxIntegrationSettings(r *fastglue.Request) error {
-	org, actor, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if !ok {
 		return nil
 	}
+	org, actor := viewer.Org, viewer.User
 	var input struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -354,7 +367,7 @@ func (a *App) UpdateInboxIntegrationSettings(r *fastglue.Request) error {
 	if !*input.Enabled {
 		reason = audit.Disabled
 	}
-	err = a.mutateAuditedIntegration(r, org, actor, "inbox_integration_settings", &org, reason, func(tx *gorm.DB) error {
+	err := a.mutateAuditedIntegration(r, org, actor, "inbox_integration_settings", &org, reason, func(tx *gorm.DB) error {
 		return tx.Model(&models.Organization{}).Where("id=?", org).Update("settings", gorm.Expr("jsonb_set(COALESCE(settings,'{}'::jsonb),'{inbox_integrations_enabled}',to_jsonb(?::boolean),true)", *input.Enabled)).Error
 	})
 	if err != nil {

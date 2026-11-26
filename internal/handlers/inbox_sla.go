@@ -210,7 +210,7 @@ func validateInboxPolicy(p models.InboxSLAPolicy) error {
 }
 
 func (a *App) ListInboxSLAPolicies(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionRead)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -222,7 +222,7 @@ func (a *App) ListInboxSLAPolicies(r *fastglue.Request) error {
 }
 
 func (a *App) SetInboxSLAPolicy(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (a *App) SetInboxSLAPolicy(r *fastglue.Request) error {
 }
 
 func (a *App) DeleteInboxSLAPolicy(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -305,7 +305,7 @@ func (a *App) DeleteInboxSLAPolicy(r *fastglue.Request) error {
 }
 
 func (a *App) GetInboxSLAReport(r *fastglue.Request) error {
-	org, user, err := a.requireAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
+	org, user, err := a.requireInboxAuth(r, models.ResourceAnalyticsAgents, models.ActionRead)
 	if err != nil {
 		return nil
 	}

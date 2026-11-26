@@ -12,7 +12,7 @@ import (
 )
 
 func (a *App) ListInboxCapacityPresets(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceTeams, models.ActionRead)
+	org, _, err := a.requireInboxAuth(r, models.ResourceTeams, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -23,7 +23,7 @@ func (a *App) ListInboxCapacityPresets(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"presets": presets})
 }
 func (a *App) SaveInboxCapacityPreset(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceTeams, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceTeams, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func (a *App) SaveInboxCapacityPreset(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"preset": preset})
 }
 func (a *App) DeleteInboxCapacityPreset(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, models.ResourceTeams, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, models.ResourceTeams, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -87,7 +87,7 @@ type inboxPresetChange struct {
 }
 
 func (a *App) applyInboxPreset(r *fastglue.Request, apply bool) error {
-	org, user, err := a.requireAuth(r, models.ResourceTeams, models.ActionWrite)
+	org, user, err := a.requireInboxAuth(r, models.ResourceTeams, models.ActionWrite)
 	if err != nil {
 		return nil
 	}

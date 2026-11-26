@@ -223,7 +223,7 @@ func (a *App) CancelInboxSequence(r *fastglue.Request) error {
 func (a *App) ListInboxRunRecoveries(r *fastglue.Request) error {
 	// Safe metadata follows the same current run/case/author visibility as
 	// execution history. Evidence decryption and recovery writes stay separate.
-	org, actor, authErr := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	org, actor, authErr := a.requireInboxAuth(r, models.ResourceChat, models.ActionRead)
 	if authErr != nil {
 		return nil
 	}

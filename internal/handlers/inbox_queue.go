@@ -59,10 +59,11 @@ func validateInboxFilter(f models.InboxQueueFilter) bool {
 }
 
 func (a *App) inboxFeatureAuth(r *fastglue.Request, action string) (uuid.UUID, uuid.UUID, bool) {
-	org, user, err := a.requireAuth(r, models.ResourceChat, action)
-	if err != nil {
+	viewer, ok := a.freshInboxAuthority(r, models.ResourceChat, action)
+	if !ok {
 		return uuid.Nil, uuid.Nil, false
 	}
+	org, user := viewer.Org, viewer.User
 	enabled, err := inboxWorkflowEnabled(a.DB, org, false)
 	if err != nil {
 		_ = a.inboxError(r, err)

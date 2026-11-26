@@ -206,7 +206,7 @@ func TestInboxSequenceResumeReceiptAdoptionRetainsOriginalInitiator(t *testing.T
 	var decision models.InboxIntegrationRecovery
 	require.NoError(t, f.a.DB.First(&decision, "id=?", input["operation_id"]).Error)
 	require.Equal(t, supervisor.ID, decision.ActorID)
-	require.Equal(t, 403, testutil.GetResponseStatusCode(resumeReceiptRequest(t, f, original, f.c.OrganizationID, run.ID, input)))
+	require.Equal(t, 401, testutil.GetResponseStatusCode(resumeReceiptRequest(t, f, original, f.c.OrganizationID, run.ID, input)))
 }
 
 func TestInboxSequenceResumeReceiptRollsBackAndRedactsStorageFailure(t *testing.T) {

@@ -116,7 +116,7 @@ func (a *App) ListInboxWorkflows(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Workflow kind is required", nil, "")
 	}
 	if kind == "rule" {
-		if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+		if _, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
 			return nil
 		}
 	}
@@ -146,7 +146,7 @@ func (a *App) CreateInboxWorkflow(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
-	if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
 		return nil
 	}
 	var input inboxWorkflowRequest
@@ -188,7 +188,7 @@ func (a *App) DeleteInboxWorkflow(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
-	if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
 		return nil
 	}
 	id, err := parsePathUUID(r, "id", "inbox workflow")
@@ -210,7 +210,7 @@ func (a *App) UpdateInboxWorkflow(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
-	if _, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
+	if _, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite); err != nil {
 		return nil
 	}
 	id, err := parsePathUUID(r, "id", "inbox workflow")
@@ -272,7 +272,7 @@ func (a *App) InboxAutomationState(r *fastglue.Request) error {
 }
 
 func (a *App) SetInboxAutomationState(r *fastglue.Request) error {
-	org, _, err := a.requireAuth(r, inboxWorkflowSettingsResource, models.ActionWrite)
+	org, _, err := a.requireInboxAuth(r, inboxWorkflowSettingsResource, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
