@@ -103,7 +103,7 @@ jobs:
           gotestsum \
             --format testname \
             --hide-summary=skipped \
-            -- -race -p 1 -timeout 20m -coverprofile=coverage.out $(go list ./... | grep -v /test/)
+            -- -race -p 1 -timeout 20m -coverprofile=coverage.out $(go list ./... | grep -v /test/) ./test/testutil
 
       - name: Display coverage
         run: go tool cover -func=coverage.out | grep "total:"

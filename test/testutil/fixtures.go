@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,19 +83,27 @@ func WithFullName(name string) UserOption {
 	}
 }
 
+// Reuse only the known synthetic default credential across fixtures. Its bcrypt
+// cost remains unchanged; production hashing and explicit WithPassword cases do
+// not use this cache. Returning a string prevents fixtures mutating shared bytes.
+var defaultTestUserPasswordHash = sync.OnceValues(func() (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	return string(hash), err
+})
+
 // CreateTestUser creates a test user in the database.
 // By default, the user is active with a hashed "password123" password and a unique email.
 func CreateTestUser(t *testing.T, db *gorm.DB, orgID uuid.UUID, opts ...UserOption) *models.User {
 	t.Helper()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	hash, err := defaultTestUserPasswordHash()
 	require.NoError(t, err)
 
 	user := &models.User{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: orgID,
 		Email:          UniqueEmail("test"),
-		PasswordHash:   string(hash),
+		PasswordHash:   hash,
 		FullName:       "Test User",
 		IsActive:       true,
 		IsAvailable:    true,
