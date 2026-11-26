@@ -245,22 +245,29 @@ defineExpose({ requestLeave: requestDiscard, hasDraft: () => dirty.value })
         <p
           :id="'field-help-' + d.id"
           class="inbox-caption"
-          v-if="d.description || (d.conditional_required && !d.archived_at)"
+          :class="{
+            'sr-only':
+              !d.description && !(d.conditional_required && !d.archived_at),
+          }"
         >
           {{ d.description }}
           <span v-if="d.conditional_required && !d.archived_at">{{
             t('inboxIntake.conditional')
+          }}</span>
+          <span
+            v-if="d.required_on_resolve && !d.archived_at"
+            class="sr-only"
+            >{{ t('inboxFields.required') }}</span
+          >
+          <span v-if="d.archived_at" class="sr-only">{{
+            t('inboxFields.archived')
           }}</span>
         </p>
         <form class="inbox-field-editor" @submit.prevent="save(d)">
           <InboxFieldInput
             :id="'field-input-' + d.id"
             :definition="d"
-            :aria-describedby="
-              d.description || (d.conditional_required && !d.archived_at)
-                ? 'field-help-' + d.id
-                : undefined
-            "
+            :aria-describedby="'field-help-' + d.id"
             :model-value="values[d.id] ?? null"
             :disabled="!!d.archived_at || !canWrite || !!busy"
             @update:model-value="(value) => update(d.id, value)"
