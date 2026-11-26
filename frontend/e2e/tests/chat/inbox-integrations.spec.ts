@@ -324,7 +324,7 @@ test('configures approved integration actions with held dispatch and responsive 
       .selectOption(integrationId)
     const mapping = page
       .locator('label')
-      .filter({ hasText: /^customer Â·/ })
+      .filter({ hasText: /^customer Ã‚\u00b7/ })
       .locator('textarea')
     await mapping.fill('{{contact_name}}')
     await page
@@ -419,7 +419,7 @@ test('configures approved integration actions with held dispatch and responsive 
     }
     await page
       .locator('label')
-      .filter({ hasText: /^client Â·/ })
+      .filter({ hasText: /^client Ã‚\u00b7/ })
       .locator('textarea')
       .fill('{{contact_name}}')
     await page
