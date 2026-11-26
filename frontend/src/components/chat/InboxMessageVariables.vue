@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, useId, watch } from 'vue'
 import '@/assets/inbox.css'
 import { useI18n } from 'vue-i18n'
-import { Braces } from 'lucide-vue-next'
+import { Braces, Check } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -213,7 +213,12 @@ function restoreFocus(event: Event) {
             @click="selectVariable(variable.key)"
             @dblclick="selectVariable(variable.key, true)"
           >
-            <span class="font-medium">{{ variable.label }}</span>
+            <Check
+              class="mt-0.5 h-3.5 w-3.5 shrink-0"
+              :class="{ invisible: selected !== variable.key }"
+              aria-hidden="true"
+            />
+            <span class="min-w-0 flex-1 font-medium">{{ variable.label }}</span>
             <span class="inbox-caption">{{ variable.scope }}</span>
           </div>
         </div>
